@@ -1,4 +1,4 @@
-Package: micropont
+Package: micropoint
 Type: Package
 Title: Below or within canopy point microclimate modelling with R
 Version: 0.1.0
@@ -18,8 +18,8 @@ Suggests:
     knitr,
     rmarkdown
 VignetteBuilder: knitr
-URL: https://github.com/ilyamaclean/microiter
-BugReports: http://github.com/microiter/issues
+URL: https://github.com/ilyamaclean/micropoint
+BugReports: http://github.com/micropoint/issues
 Depends: 
     R (>= 2.10)
 Config/testthat/edition: 3
