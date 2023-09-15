@@ -1,0 +1,25 @@
+Package: micropont
+Type: Package
+Title: Below or within canopy point microclimate modelling with R
+Version: 0.1.0
+Authors@R: c(
+    person("Ilya", "Maclean", email = "i.m.d.maclean@exeter.ac.uk", role = "cre"))
+Maintainer: Ilya M. D. Maclean <i.m.d.maclean@exeter.ac.uk>
+Description: The functions in the microiter package contain tools for 
+    the mechanistic processes that govern below or above canopy
+    microclimate on point  data. 
+License: GPL-2
+Encoding: UTF-8
+LazyData: true
+RoxygenNote: 7.2.3
+Imports: 
+    stats
+Suggests: 
+    knitr,
+    rmarkdown
+VignetteBuilder: knitr
+URL: https://github.com/ilyamaclean/microiter
+BugReports: http://github.com/microiter/issues
+Depends: 
+    R (>= 2.10)
+Config/testthat/edition: 3
