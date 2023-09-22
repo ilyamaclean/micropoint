@@ -19,7 +19,8 @@
   dst,
   gmn,
   i,
-  method
+  method,
+  yearG
 )
 }
 \description{

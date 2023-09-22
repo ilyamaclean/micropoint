@@ -20,7 +20,8 @@ RunBigLeaf(
   tol = 0.5,
   gmn = 0.1,
   plotout = FALSE,
-  swmethod = 2
+  swmethod = 2,
+  yearG = TRUE
 )
 }
 \arguments{
@@ -58,6 +59,8 @@ temperatures on each iteration}
 
 \item{swmethod}{method used to calculate fraction of ground surface acting as free water surface
 (0 = based on rainfall, 1 computed from soil effective relative humidity, 2 computed from soil moisture fraction)}
+
+\item{yearG}{optional logical indicating whether or not to calculate and account for annual ground heat flux cycle}
 }
 \value{
 an object of class pointmicro, namely a list of the following:

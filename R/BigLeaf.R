@@ -143,7 +143,7 @@
   Ts
 }
 #' Run big-leaf model: one iteration
-.BigLeaf<-function(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,method) {
+.BigLeaf<-function(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,method,yearG) {
   # Calculate absorbed radiation
   Rads<-RadiationBigLeaf(weather,vegp,groundp,bigleafp,solar,twostreamp,lat,long,merid,dst)
   RabsG<-with(Rads,radGsw+radGlw)
@@ -201,7 +201,7 @@
   phih[phih<0.75]<-0.75
   # ** G
   RnetG<-RabsG-5.67*10^-8*vegp$em*(weather$temp+273.15)^4 # deliberately capped at weather temp
-  GG<-with(groundp,GFlux(Tg,soilm,rho,Vm,Vq,Mc,RnetG,bigleafp$Gmax,bigleafp$Gmin,i))
+  GG<-with(groundp,GFlux(Tg,soilm,rho,Vm,Vq,Mc,RnetG,bigleafp$Gmax,bigleafp$Gmin,i,yearG))
   # Assign values to bigelafp
   bigleafp<-list(psih=psih,psim=psim,H=H,G=GG$G,tcc=tcc,tcg=tcg,Tc=Tc,Tg=Tg,phih=phih,
                  RnetG=RnetG,LL=LL,uf=uf,RabsG=RabsG,Gmax=GG$Gmax,Gmin=GG$Gmin)
@@ -229,6 +229,7 @@
 #' temperatures on each iteration
 #' @param swmethod method used to calculate fraction of ground surface acting as free water surface
 #' (0 = based on rainfall, 1 computed from soil effective relative humidity, 2 computed from soil moisture fraction)
+#' @param yearG optional logical indicating whether or not to calculate and account for annual ground heat flux cycle
 #' @return an object of class pointmicro, namely a list of the following:
 #' (1) tme - POSIXlt object of times and dates corresponding to model outputs
 #' (2) Tc - a vector of canopy heat exchange surface temperatures (deg C).
@@ -263,7 +264,8 @@
 #' # Canopy temperature
 #' plot(bigleafp$Tc ~ tme, type = "l", cex.axis = 2, cex.lab = 2,
 #'      xlab = "", ylab = "", ylim = c(-5, 35), col = rgb(0, 0.5, 0, 0.5))
-RunBigLeaf<-function(weather,vegp,groundp,soilm,lat,long,dTmx=25,zref=2,merid=0,dst=0,maxiter=100,bwgt=0.5,tol=0.5,gmn=0.1,plotout=FALSE,swmethod=2) {
+RunBigLeaf<-function(weather,vegp,groundp,soilm,lat,long,dTmx=25,zref=2,merid=0,dst=0,maxiter=100,bwgt=0.5,
+                     tol=0.5,gmn=0.1,plotout=FALSE,swmethod=2,yearG=TRUE) {
   # Calculate two-stream parameters
   tme<-as.POSIXlt(weather$obs_time,tz="UTC")
   if (length(soilm) == 1) soilm<-rep(soilm,length(tme))

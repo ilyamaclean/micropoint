@@ -4,7 +4,7 @@
 \alias{GFlux}
 \title{Computes ground heat flux}
 \usage{
-GFlux(Tg, soilm, rho, Vm, Vq, Mc, RnetG, Gmax, Gmin, i)
+GFlux(Tg, soilm, rho, Vm, Vq, Mc, RnetG, Gmax, Gmin, i, yearG = TRUE)
 }
 \arguments{
 \item{Tg}{a vector of ground surface tmeperatures (deg C)}
@@ -26,6 +26,8 @@ GFlux(Tg, soilm, rho, Vm, Vq, Mc, RnetG, Gmax, Gmin, i)
 \item{Gmin}{Minumum allowable value of daily G (included to ensure model convergence - W/m^2)}
 
 \item{i}{iteration of model}
+
+\item{yearG}{optional logical indicating whether or not to calculate and incorporate yearly ground heat flux}
 }
 \value{
 a list of the following:

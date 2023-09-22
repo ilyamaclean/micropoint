@@ -47,6 +47,7 @@ creategroundp<-function(soiltype) {
 #' @param Gmax Maximum allowable value of daily G (included to ensure model convergence - W/m^2)
 #' @param Gmin Minumum allowable value of daily G (included to ensure model convergence - W/m^2)
 #' @param i iteration of model
+#' @param yearG optional logical indicating whether or not to calculate and incorporate yearly ground heat flux
 #' @return a list of the following:
 #' (1) G - ground heat fluxes (W/m^2)
 #' (2) Gmax - newly compued values of Gmax if on first iteration of model
@@ -58,7 +59,7 @@ creategroundp<-function(soiltype) {
 #' convergence
 #' @rdname GFlux
 #' @export
-GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i) {
+GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
 
   # Find soil diffusivity
   cs<-(2400*rho/2.64+4180*soilm) # specific heat of soil in J/kg/K
@@ -92,7 +93,7 @@ GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i) {
   Gday<-pmin(Gday,Gmax)
   Gday<-pmax(Gday,Gmin)
   # Test whether sequence is for a year or longer
-  if (n >= 8760) {
+  if (n >= 8760 & year == TRUE) {
     # Calculate 6 month back-rolling mean of Gmu and Td to get 3 month time lag
     # NB 1.1171 correction applied as average dampens sinusoidal cycle by this amount
     omyr<-(2*pi)/(n*3600)
