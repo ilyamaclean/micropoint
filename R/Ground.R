@@ -61,7 +61,6 @@ creategroundp<-function(soiltype) {
 #' @rdname GFlux
 #' @export
 GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
-
   # Find soil diffusivity
   cs<-(2400*rho/2.64+4180*soilm) # specific heat of soil in J/kg/K
   ph<-(rho*(1-soilm)+soilm)*1000   # bulk density in kg/m3

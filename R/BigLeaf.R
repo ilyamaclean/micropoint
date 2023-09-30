@@ -278,7 +278,7 @@ RunBigLeaf<-function(weather,vegp,groundp,soilm,lat,long,dTmx=25,zref=2,merid=0,
   tst<-1
   i<-1
   while (tst > tol) {
-    bigleafp1<-.BigLeaf(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,swmethod)
+    bigleafp1<-.BigLeaf(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,swmethod,yearG)
     # Cap values
     dTc<-bigleafp1$Tc-weather$temp
     dTg<-bigleafp1$Tg-weather$temp
