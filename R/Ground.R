@@ -1,3 +1,4 @@
+globalVariables("soilparams")
 #' @title Ground parameters from soil types
 #' @description Generates an object of class `groundparams` from a specified
 #' soil type.
