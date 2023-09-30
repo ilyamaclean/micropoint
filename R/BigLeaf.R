@@ -143,7 +143,7 @@
   Ts
 }
 #' Run big-leaf model: one iteration
-.BigLeaf<-function(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,method,yearG) {
+.BigLeaf<-function(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,method,yearG=TRUE) {
   # Calculate absorbed radiation
   Rads<-RadiationBigLeaf(weather,vegp,groundp,bigleafp,solar,twostreamp,lat,long,merid,dst)
   RabsG<-with(Rads,radGsw+radGlw)
