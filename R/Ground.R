@@ -93,7 +93,7 @@ GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
   Gday<-pmin(Gday,Gmax)
   Gday<-pmax(Gday,Gmin)
   # Test whether sequence is for a year or longer
-  if (n >= 8760 & year == TRUE) {
+  if (n >= 8760 & yearG == TRUE) {
     # Calculate 6 month back-rolling mean of Gmu and Td to get 3 month time lag
     # NB 1.1171 correction applied as average dampens sinusoidal cycle by this amount
     omyr<-(2*pi)/(n*3600)
