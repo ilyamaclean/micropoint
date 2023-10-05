@@ -20,7 +20,7 @@
   gmn,
   i,
   method,
-  yearG
+  yearG = TRUE
 )
 }
 \description{

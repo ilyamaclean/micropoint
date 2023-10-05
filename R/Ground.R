@@ -9,7 +9,7 @@ globalVariables("soilparams")
 #' @examples
 #' creategroundp("Loam")
 creategroundp<-function(soiltype) {
-  data(soilparams)
+  soilparams<-microiter::soilparams
   ii<-which(soilparams$Soil.type==soiltype)
   gref<-0.15
   if (soiltype == "Sand") gref<-0.25
