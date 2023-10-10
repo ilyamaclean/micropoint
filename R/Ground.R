@@ -1,4 +1,3 @@
-globalVariables("soilparams")
 #' @title Ground parameters from soil types
 #' @description Generates an object of class `groundparams` from a specified
 #' soil type.
@@ -9,7 +8,6 @@ globalVariables("soilparams")
 #' @examples
 #' creategroundp("Loam")
 creategroundp<-function(soiltype) {
-  soilparams<-microiter::soilparams
   ii<-which(soilparams$Soil.type==soiltype)
   gref<-0.15
   if (soiltype == "Sand") gref<-0.25
