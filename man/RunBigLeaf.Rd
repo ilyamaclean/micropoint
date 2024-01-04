@@ -64,16 +64,18 @@ temperatures on each iteration}
 }
 \value{
 an object of class pointmicro, namely a list of the following:
-(1) tme - POSIXlt object of times and dates corresponding to model outputs
-(2) Tc - a vector of canopy heat exchange surface temperatures (deg C).
-(3) Tg - a vector of ground surface temperatures (deg C).
-(4) H - a vector of sensible heat fluxes (W/m^2)
-(5) G - a vector of ground heat fluxes (W/m^2)
-(6) psih - diabatic correction factor for heat
-(7) psim - diabatic correction factor for momentum
-(8) phih - diabatic influencing factor for heat
-(9) OL - Obukhov length
-(10) error.mar - maximum temperature difference between ultimate and penultimate iteration of model
+\describe{
+ \item{tme}{POSIXlt object of times and dates corresponding to model outputs}
+ \item{Tc}{a vector of canopy heat exchange surface temperatures (deg C)}
+ \item{Tg}{a vector of ground surface temperatures (deg C)}
+ \item{H}{a vector of sensible heat fluxes (W/m^2)}
+ \item{G}{a vector of ground heat fluxes (W/m^2)}
+ \item{psih}{diabatic correction factors for heat}
+ \item{psim}{diabatic correction factors for momentum}
+ \item{phih}{diabatic influencing factors for heat}
+ \item{OL}{Obukhov length}
+ \item{error.mar}{maximum temperature difference between ultimate and penultimate iteration of model}
+}
 }
 \description{
 Runs big leaf model iteratively to derive ground and canopy

@@ -34,8 +34,6 @@
 #' @param merid meridian of local time zone (0 for UTC)
 #' @param dst daylight saving yours (e.g. one for British Summer Time)
 #' @return a list of zenith and azimuth angles (decimal degrees)
-#' @examples
-#' # Hello
 #' @rdname solarposition
 #' @export
 solarposition<-function(lat,long,year,month,day,hour,merid=0,dst=0) {

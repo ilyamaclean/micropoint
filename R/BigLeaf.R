@@ -30,6 +30,7 @@
   if (class(d)=="logical") d<-.zeroplanedis(h,pai)
   Be<-sqrt(0.003+(0.2*pai)/2)
   zm<-(h-d)*exp(-0.4/Be)*exp(psi_h)
+  zm[zm<0.0005]<-0.0005
   zm
 }
 #' Calculate integrated diabatic correction coefficient for momentum
@@ -112,7 +113,7 @@
   Rv <- 461.5
   it <- 1/T0 - (Rv/L) * log(ea/e0)
   Tdew <- 1/it - 273.15
-  # Fost point
+  # Frost point
   e0 <- 610.78/1000
   L <- 2.834*10^6
   T0 <- 273.16
@@ -125,7 +126,9 @@
   .PMon<-function(Rabs,gHa,gV,tc,pk,ea,em,G,te,erh) {
     sb<-5.67*10^-8
     Rema<-em*sb*(tc+273.15)^4
-    la<-(-42.575*te+44994)
+    la<-45068.7-42.8428*te
+    sel<-which(te<0)
+    la[sel]<-51078.69-4.338*te[sel]-0.06367*te[sel]^2
     cp<-.cpair(te)
     Da<-.satvap(tc)-ea
     gR<-(4*em*sb*(te+273.15)^3)/cp
@@ -231,17 +234,19 @@
 #' (0 = based on rainfall, 1 computed from soil effective relative humidity, 2 computed from soil moisture fraction)
 #' @param yearG optional logical indicating whether or not to calculate and account for annual ground heat flux cycle
 #' @return an object of class pointmicro, namely a list of the following:
-#' (1) tme - POSIXlt object of times and dates corresponding to model outputs
-#' (2) Tc - a vector of canopy heat exchange surface temperatures (deg C).
-#' (3) Tg - a vector of ground surface temperatures (deg C).
-#' (4) H - a vector of sensible heat fluxes (W/m^2)
-#' (5) G - a vector of ground heat fluxes (W/m^2)
-#' (6) psih - diabatic correction factor for heat
-#' (7) psim - diabatic correction factor for momentum
-#' (8) phih - diabatic influencing factor for heat
-#' (9) OL - Obukhov length
-#' (10) error.mar - maximum temperature difference between ultimate and penultimate iteration of model
 
+#' \describe{
+#'  \item{tme}{POSIXlt object of times and dates corresponding to model outputs}
+#'  \item{Tc}{a vector of canopy heat exchange surface temperatures (deg C)}
+#'  \item{Tg}{a vector of ground surface temperatures (deg C)}
+#'  \item{H}{a vector of sensible heat fluxes (W/m^2)}
+#'  \item{G}{a vector of ground heat fluxes (W/m^2)}
+#'  \item{psih}{diabatic correction factors for heat}
+#'  \item{psim}{diabatic correction factors for momentum}
+#'  \item{phih}{diabatic influencing factors for heat}
+#'  \item{OL}{Obukhov length}
+#'  \item{error.mar}{maximum temperature difference between ultimate and penultimate iteration of model}
+#' }
 #' @details When running the model `zref` must be greater than he height of vegetation.
 #' If running for a location with tall vegetation, function [WeatherHeight()] can
 #' be used to adjust e.g. temperature and wind speed to a user-specified height.

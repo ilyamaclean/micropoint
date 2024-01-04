@@ -16,6 +16,24 @@
 #'  \item{precip}{precipitation (mm)}
 #' }
 "climdata"
+#' A data frame of hourly weather for a snowy environment
+#'
+#' A data frame of hourly weather (2nd Oct 2017 to 1st Apr 2019) for Sodankylä in Finland (67.367N, 26.629E)
+#'
+#' @format a data frame with the following elements:
+#' \describe{
+#'  \item{obs_time}{POSIXlt object of dates and times}
+#'  \item{temp}{temperature (degrees C)}
+#'  \item{relhum}{relative humidity (percentage)}
+#'  \item{pres}{atmospheric press (kPa)}
+#'  \item{swdown}{Total downward shortwave radiation (W / m^2)}
+#'  \item{difrad}{Total downward diffuse radiation (W / m^2)}
+#'  \item{lwdown}{Total downward shortwave radiation (W / m^2)}
+#'  \item{windspeed}{Wind speed (m/s)}
+#'  \item{winddir}{Wind direction (decimal degrees)}
+#'  \item{precip}{precipitation (mm)}
+#' }
+"snowclimdata"
 #'
 #' A dataset of vegetation parameters for running the Small Leaf model.
 #'

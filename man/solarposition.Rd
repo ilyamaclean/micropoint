@@ -29,6 +29,3 @@ a list of zenith and azimuth angles (decimal degrees)
 \description{
 Calculates the solar zenith and azimuth angles
 }
-\examples{
-# Hello
-}
