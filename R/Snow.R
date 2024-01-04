@@ -12,7 +12,7 @@
 }
 #' Calculate roughness length for snow
 .sroughlength<-function(h,pai,snowdepth,d=NA,psi_h=0) {
-  if (class(d)=="logical") d<-.szeroplanedis(h,pai,snowdepth)
+  if (class(d)[1]=="logical") d<-.szeroplanedis(h,pai,snowdepth)
   if  (snowdepth > h) {
     zm<-0.0005
   } else {
