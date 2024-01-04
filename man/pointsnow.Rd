@@ -35,6 +35,7 @@ a list of the following:
  \item{snowdepth}{a vector of snow depths (m)}
  \item{snowtemp}{a vector of snow temperatures (deg C)}
  \item{snowalb}{a vector of snow albedos (0-1)}
+ \item{snowdens}{a vector of snow densities (kg/m^3)}
  \item{psim}{diabatic correction factors for heat}
  \item{psih}{diabatic correction factors for momentum}
 }
@@ -43,5 +44,7 @@ a list of the following:
 Calculates snow depth and temperature
 }
 \examples{
-# Hello
+snowm <- pointsnow(snowclimdata, vegparams)
+plot(snowm$snowdepth ~ as.POSIXct(snowclimdata$obs_time), type = "l",
+     xlab = "Date", ylab = "Depth (m)")
 }

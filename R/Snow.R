@@ -93,6 +93,7 @@
 #'  \item{snowdepth}{a vector of snow depths (m)}
 #'  \item{snowtemp}{a vector of snow temperatures (deg C)}
 #'  \item{snowalb}{a vector of snow albedos (0-1)}
+#'  \item{snowdens}{a vector of snow densities (kg/m^3)}
 #'  \item{psim}{diabatic correction factors for heat}
 #'  \item{psih}{diabatic correction factors for momentum}
 #' }
@@ -109,6 +110,7 @@ pointsnow<-function(weather, vegp, initdepth = 0.01, inittemp = 0, snowenv = "Ta
   psim<-0
   psih<-0
   snowalb<-0
+  snowdens<-rep(1,length(weather$temp))
   for (i in 1:(length(weather$temp)-1)) {
     # Calculate Absorbed radiation
     snowalb[i]<-.snowalb(snowage)  # Snow albedo
@@ -195,7 +197,8 @@ pointsnow<-function(weather, vegp, initdepth = 0.01, inittemp = 0, snowenv = "Ta
     # Calculate diabatic coefficients
     psim[i+1]<-.dpsim(zm/LL)-.dpsim((zref-d)/LL)
     psih[i+1]<-.dpsih(zm/LL)-.dpsih((zref-d)/LL)
+    snowdens[i]<-pdensity
   }
   tme<-as.POSIXlt(weather$obs_time,tz="UTC")
-  return(list(tme=tme,snowdepth=snowdepth,snowtemp=snowtemp,snowalb=snowalb,psim=psim,psih=psih))
+  return(list(tme=tme,snowdepth=snowdepth,snowtemp=snowtemp,snowalb=snowalb,snowdens=snowdens,psim=psim,psih=psih))
 }
