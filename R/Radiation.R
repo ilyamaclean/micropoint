@@ -36,7 +36,7 @@
 #' @return a list of zenith and azimuth angles (decimal degrees)
 #' @rdname solarposition
 #' @export
-solarposition<-function(lat,long,year,month,day,hour,merid=0,dst=0) {
+solarposition<-function(lat,long,year,month,day,hour=12,merid=0,dst=0) {
   # Extract year, month, day and hour if year is a POSIXlt object
   if (class(year)[1] == "POSIXlt") {
     tme<-year
@@ -46,7 +46,7 @@ solarposition<-function(lat,long,year,month,day,hour,merid=0,dst=0) {
     hour<-with(tme,hour+(min+sec/60)/60)
   }
   # Calculate Astronomical Julian day
-  dd<-day+(hour-dst)/24 # decimal day
+  dd<-day+0.5 # decimal day
   ma<-month+(month<3)*12 # adjusted month
   ya<-year+(month<3)*-1 # adjusted year
   jd<-trunc(365.25*(ya+4716))+trunc(30.6001*(ma+1))+dd-1524.5
@@ -96,6 +96,7 @@ solarposition<-function(lat,long,year,month,day,hour,merid=0,dst=0) {
   } else {
     k<-sqrt((x^2+(tan(Z)^2)))/(x+1.774*(x+1.182)^(-0.733))
   }
+  k[k>6000]<-6000
   k
 }
 #' Internal function for calculating canopy extinction coefficients for sloped ground surfaces
@@ -151,6 +152,7 @@ twostreamparams<-function(vegp,groundp,solar) {
   # === (1c) Adjust paramaters for gap fraction and inclined surface
   pai_t<-with(vegp,(pai/(1-clump)))
   gref2<-1-(((1-groundp$gref)*cos(solar$zen*pi/180))/si)
+  gref2[is.infinite(gref2)]<-groundp$gref
   # === (1d) Calculate two stream base parameters
   om<-with(vegp,lref+ltra)
   a<-1-om
@@ -206,10 +208,12 @@ twostreamparams<-function(vegp,groundp,solar) {
 #' @param merid Longitude of local time zone meridian (decimnal degrees), Default: 0 (Greenwich Mean Time)
 #' @param dst Daylight saving hours. E.g. with `merid = 0` 0 for UTC or 1  for British Summer Time.
 #' @return A list of the following:
-#' (1) radGsw - flux density of shortwave radiation absorbed by canopy 'big-leaf' (W/m^2)
-#' (2) radGlw - flux density of longwave radiation absorbed by canopy 'big-leaf'(W/m^2)
-#' (3) radCsw - flux density of shortwave radiation absorbed by ground surface (W/m^2)
-#' (4) radClw - flux density of shortwave radiation absorbed by ground surface (W/m^2)
+#' \describe{
+#'  \item{radGsw}{Flux density of shortwave radiation absorbed by canopy 'big-leaf' (W/m^2)}
+#'  \item{radGlw}{Flux density of longwave radiation absorbed by canopy 'big-leaf'(W/m^2)}
+#'  \item{radCsw}{Flux density of shortwave radiation absorbed by ground surface (W/m^2)}
+#'  \item{radClw}{Flux density of longwave radiation absorbed by ground surface (W/m^2)}
+#' }
 #'
 #' @details Outputs form this function are used to calculate and the ground and canopy heat
 #' exchange surfaces. The outputs `radGsw` and `radGlw` are for the entire 'bigleaf'.
@@ -231,12 +235,16 @@ RadiationBigLeaf<-function(weather,vegp,groundp,bigleafp,solar,twostreamp,lat=49
   # === Calculate ground absorbed radiation
   # Shortwave
   epai<-vegp$pai/(1-cl)
-  Rbgm<-(1-cl^Kc)*exp(-twostreamp$kkd$kd*epai)+cl^Kc
-  Rdbm<-with(twostreamp,(1-cl^2)*((p8/sig)*exp(-kkd$kd*epai)+p9*exp(-h*epai)+p10*exp(h*epai)))
+  # ~~ Contribution of direct to downward diffuse
+  Rdbm<-with(twostreamp,(1-cl^Kc)*((p8/sig)*exp(-kkd$kd*epai)+p9*exp(-h*epai)+p10*exp(h*epai))+cl^Kc)
   Rdbm[Rdbm<0]<-0
-  Rddm<-with(twostreamp,(1-cl^2)*(p3*exp(-h*epai)+p4*exp(h*epai))+cl^2)
-  radGsw<-(1-groundp$gref)*(dirr*twostreamp$si*Rbgm+dirr*cos(solar$zen*pi/180)*Rdbm+weather$difrad*Rddm)
-  radGsw[solar$zen>90]<-0
+  # Downward diffuse
+  Rddm<-with(twostreamp,(p3*exp(-h*epai)+p4*exp(h*epai))+cl^2)
+  # Downward direct
+  Rbgm<-exp(-twostreamp$kkd$kd*epai)+cl^Kc # Downward direct
+  radGsw<-(1-groundp$gref)*(Rdbm*cos(solar$zen*pi/180)*dirr+ # Contribution of direct to downward diffuse
+                            Rddm*weather$difrad+ # Diffuse radiation
+                            Rbgm*twostreamp$si*dirr) # Direct radiation
   # Longwave
   trd<-(1-cl^2)*exp(-epai)+cl^2
   RemG<-with(groundp,em*5.67*10^-8*(bigleafp$Tg+273.15)^4)
@@ -246,12 +254,12 @@ RadiationBigLeaf<-function(weather,vegp,groundp,bigleafp,solar,twostreamp,lat=49
   radGlw<-groundp$em*(trd*radClw+(1-trd)*RemC)
   # === Calculate ground and canopy absorbed radiation
   # Shortwave
-  radCsw<-(1-albedo)*(dirr*cos(solar$zen)+weather$difrad)
+  radCsw<-(1-albedo)*(dirr*cos(solar$zen*pi/180)+weather$difrad)
   radCsw[is.na(radCsw)]<-0
   radCsw[is.infinite(radCsw)]<-0
   return(list(radGsw=radGsw,radGlw=radGlw,radCsw=radCsw,radClw=radClw,RemG=RemG,RemC=RemC))
 }
-#' @title Calculates shortwave radiation fluxes within canopy
+#' @title Calculates radiation fluxes within canopy
 #' @description Calculates radiation fluxes for application with SmallLeaf model
 #' @param weather a data.frame of hourly weather as in the example dataset `climdata`
 #' @param forestp an object of class vegparams formatted as for the inbuilt example dataset `vegparams`
@@ -260,40 +268,48 @@ RadiationBigLeaf<-function(weather,vegp,groundp,bigleafp,solar,twostreamp,lat=49
 #' @param twostreamPAR a list of two-stream radiation model parameters for photosynthetically
 #' active radiation (PAR) as returned by [twostreamparams()] but with leaf reflectance
 #' and transmittance adjusted for PAR.
-#' @param smallleafp an object of class smallleafp as returned by [RunBigLeaf()]
-#' @param tground ground temperature at time increment i (deg C)
+#' @param smallleafp an object of class smallleafparams as returned by [SmallLeafInit()]
 #' @param groundem ground emissivity
 #' @param i entry of weather for which shortwave fluxes are required
 #' @return A list of the following:
-#' (1) swupper - flux density of shortwave radiation absorbed by upper-side of canopy elements (W/m^2)
-#' (2) swunder - flux density of shortwave radiation absorbed by under-side of canopy elements (W/m^2)
-#' (3) lwupper - flux density of longwave radiation absorbed by upper-side of canopy elements (W/m^2)
-#' (4) lwunder - flux density of longwave radiation absorbed by under-side of canopy elements (W/m^2)
-#' (5) PARupper - Downward flux density of PAR  (W/m^2)
-#' (6) PARunder - Upward flux density of PAR (W/m^2)
-
+#' \describe{
+#'  \item{swupper}{a vector of flux densities of shortwave radiation absorbed by the upper-side of canopy elements (W/m^2)}
+#'  \item{swunder}{a vector of flux densities of shortwave radiation absorbed by the under-side of canopy elements (W/m^2)}
+#'  \item{lwupper}{a vector of flux densities of longnwave radiation absorbed by the upper-side of canopy elements (W/m^2)}
+#'  \item{lwunder}{a vector of flux densities of longwave radiation absorbed by the under-side of canopy elements (W/m^2)}
+#'  \item{PARupper}{a vector of downward flux densities of Photosynthetically Active Radiation (W/m^2)}
+#'  \item{PARunder}{a vector of upward flux densities of Photosynthetically Active Radiation (W/m^2)}
+#'  \item{radout}{a list of upward and downward short- and longwave fluxes for each canopy layer}
+#' }
 #' @rdname RadiationSmallLeaf
 #' @export
-RadiationSmallLeaf<-function(weather,forestp,solar,twostreamp,twostreamPAR,smallleafp,tground,groundem=0.97,i) {
-  # ===== Calculate radiation streams for radiation absorbtion ===================== #
+RadiationSmallLeaf<-function(weather,forestp,solar,twostreamp,twostreamPAR,smallleafp,groundem=0.97,i) {
   Kc<-with(twostreamp,kkd$kd[i]/kkd$k0)
   cl<-forestp$clump
   pai_a<-smallleafp$pai_a
+  # Adjust for clumping factor
+  z<-(c(1:length(pai_a))/length(pai_a))*forestp$h
+  n<-(forestp$h-z)/forestp$h
+  n[n<0]<-0
+  pai_a<-pai_a/(1-cl*n)
+  # Clump controls
+  trcb<-cl^(Kc*n) # transmission through canopy gaps (direct)
+  trcd<-cl^(2*n) # transmission through canopy gaps (diffuse)
   # ~~ Direct beam above canopy
   Rb0<-with(weather,swdown[i]-difrad[i])/cos(solar$zen[i]*pi/180)
   # ~~ Contribution of direct to downward diffuse
-  Rdbm<-with(twostreamp,(1-cl^2)*((p8[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p9[i]*exp(-h*pai_a)+p10[i]*exp(h*pai_a)))*Rb0
+  Rdbm<-with(twostreamp,((1-trcb)*(p8[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p9[i]*exp(-h*pai_a)+p10[i]*exp(h*pai_a)+trcb)*Rb0)
   # ~~ Contribution of direct to upward diffuse
-  Rubm<-with(twostreamp,(1-cl^2)*((p5[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p6[i]*exp(-h*pai_a)+p7[i]*exp(h*pai_a)))*Rb0
+  Rubm<-with(twostreamp,((1-trcb)*(p5[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p6[i]*exp(-h*pai_a)+p7[i]*exp(h*pai_a)+trcb)*Rb0)
   # ~~ Downward diffuse
-  Rddm<-with(twostreamp,(1-cl^2)*(p3*exp(-h*pai_a)+p4*exp(h*pai_a))+cl^2)*weather$difrad[i]+Rdbm
+  Rddm<-with(twostreamp,(p3*exp(-h*pai_a)+p4*exp(h*pai_a)+trcd)*weather$difrad[i]+Rdbm)
   # ~~ Upward diffuse
-  Rudm<-with(twostreamp,(1-cl^2)*(p1*exp(-h*pai_a)+p2*exp(h*pai_a))+cl^2)*weather$difrad[i]+Rubm
+  Rudm<-with(twostreamp,(p1*exp(-h*pai_a)+p2*exp(h*pai_a)+trcd)*weather$difrad[i]+Rubm)
   # Downward direct
-  Rdbm<-with(twostreamp,(1-cl^2)*exp(-kkd$kd[i]*pai_a)+cl^2)*Rb0
+  Rbdm<-with(twostreamp,(exp(-kkd$kd[i]*pai_a)+trcb)*Rb0)
   # Shortwave absorbed (average per one-sided leaf area)
   sil<-twostreamp$kkd$k[i]*cos(solar$zen[i]*pi/180)
-  swtop<-(1-forestp$lref)*(Rddm+sil*Rdbm)
+  swtop<-(1-forestp$lref)*(Rddm+sil*Rbdm)
   swbtm<-(1-forestp$lref)*Rudm
   # Longwave down and up
   sb<-5.67*10^-8
@@ -301,7 +317,7 @@ RadiationSmallLeaf<-function(weather,forestp,solar,twostreamp,twostreamPAR,small
   # Downward from sky
   lwsky<-weather$lwdown[i]*smallleafp$lwgt$trh
   # Upward from sky
-  lwgro<-groundem*sb*smallleafp$lwgt$trg*(tground+273.15)^4
+  lwgro<-groundem*sb*smallleafp$lwgt$trg*(smallleafp$tground+273.15)^4
   lwfd<-0 # downward from foliage
   lwfu<-0 # upward from foliage
   for (j in 1:n) {
@@ -310,23 +326,27 @@ RadiationSmallLeaf<-function(weather,forestp,solar,twostreamp,twostreamPAR,small
   }
   lwtop<-forestp$em*(lwsky+lwfd)
   lwbtm<-forestp$em*(lwgro+lwfu)
+  # Coefficients to return
+  radout<-list(Rdni_down=Rb0,
+               Rdif_down=Rddm,
+               Rdif_up=Rudm,
+               Rlw_down=lwsky+lwfd,
+               Rlw_up=lwgro+lwfu)
   # ===== Calculate radiation streams for PAR ===================== #
   # ~~ Contribution of direct to downward diffuse
-  Rdbm<-with(twostreamPAR,(1-cl^2)*((p8[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p9[i]*exp(-h*pai_a)+p10[i]*exp(h*pai_a)))*Rb0
+  Rdbm<-with(twostreamPAR,((p8[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p9[i]*exp(-h*pai_a)+p10[i]*exp(h*pai_a)+trcb)*Rb0)
   # ~~ Contribution of direct to upward diffuse
-  Rubm<-with(twostreamPAR,(1-cl^2)*((p5[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p6[i]*exp(-h*pai_a)+p7[i]*exp(h*pai_a)))*Rb0
+  Rubm<-with(twostreamPAR,((p5[i]/sig[i])*exp(-kkd$kd[i]*pai_a)+p6[i]*exp(-h*pai_a)+p7[i]*exp(h*pai_a)+trcb)*Rb0)
   # ~~ Downward diffuse
-  Rddm<-with(twostreamPAR,(1-cl^2)*(p3*exp(-h*pai_a)+p4*exp(h*pai_a))+cl^2)*weather$difrad[i]+Rdbm
+  Rddm<-with(twostreamPAR,(p3*exp(-h*pai_a)+p4*exp(h*pai_a)+trcd)*weather$difrad[i]+Rdbm)
   # ~~ Upward diffuse
-  Rudm<-with(twostreamPAR,(1-cl^2)*(p1*exp(-h*pai_a)+p2*exp(h*pai_a))+cl^2)*weather$difrad[i]+Rubm
+  Rudm<-with(twostreamPAR,(p1*exp(-h*pai_a)+p2*exp(h*pai_a)+trcd)*weather$difrad[i]+Rubm)
   # Downward direct
-  Rdbm<-with(twostreamPAR,(1-cl^2)*exp(-kkd$kd[i]*pai_a)+cl^2)*Rb0
+  Rdbm<-with(twostreamPAR,(exp(-kkd$kd[i]*pai_a)+trcb)*Rb0)
   # PAR fluxes
   # Shortwave absorbed (average per one-sided leaf area)
   sil<-cos(solar$zen[i]*pi/180)
   PARtop<-Rddm+Rdbm*cos(solar$zen[i]*pi/180)
   PARbtm<-Rudm
-  return(list(swupper=swtop,swunder=swbtm,lwupper=lwtop,lwunder=lwbtm,PARupper=PARtop,PARunder=PARbtm))
+  return(list(swupper=swtop,swunder=swbtm,lwupper=lwtop,lwunder=lwbtm,PARupper=PARtop,PARunder=PARbtm,radout=radout))
 }
-
-
