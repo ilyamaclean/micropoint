@@ -1,0 +1,7 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^vignettes/.*\.Rmd$
+^vignettes/.*\.html$
+^vignettes/.*\.md$
+^vignettes/.*\.R$
+^vignettes/.*\.out$
