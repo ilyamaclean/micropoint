@@ -1528,7 +1528,10 @@ DataFrame BelowCanopy(double reqhgt, double zref, double lat, double lon, DataFr
     // Run model in hourly time-steps
     for (size_t hr = 0; hr < tc.size(); ++hr) {
         // create inputs
-        std::vector<double> obsvarsone{ year[hr],month[hr],day[hr],hour[hr] };
+        std::vector<double> obsvarsone{
+            static_cast<double>(year[hr]),
+            static_cast<double>(month[hr]),
+            static_cast<double>(day[hr]),hour[hr] };
         std::vector<double> climvarsone{ tc[hr],rh[hr],pk[hr],Rsw[hr],Rdif[hr],Rlw[hr] };
         std::vector<double> blvarsone{ Tc[hr],Tg[hr],psih[hr],psim[hr],phih[hr],uf[hr],sm[hr] };
         Rcpp::List onerun = SmallLeafOne(reqhgt, zref, lat, lon, obsvarsone, climvarsone, blvarsone, iters, wc, vegp, paii, groundp,
