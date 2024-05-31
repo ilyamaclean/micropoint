@@ -4,7 +4,7 @@
 \alias{solarposition}
 \title{Calculates solar position}
 \usage{
-solarposition(lat, long, year, month, day, hour, merid = 0, dst = 0)
+solarposition(lat, long, year, month, day, hour = 12, merid = 0, dst = 0)
 }
 \arguments{
 \item{lat}{latitude (decimal degrees)}

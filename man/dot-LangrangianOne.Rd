@@ -11,7 +11,6 @@
   solar,
   twostreamp,
   smallleafp,
-  tground,
   groundem = 0.97,
   surfwet = 1,
   theta = 1,

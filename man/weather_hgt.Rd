@@ -4,11 +4,9 @@
 \alias{weather_hgt}
 \title{Adjust weather data for height}
 \usage{
-weather_hgt(weather, zin = 2, uzin = zin, zout = 10, lat, long)
+weather_hgt(climdata, zin = 2, uzin = zin, zout = 10, lat, long)
 }
 \arguments{
-\item{weather}{a data.frame of hourly weather as in the example dataset `climdata`}
-
 \item{zin}{height above ground of temperature and relative humidity measurements (m)}
 
 \item{uzin}{height above ground of wind speed measurements (m)}
@@ -18,6 +16,8 @@ weather_hgt(weather, zin = 2, uzin = zin, zout = 10, lat, long)
 \item{lat}{latitude (decimal degrees). Negative south of the equator.}
 
 \item{long}{latitude (decimal degrees). Negative west of the Greenwich Meridian.}
+
+\item{weather}{a data.frame of hourly weather as in the example dataset `climdata`}
 }
 \value{
 a data.frame of hourly weather

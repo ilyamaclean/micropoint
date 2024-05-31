@@ -5,47 +5,43 @@
 \title{Run big-leaf model}
 \usage{
 RunBigLeaf(
-  weather,
+  climdata,
   vegp,
   groundp,
-  soilm,
   lat,
   long,
-  dTmx = 25,
   zref = 2,
-  merid = 0,
-  dst = 0,
-  maxiter = 100,
-  bwgt = 0.5,
-  tol = 0.5,
-  gmn = 0.1,
-  plotout = FALSE,
-  swmethod = 2,
-  yearG = TRUE
+  uref = zref,
+  soilm = NA,
+  surfwet = NA,
+  dTmx = 25,
+  maxiter = 20
 )
 }
 \arguments{
-\item{weather}{a data.frame of hourly weather as in the example dataset `climdata`}
-
 \item{vegp}{an object of class vegparams formatted as for the inbuilt example dataset `vegparams`}
 
 \item{groundp}{an object of class vegparams formatted as for the inbuilt example dataset `groundparams`}
-
-\item{soilm}{a vector of volumetric soil moisture fractions in the top 10 cm of soil.}
 
 \item{lat}{latitude (decimal degrees). Negative south of the equator.}
 
 \item{long}{longitude (decimal degrees). Negative west of the Greenwich Meridian.}
 
+\item{zref}{height above ground (m) of measurements in `weather` (see details)}
+
+\item{uref}{height above gorund (m) of wind speed measurements in `climdata` (if different from zref)}
+
+\item{soilm}{a vector of volumetric soil moisture fractions in the top 10 cm of soil.}
+
 \item{dTmx}{maximum by which vegetation or soil surface temperature can exceed air temperature (deg C, set to ensure model convergence)}
 
-\item{zref}{height above ground of measurements in `weather` (see details)}
+\item{maxiter}{Maximum number of iterations over which to run the model}
+
+\item{weather}{a data.frame of hourly weather as in the example dataset `climdata`}
 
 \item{merid}{Longitude of local time zone meridian (decimnal degrees), Default: 0 (Greenwich Mean Time)}
 
 \item{dst}{Daylight saving hours. E.g. with `merid = 0` 0 for UTC or 1  for British Summer Time.}
-
-\item{maxiter}{Maximum number of iterations over which to run the model}
 
 \item{bwgt}{backward weighting to apply when iteratively running the model (default 0.5)}
 
@@ -87,18 +83,18 @@ If running for a location with tall vegetation, function [WeatherHeight()] can
 be used to adjust e.g. temperature and wind speed to a user-specified height.
 }
 \examples{
-# Run Big leaf model with inbuilt parameters assuming soil moisture = 0.2
-bigleafp <- RunBigLeaf(climdata, vegparams, groundparams, soilm = 0.2,
-                       lat = 49.96807, long = -5.215668)
+# Run Big leaf model with inbuilt parameters
+bigleafp <- RunBigLeaf(climdata, vegparams, groundparams, lat = 49.96807,
+long = -5.215668)
 # Plot ground and canopy temperature
 tme <- as.POSIXct(climdata$obs_time, tz = "UTC")
 par(mar = c(6, 6, 3, 3))
 # Ground temperature
 plot(bigleafp$Tg ~ tme, type = "l", cex.axis = 2, cex.lab = 2,
-     xlab = "Month", ylab = "Temperature", ylim = c(-5, 35),
+     xlab = "Month", ylab = "Temperature", ylim = c(-5, 40),
      col = rgb(1, 0, 0, 0.5))
 par(new = TRUE)
 # Canopy temperature
 plot(bigleafp$Tc ~ tme, type = "l", cex.axis = 2, cex.lab = 2,
-     xlab = "", ylab = "", ylim = c(-5, 35), col = rgb(0, 0.5, 0, 0.5))
+     xlab = "", ylab = "", ylim = c(-5, 40), col = rgb(0, 0.5, 0, 0.5))
 }

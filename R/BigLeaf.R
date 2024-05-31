@@ -61,12 +61,13 @@
 }
 .dphih<-function(ze) {
   # unstable
-  y<-(1-9*ze)^-0.5
+  phim<-1/((1-16*ze)^0.25)
+  phih<-phim^2
   # stable
-  s<-which(ze>=0)
-  p<-(0.74+4.7*ze)/0.74
-  y[s]<-p[s]
-  y
+  phis<-1+((6*ze)/(1+ze))
+  s<-which(ze>0)
+  phih[s]<-phis[s]
+  phih
 }
 #' Calculate free convection
 .gfree<-function(leafd,H) {
@@ -88,7 +89,7 @@
 #' Stomatal conductance (set g50 to 300 and multiply by 3 to give bulk surface)
 .stomcond <- function(Rsw, gsmax, q50 = 100) {
   rpar<-Rsw*4.6
-  gs<-(gsmax * rpar) / (rpar + q50)
+  gs<-(gsmax * rpar)/(rpar + q50)
   gs
 }
 .satvap <- function(tc, method = "Tetens") {
@@ -122,94 +123,6 @@
   Tdew[Tdew < 0] <- Tfrost[Tdew < 0]
   Tdew
 }
-.PenmanMonteith<-function(Rabs,gHa,gV,tc,pk,ea,em=0.97,G=0,tms=3,erh=1) {
-  .PMon<-function(Rabs,gHa,gV,tc,pk,ea,em,G,te,erh) {
-    sb<-5.67*10^-8
-    Rema<-em*sb*(tc+273.15)^4
-    la<-45068.7-42.8428*te
-    sel<-which(te<0)
-    la[sel]<-51078.69-4.338*te[sel]-0.06367*te[sel]^2
-    cp<-.cpair(te)
-    Da<-.satvap(tc)-ea
-    gR<-(4*em*sb*(te+273.15)^3)/cp
-    De<-.satvap(te+0.5)-.satvap(te-0.5)
-    Ts<-tc+((Rabs-Rema-la*(gV/pk)*Da*erh-G)/(cp*(gHa+gR)+la*(gV/pk)*De*erh))
-    Ts
-  }
-  Ts<-.PMon(Rabs,gHa,gV,tc,pk,ea,em,G,tc,erh)
-  if (tms>1) {
-    for (i in 2:tms) {
-      te<-(Ts+tc)/2
-      Ts<-.PMon(Rabs,gHa,gV,tc,pk,ea,em,G,te,erh)
-    }
-  }
-  Ts
-}
-#' Run big-leaf model: one iteration
-.BigLeaf<-function(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,method,yearG=TRUE) {
-  # Calculate absorbed radiation
-  Rads<-RadiationBigLeaf(weather,vegp,groundp,bigleafp,solar,twostreamp,lat,long,merid,dst)
-  RabsG<-with(Rads,radGsw+radGlw)
-  RabsC<-with(Rads,radCsw+radClw)
-  # Calculate canopy temperature
-  d<-with(vegp,.zeroplanedis(h,pai))
-  zm<-with(vegp,.roughlength(h,pai,d,bigleafp$psih))
-  uf<-(0.4*weather$windspeed)/(log((zref-d)/zm)+bigleafp$psim)
-  uf[uf<0.0002]<-0.0002
-  gmin<-with(vegp,.gfree(leafd,abs(bigleafp$H))*2*pai)
-  ph<-.phair(bigleafp$tcc,weather$pres)
-  gHa<-.gturb(uf,d,zm,zref,z0=NA,ph,bigleafp$psih,gmin=gmin)
-  gV<-with(vegp,.stomcond(weather$swdown,gsmax*3,q50*3))
-  ea<-.satvap(weather$temp)*weather$relhum/100
-  Tc<-.PenmanMonteith(RabsC,gHa,gV,weather$temp,weather$pres,ea,vegp$em,bigleafp$G)
-  tdew<-.dewpoint(weather$temp,ea)
-  Tc[Tc<tdew]<-tdew[Tc<tdew]
-  # Calculate effective soil relative humidity
-  if (method == 0) {
-    srh<-ifelse(weather$precip>0,0.9,0)
-  } else if (method == 1) {
-    srh<-with(groundp,.soilrh(soilm, b, Psie, Smax, bigleafp$Tg))
-  } else {
-    srh<-with(groundp,(soilm-Smin)/(Smax-Smin))
-  }
-  srh<-ifelse(weather$precip>0,0.9,0)
-  #srh<-with(groundp,.soilrh(soilm, b, Psie, Smax, bigleafp$Tg))
-  Tg<-.PenmanMonteith(RabsG,gHa,gHa,weather$temp,weather$pres,ea,groundp$em,bigleafp$G,3,srh)
-  Tg[Tg<tdew]<-tdew[Tg<tdew]
-  # Recalculate Big Leaf parameters
-  # ** diabatic coefficients
-  tcc<-(Tc+weather$temp)/2
-  tcg<-(Tg+weather$temp)/2
-  Tk<-273.15+tcc
-  ph<-.phair(tcc,weather$pres)
-  cp<-.cpair(tcc)
-  H<-gHa*cp*(Tc-weather$temp)
-  # ** set limits to H
-  Rnet<-RabsC-5.67*10^-8*vegp$em*(Tc+273.15)^4
-  s<-which(Rnet>0 & H>Rnet)
-  H[s]<-Rnet[s]
-  # Stability
-  LL<-(ph*cp*uf^3*Tk)/(-0.4*9.81*H)
-  psim<-.dpsim(zm/LL)-.dpsim((zref-d)/LL)
-  psih<-.dpsih(zm/LL)-.dpsih((zref-d)/LL)
-  phih<-.dphih((zref-d)/LL)
-  # ** Set limits to diabatic coefficients
-  ln1<-log((zref-d)/zm)
-  ln2<-log((zref-d)/(0.2*zm))
-  psim<-pmax(psim,-0.9*ln1)
-  psih<-pmax(psih,-0.9*ln1)
-  psim<-pmin(psim,0.9*ln1)
-  psih<-pmin(psih,0.9*ln1)
-  phih[phih>1.5]<-1.5
-  phih[phih<0.75]<-0.75
-  # ** G
-  RnetG<-RabsG-5.67*10^-8*vegp$em*(weather$temp+273.15)^4 # deliberately capped at weather temp
-  GG<-with(groundp,GFlux(Tg,soilm,rho,Vm,Vq,Mc,RnetG,bigleafp$Gmax,bigleafp$Gmin,i,yearG))
-  # Assign values to bigelafp
-  bigleafp<-list(psih=psih,psim=psim,H=H,G=GG$G,tcc=tcc,tcg=tcg,Tc=Tc,Tg=Tg,phih=phih,
-                 RnetG=RnetG,LL=LL,uf=uf,RabsG=RabsG,Gmax=GG$Gmax,Gmin=GG$Gmin)
-  return(bigleafp)
-}
 #' @title Run big-leaf model
 #' @description Runs big leaf model iteratively to derive ground and canopy
 #' heat exchange surface temperatures
@@ -220,7 +133,8 @@
 #' @param lat latitude (decimal degrees). Negative south of the equator.
 #' @param long longitude (decimal degrees). Negative west of the Greenwich Meridian.
 #' @param dTmx maximum by which vegetation or soil surface temperature can exceed air temperature (deg C, set to ensure model convergence)
-#' @param zref height above ground of measurements in `weather` (see details)
+#' @param zref height above ground (m) of measurements in `weather` (see details)
+#' @param uref height above gorund (m) of wind speed measurements in `climdata` (if different from zref)
 #' @param merid Longitude of local time zone meridian (decimnal degrees), Default: 0 (Greenwich Mean Time)
 #' @param dst Daylight saving hours. E.g. with `merid = 0` 0 for UTC or 1  for British Summer Time.
 #' @param maxiter Maximum number of iterations over which to run the model
@@ -234,7 +148,6 @@
 #' (0 = based on rainfall, 1 computed from soil effective relative humidity, 2 computed from soil moisture fraction)
 #' @param yearG optional logical indicating whether or not to calculate and account for annual ground heat flux cycle
 #' @return an object of class pointmicro, namely a list of the following:
-
 #' \describe{
 #'  \item{tme}{POSIXlt object of times and dates corresponding to model outputs}
 #'  \item{Tc}{a vector of canopy heat exchange surface temperatures (deg C)}
@@ -255,72 +168,52 @@
 #' @export
 #'
 #' @examples
-#' # Run Big leaf model with inbuilt parameters assuming soil moisture = 0.2
-#' bigleafp <- RunBigLeaf(climdata, vegparams, groundparams, soilm = 0.2,
-#'                        lat = 49.96807, long = -5.215668)
+#' # Run Big leaf model with inbuilt parameters
+#' bigleafp <- RunBigLeaf(climdata, vegparams, groundparams, lat = 49.96807,
+#' long = -5.215668)
 #' # Plot ground and canopy temperature
 #' tme <- as.POSIXct(climdata$obs_time, tz = "UTC")
 #' par(mar = c(6, 6, 3, 3))
 #' # Ground temperature
 #' plot(bigleafp$Tg ~ tme, type = "l", cex.axis = 2, cex.lab = 2,
-#'      xlab = "Month", ylab = "Temperature", ylim = c(-5, 35),
+#'      xlab = "Month", ylab = "Temperature", ylim = c(-5, 40),
 #'      col = rgb(1, 0, 0, 0.5))
 #' par(new = TRUE)
 #' # Canopy temperature
 #' plot(bigleafp$Tc ~ tme, type = "l", cex.axis = 2, cex.lab = 2,
-#'      xlab = "", ylab = "", ylim = c(-5, 35), col = rgb(0, 0.5, 0, 0.5))
-RunBigLeaf<-function(weather,vegp,groundp,soilm,lat,long,dTmx=25,zref=2,merid=0,dst=0,maxiter=100,bwgt=0.5,
-                     tol=0.5,gmn=0.1,plotout=FALSE,swmethod=2,yearG=TRUE) {
-  # Calculate two-stream parameters
-  tme<-as.POSIXlt(weather$obs_time,tz="UTC")
-  if (length(soilm) == 1) soilm<-rep(soilm,length(tme))
-  solar<-solarposition(lat,long,year=tme)
-  twostreamp<-twostreamparams(vegp,groundp,solar)
-  # Assign initial values to bigleafp
-  H<-0.5*weather$swdown-vegp$em*5.67*10^-8*(weather$temp+273.15)^4
-  bigleafp<-list(psih=0,psim=0,H=H,G=0,tcc=weather$temp,tcg=weather$temp,Tc=weather$temp,
-                 Tg=weather$temp,phih=1,uf=0.1,LL=0,RabsG=0,Gmax=1000,Gmin=-1000)
-  tst<-1
-  i<-1
-  while (tst > tol) {
-    bigleafp1<-.BigLeaf(weather,zref,vegp,groundp,bigleafp,solar,twostreamp,soilm,lat,long,merid,dst,gmn,i,swmethod,yearG)
-    # Cap values
-    dTc<-bigleafp1$Tc-weather$temp
-    dTg<-bigleafp1$Tg-weather$temp
-    dTc[dTc>dTmx]<-dTmx
-    dTg[dTg>dTmx]<-dTmx
-    bigleafp1$Tc<-weather$temp+dTc
-    bigleafp1$Tg<-weather$temp+dTg
-    # Calculate differences
-    m1<-max(abs(bigleafp$Tc-bigleafp1$Tc))
-    m2<-max(abs(bigleafp$Tg-bigleafp1$Tg))
-    tst<-max(m1,m2)
-    # Add together
-    bigleafp<-list(psih=bwgt*bigleafp$psih+(1-bwgt)*bigleafp1$psih,
-                   psim=bwgt*bigleafp$psim+(1-bwgt)*bigleafp1$psim,
-                   H=bwgt*bigleafp$H+(1-bwgt)*bigleafp1$H,
-                   G=bwgt*bigleafp$G+(1-bwgt)*bigleafp1$G,
-                   tcc=bwgt*bigleafp$tcc+(1-bwgt)*bigleafp1$tcc,
-                   tcg=bwgt*bigleafp$tcg+(1-bwgt)*bigleafp1$tcg,
-                   Tc=bwgt*bigleafp$Tc+(1-bwgt)*bigleafp1$Tc,
-                   Tg=bwgt*bigleafp$Tg+(1-bwgt)*bigleafp1$Tg,
-                   phih=bwgt*bigleafp$phih+(1-bwgt)*bigleafp1$phih,
-                   uf=bwgt*bigleafp$uf+(1-bwgt)*bigleafp1$uf,
-                   LL=bwgt*bigleafp$LL+(1-bwgt)*bigleafp1$LL,
-                   RabsG=bigleafp1$RabsG,Gmax=bigleafp1$Gmax,Gmin=bigleafp1$Gmin)
-    # Plot
-    if (plotout) {
-      plot(bigleafp$Tg~as.POSIXct(tme),type="l",main=round(tst,3))
-    }
-    if (i>maxiter) tst<-0
-    i<-i+1
+#'      xlab = "", ylab = "", ylim = c(-5, 40), col = rgb(0, 0.5, 0, 0.5))
+RunBigLeaf<-function(climdata,  vegp, groundp, lat, long, zref = 2, uref = zref, soilm = NA, surfwet = NA, dTmx = 25,
+                     maxiter = 20) {
+  # Create date data.frame of obstime
+  tme<-as.POSIXlt(climdata$obs_time,tz="UTC")
+  obstime<-data.frame(year=tme$year+1900,month=tme$mon+1,day=tme$mday,hour=tme$hour+tme$min/60+tme$sec/3600)
+  climdata$obs_time<-NULL
+  # Create vectors of vegp and groundp
+  vegpp<-as.vector(unlist(vegp))
+  groundpp<-as.vector(unlist(groundp))
+  if (vegp$h > zref) {
+    climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
+    zref<-vegp$h
   }
-  bigleafp<-list(tme=tme,Tc=bigleafp$Tc,Tg=bigleafp$Tg,H=bigleafp$H,G=bigleafp$G,
-                 psih=bigleafp$psih,psim=bigleafp$psim,phih=bigleafp$phih,
-                 OL=bigleafp$LL,uf=bigleafp$uf,RabsG=bigleafp$RabsG,error.mar=tst)
+  climdata$windspeed[climdata$windspeed<0.5]<-0.5
+  if (class(soilm)=="logical") {
+    soiltype<-.soilmatch(groundp)
+    spa<-micropoint::soilparams
+    ii<-which(spa$Soil.type==soiltype)
+    soilm<-soilmCpp(climdata,spa$rmu[ii],spa$mult[ii],spa$pwr[ii],spa$Smax[ii],spa$Smin[ii],spa$Ksat[ii],spa$a[ii])
+    soilm<-stats::spline(soilm,n=length(climdata$temp))$y
+  }
+  # check whether time sequence is for whole year
+  yearG<-TRUE
+  nn<-dim(climdata)[1]
+  if (nn < 8760) yearG<-FALSE
+  # Run big Leaf model
+  microp<-BigLeafCpp(obstime,climdata,vegpp,groundpp,soilm,lat,long,dTmx,zref,maxiter,0.5,0.5,0.1,yearG)
   class(bigleafp)<-"pointmicro"
-  return(bigleafp)
+  return(microp)
 }
+
+
 #'
 #' @title Adjust weather data for height
 #' @description Adjust weather data to user-specified height above ground
@@ -355,26 +248,10 @@ RunBigLeaf<-function(weather,vegp,groundp,soilm,lat,long,dTmx=25,zref=2,merid=0,
 #' abline(a = 0, b = 1, lwd = 2, col = "red")
 #' @rdname weather_hgt
 #' @export
-weather_hgt<-function(weather, zin = 2, uzin = zin, zout = 10, lat, long) {
-  bigleafp <- RunBigLeaf(weather,vegparams,groundparams,0.2,lat,long)
-  d<-with(vegparams,.zeroplanedis(h,pai))
-  zm<-with(vegparams,.roughlength(h,pai,d,0))
-  zh<-0.2*zm
-  lnr<-log((zout-d)/zh)/log((zin-d)/zh)
-  # Temperature
-  Tz<-(bigleafp$Tc-weather$temp)*(1-lnr)+weather$temp
-  # Vapour pressure
-  ea<-.satvap(weather$temp)*weather$relhum/100
-  es<-.satvap(bigleafp$Tc)
-  ez<-ea+(es-ea)*(1-lnr)
-  es<-.satvap(Tz)
-  rh<-(ez/es)*100
-  # Wind speed
-  lnr<-log((zout-d)/zm)/log((uzin-d)/zm)
-  uz<-weather$windspeed*lnr
-  weathero<-data.frame(obs_time=weather$obs_time,temp=Tz,relhum=rh,
-                       pres=weather$pres,swdown=weather$swdown,
-                       difrad=weather$difrad,lwdown=weather$lwdown,
-                       windspeed=uz,winddir=weather$winddir,precip=weather$precip)
-  return(weathero)
+weather_hgt<-function(climdata, zin = 2, uzin = zin, zout = 10, lat, long) {
+  # Create date data.frame of obstime
+  tme<-as.POSIXlt(climdata$obs_time,tz="UTC")
+  obstime<-data.frame(year=tme$year+1900,month=tme$mon+1,day=tme$mday,hour=tme$hour+tme$min/60+tme$sec/3600)
+  climdata<-weatherhgtCpp(obstime, climdata, zin, uzin, zout, lat, long)
+  return(climdata)
 }

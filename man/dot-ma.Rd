@@ -4,7 +4,7 @@
 \alias{.ma}
 \title{Calculates moving average by default over 6 months}
 \usage{
-.ma(x, n = 4380)
+.ma(x, n = 2190)
 }
 \description{
 Calculates moving average by default over 6 months

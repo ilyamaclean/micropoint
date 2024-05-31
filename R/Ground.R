@@ -31,19 +31,18 @@ creategroundp<-function(soiltype) {
   groundp
 }
 #' Calculates moving average by default over 6 months
-.ma <- function(x, n = 4380) {
+.ma <- function(x, n = 2190) {
   y <- stats::filter(x, rep(1 / n, n), circular = TRUE, sides = 1)
   y
 }
 #' @title Computes ground heat flux
 #' @description Computes ground heat flux from hourly surface temperature data
-#' @param Tg a vector of ground surface tmeperatures (deg C)
+#' @param Tg a vector of ground surface temperatures (deg C)
 #' @param soilm a vector of fractional soil moistures
 #' @param rho Soil bulk density (Mg / m^3)
 #' @param Vm Volumetric mineral fraction of soil
 #' @param Vq Volumetric quartz fraction of soil
 #' @param Mc Mass fraction of clay
-#' @param RnetG Net flux density of radiation at soil surface (W/m^2)
 #' @param Gmax Maximum allowable value of daily G (included to ensure model convergence - W/m^2)
 #' @param Gmin Minumum allowable value of daily G (included to ensure model convergence - W/m^2)
 #' @param i iteration of model
@@ -59,7 +58,7 @@ creategroundp<-function(soiltype) {
 #' convergence
 #' @rdname GFlux
 #' @export
-GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
+GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,Gmax=200,Gmin=200,i=1,yearG=TRUE) {
   # Find soil diffusivity
   cs<-(2400*rho/2.64+4180*soilm) # specific heat of soil in J/kg/K
   ph<-(rho*(1-soilm)+soilm)*1000   # bulk density in kg/m3
@@ -71,7 +70,6 @@ GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
   k<-c1+c2*soilm-(c1-c4)*exp(-(c3*soilm)^4) # Thermal conductivity   W/m/K
   ka<-k/(cs*ph)
   # Get T multiplier  for daily
-  tt<-c(0:(length(Tg)-1))*3600
   omdy<-(2*pi)/(24*3600)
   DD<-sqrt(2*ka/omdy)
   Gmu<-sqrt(2)*(k/DD)*0.5
@@ -110,61 +108,37 @@ GFlux<-function(Tg,soilm,rho,Vm,Vq,Mc,RnetG,Gmax,Gmin,i,yearG=TRUE) {
   hr[hr>1]<-1
   hr
 }
+#' Get soil type form gorund parameters
+.soilmatch<-function(groundp) {
+  # Calculate standard deviations away from each variable
+  Smx<-abs(groundp$Smax-soilparams$Smax)/sd(soilparams$Smax)
+  Smn<-abs(groundp$Smin-soilparams$Smin)/sd(soilparams$Smin)
+  Rho<-abs(groundp$rho-soilparams$rho)/sd(soilparams$rho)
+  Kst<-abs(groundp$Ksat-soilparams$Ksat)/sd(soilparams$Ksat)
+  sm<-Smx+Smn+Rho+Kst
+  i<-which.min(sm)[1]
+  soiltype<-soilparams$Soil.type[i]
+  return(soiltype)
+}
 #' @title Runs a simple two-layer soil model
 #' @description Runs a simple two-layer soil model to derive soil moisture in upper 10 cm
-#' @param weather a data.frame of hourly weather formatted as [climdata()]
+#' @param climdata a data.frame of hourly weather formatted as [climdata()]
 #' @param soiltype a character vector of soil type - one of those listed in [soilparams()]
-#' @return a vector of hourly volumetrivc soil moisture fractions
+#' @return a vector of hourly volumetric soil moisture fractions
 #' @rdname soilmmodel
 #' @export
 #' @examples
 #' soilm<-soilmmodel(climdata, "Loam")
 #' plot(soilm,type="l")
-soilmmodel<-function(weather, soiltype) {
-  .onestep<-function(rnetd,rain,soilparams,si,si2,ti,ii) {
-    s<-si+soilparams$rmu[ii]*rain[ti]-soilparams$mult[ii]*rnetd[ti]
-    sav<-(si+si2)/2
-    k<-soilparams$Ksat[ii]*(sav/soilparams$Smax[ii])^soilparams$pwr[ii]
-    dif<-si2-si
-    s<-s+soilparams$a[ii]*k*dif
-    s2<-si2-((soilparams$a[ii]*k*dif)/10)
-    s<-ifelse(s>soilparams$Smax[ii],soilparams$Smax[ii],s)
-    s<-ifelse(s<soilparams$Smin[ii],soilparams$Smin[ii],s)
-    s2<-ifelse(s2>soilparams$Smax[ii],soilparams$Smax[ii],s2)
-    s2<-ifelse(s2<soilparams$Smin[ii],soilparams$Smin[ii],s2)
-    return(list(s=s,s2=s2))
-  }
-  # Get soil moisture model coefficients
-  ii<-which(soilparams$Soil.type==soiltype)
-  # Calculate daily positive net radiation
-  swrad<-(1-0.15)*weather$swdown
-  lwout<-5.67e-8*0.95*(weather$temp+273.15)^4
-  lwnet<-lwout-weather$lwdown
-  rnet<-swrad-lwnet
-  rnet[rnet<0]<-0
-  rnetd<-matrix(rnet,ncol=24,byrow=TRUE)
-  rnetd<-apply(rnetd,1,mean)
-  # Get daily rainfall
-  rain<-matrix(weather$precip,ncol=24,byrow=TRUE)
-  rain<-apply(rain,1,sum)
-  s<-soilparams$Smax[ii]
-  s2<-s
-  for (ti in 2:length(rain)) {
-    ss<-.onestep(rnetd,rain,soilparams,s[ti-1],s2[ti-1],ti,ii)
-    s[ti]<-ss$s
-    s2[ti]<-ss$s2
-  }
-  if (length(rain)>364 & length(rain) < 367) {
-    s<-s[length(s)]
-    s2<-s2[length(s2)]
-    for (ti in 2:length(rain)) {
-      ss<-.onestep(rnetd,rain,soilparams,s[ti-1],s2[ti-1],ti,ii)
-      s[ti]<-ss$s
-      s2[ti]<-ss$s2
-    }
-  }
-  soilm<-(s+s2)/2
-  soilm<-stats::spline(soilm,n=length(rnet))$y
-  soilm
+soilmmodel<-function(climdata, soiltype) {
+  # Create date data.frame of obstime
+  tme<-as.POSIXlt(climdata$obs_time,tz="UTC")
+  obstime<-data.frame(year=tme$year+1900,month=tme$mon+1,day=tme$mday,hour=tme$hour+tme$min/60+tme$sec/3600)
+  climdata$obs_time<-NULL
+  spa<-micropoint::soilparams
+  ii<-which(spa$Soil.type==soiltype)
+  soilm<-soilmCpp(climdata,spa$rmu[ii],spa$mult[ii],spa$pwr[ii],spa$Smax[ii],spa$Smin[ii],spa$Ksat[ii],spa$a[ii])
+  soilm<-stats::spline(soilm,n=length(climdata$temp))$y
+  return(soilm)
 }
 

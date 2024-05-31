@@ -4,10 +4,10 @@
 \alias{GFlux}
 \title{Computes ground heat flux}
 \usage{
-GFlux(Tg, soilm, rho, Vm, Vq, Mc, RnetG, Gmax, Gmin, i, yearG = TRUE)
+GFlux(Tg, soilm, rho, Vm, Vq, Mc, Gmax = 200, Gmin = 200, i = 1, yearG = TRUE)
 }
 \arguments{
-\item{Tg}{a vector of ground surface tmeperatures (deg C)}
+\item{Tg}{a vector of ground surface temperatures (deg C)}
 
 \item{soilm}{a vector of fractional soil moistures}
 
@@ -18,8 +18,6 @@ GFlux(Tg, soilm, rho, Vm, Vq, Mc, RnetG, Gmax, Gmin, i, yearG = TRUE)
 \item{Vq}{Volumetric quartz fraction of soil}
 
 \item{Mc}{Mass fraction of clay}
-
-\item{RnetG}{Net flux density of radiation at soil surface (W/m^2)}
 
 \item{Gmax}{Maximum allowable value of daily G (included to ensure model convergence - W/m^2)}
 

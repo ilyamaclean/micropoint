@@ -10,7 +10,6 @@
   solar,
   twostreamp,
   smallleafp,
-  tground,
   groundem = 0.97,
   i,
   surfwet = 0.98

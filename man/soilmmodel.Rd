@@ -4,15 +4,15 @@
 \alias{soilmmodel}
 \title{Runs a simple two-layer soil model}
 \usage{
-soilmmodel(weather, soiltype)
+soilmmodel(climdata, soiltype)
 }
 \arguments{
-\item{weather}{a data.frame of hourly weather formatted as [climdata()]}
+\item{climdata}{a data.frame of hourly weather formatted as [climdata()]}
 
 \item{soiltype}{a character vector of soil type - one of those listed in [soilparams()]}
 }
 \value{
-a vector of hourly volumetrivc soil moisture fractions
+a vector of hourly volumetric soil moisture fractions
 }
 \description{
 Runs a simple two-layer soil model to derive soil moisture in upper 10 cm
