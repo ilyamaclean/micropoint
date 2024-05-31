@@ -1173,7 +1173,7 @@ canHL CanopyHL(double uh, double pk, radmodel2 swrad, radmodel3 lwrad, std::vect
         if (gHa < 0.25) gHa = 0.25;
         // Conductance for vapour
         double gS = stomcondCpp(swrad.PAR[i], gsmax, q50);
-        double gV = 1 / (1 / gHa + 1 / gV);
+        double gV = 1 / (1 / gHa + 1 / gS);
         if (gS == 0.0) gV = 0.0;
         // PenmanMonteith
         double lwabs = 0.5 * vegem * (lwrad.Rlwdown[i] + lwrad.Rlwup[i]);
