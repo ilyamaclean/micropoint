@@ -1,8 +1,8 @@
 ---
-title: "running-micropoint"
+title: "runningmicropoint"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{running-micropoint}
+  %\VignetteIndexEntry{runningmicropoint}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
