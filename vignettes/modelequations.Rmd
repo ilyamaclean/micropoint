@@ -1,0 +1,49 @@
+---
+title: "Model Equations"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{modelequations}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+## Energy balance of heat exchange surface
+Temperature and humidity above canopy are derived using standard Monin-Obukhov Similarity Theory (MOST, Foken 2006). Thus, the temperature of a vegetated surface is derived by treating canopy as a single vertically homogeneous layer of phytomass and equating the energy balance of this layer to zero such that
+
+\begin{equation}
+R_{abs}-\uparrow R_{lw}=H+L+G
+\end{equation}
+
+where $\small R_{abs}$ $\small (W·m^2)$ is absorbed radiation, $\small \uparrow R_{lw}$ $\small (W·m^2)$ is emitted radiation, $\small H$ $\small (W·m^2)$ sensible heat, $\small L$ $\small (W·m^2)$ latent heat and $\small G$ $\small (W·m^2)$ the rate of heat storage by the ground. In effect, the temperature of the canopy surface is determined by the sensible heat flux, but some of the incoming net radiation is also converted to latent heat or stored in the ground instead of heating or cooling the canopy. Each of these terms has a temperature-dependence, and to derive the temperature of the canopy surface, the energy balance equation is solved for temperature using the Penman-Monteith equation (Monteith 1965, Penman 1948) as detailed below. Before doing that, each of the terms is described in more detail.
+
+## Absorbed radiation
+Radiation absorbed by the canopy $\small R_{abs}$ is given by
+
+R_abs=(1-α) R_sw^↓+εR_lw^↓
+
+where R_sw^↓ is downward shortwave radiation, R_lw^↓ is downward longwave radiation and α is the canopy (and combined ground) albedo. Radiation absorbed by the ground surface is then given by
+
+R_abs^G=+ε_G R_G^(lw↓)+(1-α_G )(R_G^(b↓)+R_G^(d↓) )
+where R_G^(lw↓) is downward longwave radiation reaching the ground surface, R_G^(b↓) is the downward flux of direct radiation reaching the ground surface and α_G is the user-specified reflectance of the ground surface.
+
+Albedos
+From Sellers (1985) and Yuan et al (2017) albedos are derived using a two-stream radiative transfer model of the form
+
+-(dR_i^(d↑))/(dP_AI )=-(a+γ) R_i^(d↓)+sR_i^(b↓)
+(dR_i^(d↓))/(dP_AI )=-(a+γ) R_i^(d↓)+γR_i^(d↑)+s^' R_i^(b↓)
+
+where R_i^(d↑) is upward diffuse radiation intercepted by canopy element i (i.e. that reflected upward by foliage and the ground surface), R_i^(d↓) is downward diffuse radiation, R_i^(b↓) is downward direct radiation and P_AI  is the one-sided plant area per unit ground area. The terms in the equation represent the upward (top equation) and downward (bottom equation) attenuation of radiation through the canopy, the re-scattering of upward diffuse radiation in an upward direction (and vis-versa), and the upward scattering of downward radiation and vis-versa. There is also a contribution of direct radiation to the upward and downward diffuse fluxes, as once scattered, these approximate a diffuse flux. Here a=(1-ω) is the absorption coefficient for incoming diffuse radiation per unit leaf area, where ω=α_P+τ_P, and α_P is canopy element reflectance and τ_P is canopy element transmittance. The backward scattering coefficient γ is given by  0.5(ω+Jδ) where δ=α_P-τ_P and J is an integral function of the inclination distribution of canopy elements, approximated as J=cos⁡〖θ_P 〗 where θ_P is the mean inclination angle of canopy elements in the zenith direction. From Campbell (1990), θ_P=9.65(3+x)^1.65, where x is the ratio of average projected canopy elements on horizontal surfaces (x=0 for perfectly vertically-orientated foliage, x=∞ for perfectly horizontal orientated foliage and x=1 for a spherical distribution). The backward scattering coefficient s is given by 0.5(ω+Jδ⁄K)K and the forward scattering coefficient s^' is given by ωK-s where K is the extinction coefficient of the canopy. For a given zenith angle Z, from Campbell (1986) and Campbell & Norman (2012), K is approximated by
+
+K=√(x^2+tan^2⁡Z )/(x+1.774(x+1.182)-0.733)
+Canopy albedo is then derived as
+α=(α_d R_0^(d↓)+α_b R_0^(b↓))/(R_0^(d↓)+R_0^(b↓) )
+
+where R_0^(d↓) and R_0^(b↓) are diffuse and direct radiation above the canopy and α_d and α_b are the ‘white-sky’ and ‘black-sky’ albedos respectively given by α_d=p_1+p_2+〖F_G〗^(1/(K(Z=0))) and α_d=p_5⁄σ_P +p_6+p_7+〖F_G〗^((K(Z))/(K(Z=0))), where F_G is fraction of the canopy that is unobscured by vegetation when the sun is at its zenith. The derivation of p_(1..7) and σ_P are shown in Table S1. 
+

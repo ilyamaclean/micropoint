@@ -187,7 +187,7 @@ hr <- which.max(climdata$temp)
 # plot profile for air temperature for hottest hour 
 # inbuilt vegetation parameters for a forest used (paii estimated automatically)
 par(mfrow=c(1, 2))
-xx <- plotprofile(climdata, hr = 4091, plotout = "tair", forestparams, paii = NA, groundparams, lat =49.96807, long= -5.215668, n = 100)
+xx <- plotprofile(climdata, hr = 4091, plotout = "tair", forestparams, paii = NA, groundparams, lat =49.96807, long= -5.215668)
 # plot profile for leaf temperature for hr 4091
 xx <- plotprofile(climdata, hr = 4091, plotout = "tleaf", forestparams, paii = NA, groundparams, lat =49.96807, long= -5.215668)
 ```

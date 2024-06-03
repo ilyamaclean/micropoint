@@ -1173,8 +1173,8 @@ canHL CanopyHL(double uh, double pk, radmodel2 swrad, radmodel3 lwrad, std::vect
         if (gHa < 0.25) gHa = 0.25;
         // Conductance for vapour
         double gS = stomcondCpp(swrad.PAR[i], gsmax, q50);
-        double gV = 1 / (1 / gHa + 1 / gS);
-        if (gS == 0.0) gV = 0.0;
+        double gV = 0.0;
+        if (gS > 0.0) gV = 1 / (1 / gHa + 1 / gS);
         // PenmanMonteith
         double lwabs = 0.5 * vegem * (lwrad.Rlwdown[i] + lwrad.Rlwup[i]);
         double Rabs = swrad.Rswabs[i] + lwabs;
@@ -1393,8 +1393,14 @@ Rcpp::List SmallLeafOne(double reqhgt, double zref, double lat, double lon, std:
     double slope = groundp[1];
     double aspect = groundp[2];
     double groundem = groundp[3];
-    double Smax = groundp[4];
-    double Smin = groundp[5];
+    //double rho = groundp[4];
+    //double Vm = groundp[5];
+    //double Vq = groundp[6];
+    //double Mc = groundp[7];
+    //double b = groundp[8];
+    //double Psie = groundp[9];
+    double Smax = groundp[10];
+    double Smin = groundp[11];
     // Extract bigleafvars
     double Tc = bigleafvars[0]; // Canopy heat exchange surface temperature (deg C)
     double Tg = bigleafvars[1]; // Ground surface temperature (deg C)
@@ -1405,6 +1411,7 @@ Rcpp::List SmallLeafOne(double reqhgt, double zref, double lat, double lon, std:
     double sm = bigleafvars[6]; // Fractional volumetric soil moisture
     // Calculate theta
     double theta = (sm - Smin) / (Smax - Smin);
+    if (theta > 1.0) theta = 1.0;
     // Calculate variables at top of canopy
     if (hgt < 0.001) hgt = 0.001;
     double d = zeroplanedisCpp(hgt, pai);
