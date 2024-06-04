@@ -209,7 +209,7 @@ RunBigLeaf<-function(climdata,  vegp, groundp, lat, long, zref = 2, uref = zref,
   if (nn < 8760) yearG<-FALSE
   # Run big Leaf model
   microp<-BigLeafCpp(obstime,climdata,vegpp,groundpp,soilm,lat,long,dTmx,zref,maxiter,0.5,0.5,0.1,yearG)
-  class(bigleafp)<-"pointmicro"
+  class(microp)<-"pointmicro"
   return(microp)
 }
 
