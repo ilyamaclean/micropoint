@@ -23,18 +23,36 @@ R_{abs}-\uparrow R_{lw}=H+L+G
 
 where $\small R_{abs}$ $\small (W·m^2)$ is absorbed radiation, $\small \uparrow R_{lw}$ $\small (W·m^2)$ is emitted radiation, $\small H$ $\small (W·m^2)$ sensible heat, $\small L$ $\small (W·m^2)$ latent heat and $\small G$ $\small (W·m^2)$ the rate of heat storage by the ground. In effect, the temperature of the canopy surface is determined by the sensible heat flux, but some of the incoming net radiation is also converted to latent heat or stored in the ground instead of heating or cooling the canopy. Each of these terms has a temperature-dependence, and to derive the temperature of the canopy surface, the energy balance equation is solved for temperature using the Penman-Monteith equation (Monteith 1965, Penman 1948) as detailed below. Before doing that, each of the terms is described in more detail.
 
-## Absorbed radiation
+## Radiation
 Radiation absorbed by the canopy $\small R_{abs}$ is given by
 
-R_abs=(1-α) R_sw^↓+εR_lw^↓
+\begin{equation}
+R_{abs}=(1-\alpha) \downarrow R_{sw}+\varepsilon \downarrow R_{lw}
+\end{equation}
 
-where R_sw^↓ is downward shortwave radiation, R_lw^↓ is downward longwave radiation and α is the canopy (and combined ground) albedo. Radiation absorbed by the ground surface is then given by
+where $\small \downarrow R_{sw}$ is downward shortwave radiation, $\small \downarrow R_{lw}$ is downward longwave radiation, $\small \alpha$ is the canopy (and combined ground) albedo and $\small \varepsilon$ the emissivity of the canopy surface. 
 
-R_abs^G=+ε_G R_G^(lw↓)+(1-α_G )(R_G^(b↓)+R_G^(d↓) )
-where R_G^(lw↓) is downward longwave radiation reaching the ground surface, R_G^(b↓) is the downward flux of direct radiation reaching the ground surface and α_G is the user-specified reflectance of the ground surface.
+### Albedo
+The albedo of the vegetated surface is, in effect, the proportion of shortwave radiation that is reflected - i.e. total downward less than absorbed and dependent both on the fraction absorbed by the canopy and by underlying ground surface. Whereas the reflectance of a surface - the ratio of the radiant flux reflected from a material to the incident radiant flux is an innate property of the surface, the albedo depends on the angle of the reflecting surface relative to the solar beam. It changes therefore in relation to solar angles and also depending on what fraction of the radiation received by the surface is direct radiation relative to diffuse radiation. Since the surfaces reflecting radiation comprise both the surface of the vegetation and the surface of the underlying ground layer, it is contingent on both the reflectances of the ground and vegetations and transmission of radiation through the canopy, to reach the gorund surface.      
 
-Albedos
-From Sellers (1985) and Yuan et al (2017) albedos are derived using a two-stream radiative transfer model of the form
+From Sellers (1985) and Yuan et al (2017), but with adaptation allowing for radiation to pass through larger gaps in the canopy and for potential inclined ground surfaces, albedos are thus derived using a two-stream radiative transfer model as follows:
+
+
+\begin{equation}
+\alpha=f_{Rd} \alpha_d+(1-f_{Rd} \alpha_b)
+\end{equation}
+
+where $\small f_{Rd}$ is the fraction of diffusive radiation given by $\small f_{Rd}=\downarrow R_{dif}/\downarrow R_{sw}$ where $\small \downarrow R_{dif}$ is downward diffuse radiation. Here $\small \alpha_d$ and $\small \alpha_b$ are white-sky and blue-sky albedo respectively given by
+
+\begin{equation}
+\alpha_d=(1-f_{dg})(p_1+p_2)+f_{dg}
+\alpha_b=(1-f_{bg})(\frac{p_5}{\sigma_p}+p_6+p_7)+f_{bg}
+
+Here $\small p_1$ and $\small p_2$ are parameters of the two-stream model derived from canopy properties (see below) and $\small f_{dg}$ and (1-f_{bg}) are the fraction of direct and diffuse radiation passing through larger gaps in the canopy.
+
+
+
+
 
 -(dR_i^(d↑))/(dP_AI )=-(a+γ) R_i^(d↓)+sR_i^(b↓)
 (dR_i^(d↓))/(dP_AI )=-(a+γ) R_i^(d↓)+γR_i^(d↑)+s^' R_i^(b↓)
@@ -47,3 +65,10 @@ Canopy albedo is then derived as
 
 where R_0^(d↓) and R_0^(b↓) are diffuse and direct radiation above the canopy and α_d and α_b are the ‘white-sky’ and ‘black-sky’ albedos respectively given by α_d=p_1+p_2+〖F_G〗^(1/(K(Z=0))) and α_d=p_5⁄σ_P +p_6+p_7+〖F_G〗^((K(Z))/(K(Z=0))), where F_G is fraction of the canopy that is unobscured by vegetation when the sun is at its zenith. The derivation of p_(1..7) and σ_P are shown in Table S1. 
 
+
+
+
+Radiation absorbed by the ground surface is then given by
+
+R_abs^G=+ε_G R_G^(lw↓)+(1-α_G )(R_G^(b↓)+R_G^(d↓) )
+where R_G^(lw↓) is downward longwave radiation reaching the ground surface, R_G^(b↓) is the downward flux of direct radiation reaching the ground surface and α_G is the user-specified reflectance of the ground surface.
