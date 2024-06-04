@@ -77,6 +77,7 @@ solarposition<-function(lat,long,year,month,day,hour=12,merid=0,dst=0) {
   return(solar)
 }
 #' Internal function for calculating solar index
+#' @export
 .solarindex<- function(slope,aspect,solar) {
   i<-with(solar,cos(zen*pi/180)*cos(slope*pi/180)+sin(zen*pi/180)*sin(slope*pi/180)*cos((azi-aspect)*pi/180))
   i[i<0]<-0
