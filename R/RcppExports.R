@@ -9,6 +9,10 @@ solarindexCpp <- function(slope, aspect, zen, azi, shadowmask = FALSE) {
     .Call(`_micropoint_solarindexCpp`, slope, aspect, zen, azi, shadowmask)
 }
 
+clearskyradCpp <- function(year, month, day, lt, lat, lon, tc, rh, pk) {
+    .Call(`_micropoint_clearskyradCpp`, year, month, day, lt, lat, lon, tc, rh, pk)
+}
+
 zeroplanedisCpp <- function(h, pai) {
     .Call(`_micropoint_zeroplanedisCpp`, h, pai)
 }

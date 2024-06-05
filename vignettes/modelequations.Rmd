@@ -14,61 +14,175 @@ knitr::opts_chunk$set(
 )
 ```
 
+<style>
+body {
+text-align: justify}
+</style>
+<style>
+  .col2 {
+    columns: 2 200px;         /* number of columns and width in pixels*/
+    -webkit-columns: 2 200px; /* chrome, safari */
+    -moz-columns: 2 200px;    /* firefox */
+  }
+</style>
+<style>
+  .leg {
+  font-size: 12px;
+}
+</style>
+
 ## Energy balance of heat exchange surface
 Temperature and humidity above canopy are derived using standard Monin-Obukhov Similarity Theory (MOST, Foken 2006). Thus, the temperature of a vegetated surface is derived by treating canopy as a single vertically homogeneous layer of phytomass and equating the energy balance of this layer to zero such that
 
-\begin{equation}
-R_{abs}-\uparrow R_{lw}=H+L+G
-\end{equation}
+$$R_{abs}-R_{lw}^\uparrow=H+L+G$$
 
-where $\small R_{abs}$ $\small (W·m^2)$ is absorbed radiation, $\small \uparrow R_{lw}$ $\small (W·m^2)$ is emitted radiation, $\small H$ $\small (W·m^2)$ sensible heat, $\small L$ $\small (W·m^2)$ latent heat and $\small G$ $\small (W·m^2)$ the rate of heat storage by the ground. In effect, the temperature of the canopy surface is determined by the sensible heat flux, but some of the incoming net radiation is also converted to latent heat or stored in the ground instead of heating or cooling the canopy. Each of these terms has a temperature-dependence, and to derive the temperature of the canopy surface, the energy balance equation is solved for temperature using the Penman-Monteith equation (Monteith 1965, Penman 1948) as detailed below. Before doing that, each of the terms is described in more detail.
+where $\small R_{abs}$ $\small (W·m^2)$ is absorbed radiation, $\small R_{lw}^\uparrow$ $\small (W·m^2)$ is emitted radiation, $\small H$ $\small (W·m^2)$ sensible heat, $\small L$ $\small (W·m^2)$ latent heat and $\small G$ $\small (W·m^2)$ the rate of heat storage by the ground. In effect, the temperature of the canopy surface is determined by the sensible heat flux, but some of the incoming net radiation is also converted to latent heat or stored in the ground instead of heating or cooling the canopy. Each of these terms has a temperature-dependence, and to derive the temperature of the canopy surface, the energy balance equation is solved for temperature using the Penman-Monteith equation (Monteith 1965, Penman 1948) as detailed below. Before doing that, each of the terms is described in more detail.
 
 ## Radiation
 Radiation absorbed by the canopy $\small R_{abs}$ is given by
 
-\begin{equation}
-R_{abs}=(1-\alpha) \downarrow R_{sw}+\varepsilon \downarrow R_{lw}
-\end{equation}
+$$R_{abs}=(1-\alpha)R_{sw}^\downarrow+\varepsilon R_{lw}^\downarrow$$
 
-where $\small \downarrow R_{sw}$ is downward shortwave radiation, $\small \downarrow R_{lw}$ is downward longwave radiation, $\small \alpha$ is the canopy (and combined ground) albedo and $\small \varepsilon$ the emissivity of the canopy surface. 
+where $\small R_{sw}^\downarrow$ is downward shortwave radiation, $\small R_{lw}^\downarrow$ is downward longwave radiation, $\small \alpha$ is the canopy (and combined ground) albedo and $\small \varepsilon$ the emissivity of the canopy surface. Both downward longwave radiation and emissivity are provided as user inputs.
 
-### Albedo
-The albedo of the vegetated surface is, in effect, the proportion of shortwave radiation that is reflected - i.e. total downward less than absorbed and dependent both on the fraction absorbed by the canopy and by underlying ground surface. Whereas the reflectance of a surface - the ratio of the radiant flux reflected from a material to the incident radiant flux is an innate property of the surface, the albedo depends on the angle of the reflecting surface relative to the solar beam. It changes therefore in relation to solar angles and also depending on what fraction of the radiation received by the surface is direct radiation relative to diffuse radiation. Since the surfaces reflecting radiation comprise both the surface of the vegetation and the surface of the underlying ground layer, it is contingent on both the reflectances of the ground and vegetations and transmission of radiation through the canopy, to reach the gorund surface.      
+### Shortwave radiation and albedo
+The albedo of the vegetated surface is, in effect, the proportion of shortwave radiation that is reflected - i.e. total downward less than absorbed and dependent both on the fraction absorbed by the canopy and by underlying ground surface. Whereas the reflectance of a surface - the ratio of the radiant flux reflected from a material to the incident radiant flux is an innate property of the surface, the albedo depends on the angle of the reflecting surface relative to the solar beam. It changes therefore in relation to solar angles and also depending on what fraction of the radiation received by the surface is direct radiation relative to diffuse radiation. Since the surfaces reflecting radiation comprise both the surface of the vegetation and the surface of the underlying ground layer, it is contingent on both the reflectances of the ground and vegetation and transmission of radiation through the canopy, to reach the ground surface.      
 
-From Sellers (1985) and Yuan et al (2017), but with adaptation allowing for radiation to pass through larger gaps in the canopy and for potential inclined ground surfaces, albedos are thus derived using a two-stream radiative transfer model as follows:
+From Sellers (1985) and Yuan et al (2017), but with adaptation allowing for radiation to pass through larger gaps in the canopy and for potential inclined ground surfaces, albedos are thus derived using a two-stream radiative transfer model. The two-stream model is also used to derive the radiative flux within the canopy, later used to compute below canopy microclimate. We therefore describe the model in full.
+
+The underpinning assumption of a two-stream model is that solar radiation arrives at the top of the canopy in the form of either diffuse or direct radiation. Because the leaves are partially reflective and translucent, a portion of the direct radiation at any given point within the canopy is scattered in either an upward or downward direction, but because at that point it has interacted with multiple surfaces within the canopy it is essentially diffuse.The a portion of the diffuse radiation is likewise scattered both upward and downward. Consequently there are several radiation streams that need to be derived: (i) Downward direct, (ii) downward diffuse, (iii) upward diffuse, (iv) the contribution of downward direct to downward diffuse radiation and (v), the contribution of downward direct to upward diffuse. There is is no upward direct, as any radiation upward is assumed to be scattered and diffuse. The albedo is essentially determined form the upward and downward streams at the top of the canopy, but it is also possible to derive upward and downward streams within the canopy.
+
+### Downward direct radiation
+It is convenient to envisage the canopy being divided into multiple layers, each with a series of nodes $\small i$ situation at the top of each layer and numbered sequentially downward from the top of the canopy. Let us combine the effects of leafs and other canopy elements such as branches and tree tracks and let $\small P_i$ be the cumulative area of these canopy constituents per unit ground area (from the top of the canopy) to node $\small i$ and let $\small P_{i+1}$ be the cumulative area at the node below. From e.g. Campbell (1985), the attenuation of radiation at node $\small i$ is then described as $\small  R_i^{\downarrow b}=R_0^{\downarrow b}\exp(-KP_i)$ where $\small R_i^{\downarrow b}$ is the downward flux of direct radiation perpendicular to the solar beam at node $\small i$, $\small \downarrow R_0^{\downarrow b}$ the  is the downward flux of direct radiation perpendicular to the solar beam at the top of the canopy, and $\small K$ is an radiation extinction coefficient, which depends on the inclination angle of canopy elements relative to the solar beam (vertically orientated leaves will block out more sunlight when the sun is low above the horizon). 
+
+However, rather than defining each canopy element individually, it is more convenient to characterise the canopy as comprising surfaces that have a continuous distribution of inclinations. From Campbell (1986) and Campbell (1990), it is reasonable to assume that the real distribution of inclinations can be approximated by assuming they conform to a prolate or oblate spheroid distribution. By adjusting the ratio of horizontal to vertical axis of the spheroid, canopy element angle distributions of any canopy from erectophile to planophile can be simulated. Defining $\small x$ as the ratio of average projected elements on horizontal surfaces, such that $\small x=0$ for a vertical distribution, $\small x=\infty$ for a horizontal distribution and $\small x=1$ for a spherical distribution, $\small K$ is approximated as
+
+$$K\approx\frac{\sqrt{x^2+\tan^2Z}}{x+1.774(x+1.182)^-0.733}$$
+
+where $\small Z$ is the solar zenith angle (see below). In the special case where $\small x=1$, the equation can be simplified to $\small 1/(2\cos Z)$ and when $\small x=0$, $\small K=2/(\pi\tan(0.5\pi-Z))$. When $\small x\to\infty$, $\small K\to1$ and therefore does not depend on the sun’s position.
+
+This assumes canopy elements are small and randomly distributed. In reality, canopy elements are non-randomly distributed and radiation can penetrate through larger gaps in he canopy unimpeded. We thus define a gap fraction ($\small F_G$) representing the fraction of the canopy that is unobscured by vegetation when the sun is at its zenith. The probability of the sunbeam's path through the canopy being unobscured diminishes as the optical path length increases, but the extent to which it does depends on the shape of the vegetation clumps. It is assumed that the shape of the clumps is dictated by the inclination angles of leaves such that canopies with planophile leafs will typically have planophile clumps of vegetation. Under these circumstances $\small K_c = K(Z) / K(0)$ where $\small K(Z)$ and $\small K(0)$ are the values of $\small K$ derived using the equation above, when the solar zenith angles are $\small Z$ and $\small 0$ respectively. 
+
+A correction must also be applied when the canopy overlies an inclined ground surface. While it can be assumed, for a given habitat type, that the inclination of canopy elements is unaffected by ground surface inclination, the optical path length through the canopy will be shorter for ground surfaces facing in the direction of the sun. A full equation for the transmission of direct radiation through the canopy is thus given by 
+
+$$R_i^{\downarrow b}=R_0^{\downarrow b}[F_G+(1-F_G)\exp(-\tilde{K}\tilde{P_i})]$$
+
+where $\small\tilde{P_i}$ is the cumulative canopy element area now concentrated into 'non-gaps' given by $\small\tilde{P_i}=P_i/(1-F_G)$ and $\small \tilde K=K\cos Z/s_c$ and $\small s_c$ is the fraction of direct beam radiation intercepted by an inclined surface given by 
+
+$$s_c=\cos Z \cos s+\sin Z\sin s\cos(\Lambda_s-\Lambda)$$ 
+$\small s$ the slope angle of the surface measured from horizontal, $\small \Lambda_s$ the solar azimuth (direction from north) and $\small \Lambda$ the aspect of the surface (relative to north). Slope and aspect are given as user inputs.
+
+### The sun's position
+To calculate radiation absorption in real environments, it is necessary to calculate the solar zenith and azimuth. The solar zenith ($\small Z$) depends on latitude $\small \phi_y$ and time as follows
+
+$$\cos Z=\sin\delta\sin \phi_y+\cos\delta\cos\phi_y\cos h_s$$
+where $\small h_s$ is the hour angle in solar time ($\small t_s$) given by
+
+$$h_s=(\pi⁄12)(t_s-12)$$
+and $\small \delta$ is the current declination angle of the sun calculated from the Astronomical Julian day ($\small j$) as
+
+$$\delta=\frac{\pi 23.5}{180} \cos\lgroup 2\pi\frac{j-159.5}{365.25}\rgroup$$
+The Astronomical Julian day is the continuous count of days since the beginning of the Julian period. The date 1^st^ Jan 2022 has an Astronomical Julian day of 2459581. The solar time is calculated from longitude ($\small \phi_x$) and local time ($\small t_l$) as 
+
+$$t_s=t_l+\frac{4(\phi_x-\phi_m)-\Delta_t}{60}$$
+where $\small \phi_m$ is the longitude of the local time zone meridian (i.e. 0 for Greenwich Mean Time) and $\small \Delta_t$ is the equation of time – a correction applied to account obliquity due to tilt of the Earth's rotational axis and for the east-west component of the analemma, namely the angular offset of the Sun from its mean position on the celestial sphere due the eccentricity of the Earth's orbit. These two factors have different wavelengths, amplitudes and phases that vary over geological timescales. From Milne (1921)
+
+$$\Delta_t=-7.659\sin(M+9.683)\sin(2M-3.5932)$$
+where $\small M$ is the mean anomaly given by $\small 6.24004077+0.01720197(j-2451545)$. 
+
+The solar azimuth ($\small \Lambda_s$) is calculated as
+
+$$\sin\Lambda_s=-\frac{\sin h_s\cos\delta}{\sin Z}$$
+### Diffuse radiation
+The diffuse radiation streams can be written using two sets of differential equations: 
+
+$$-\frac{dR_i^{d\uparrow}}{dP}=-(a+\gamma)R_i^{d\downarrow}+sR_i^{b\downarrow}$$
+$$\frac{dR_i^{d\downarrow}}{dP}=-(a+\gamma)R_i^{d\downarrow}+\gamma R_i^{d\uparrow}+s^,R_i^{b\downarrow}$$
+Here $\small R_i^{d\uparrow}$ is upward diffuse radiation (i.e. that reflected upward by canopy elements and the ground surface, $\small R_i^{d\downarrow}$ is downward diffuse radiation (analogous to the processes described for direct radiation above) and $\small R_i^{b\downarrow}$ is downward direct radiation quantified as in equation (2.6b).
+
+Each of the equation's components describes a different physical process. In both equations, the left hand term describes the overall attenuation of upward or downward radiation through the canopy. The first right hand term in the top equation describes the fraction of upward diffuse radiation that is re-scattered in upward direction and the equivalent in the bottom equation describes the fraction of downward diffuse radiation that is re-scattered downward. $\small a$ is the absorption coefficient for incoming diffuse radiation per unit leaf area and $\small \gamma$ is the backward scattering coefficient. The second term on the right hand side in the top equation describes the fraction of the downward diffuse radiation that is converted into an upward diffuse flux by back-scattering and the equivalent in the bottom equation describes the fraction of the upward diffuse radiation that is converted into an downward diffuse flux by back-scattering.The final term on the right hand side of (1a) refers to the contribution to the upward diffuse flux by the scattering of direct radiation penetrating into the canopy to $\small i$. The equivalent in (1b) is the contribution from scattering of direct radiation to the downward diffuse flux. $\small s$ and $\small s^,$ are thus the backward and forward scattering coefficient for direct radiation respectively.
+
+$\small a$ is given by $\small a=(1-\omega)$ where $\small \omega$ is the single scattering albedo of individual canopy elements given by $\small \omega=\alpha_P+\tau_P$ where $\small \alpha_P$ is canopy element reflectance and $\small \tau_P$ is canopy element transmittance, both provided as user inputs. 
+
+$\small \gamma$ is given by $\small \gamma=0.5(\omega+J\delta)$ where $\small \delta$ is given by $\small \delta=\alpha_P-\tau_P$ and  $\small J$ is an integral function of the inclination distribution of canopy elements approximated by $\small J=\cos \hat{\Theta}_P$ where $\small \hat{\Theta}_P$ is the mean inclination angle of canopy elements in the zenith direction. From Campbell (1990) $\small \hat{\Theta}_P=9.65(3+x)^{1.65}$.  
+
+From Verhoef (1984) and Pinty et al (2006) $\small s=0.5(\omega+\frac{J\delta}{K})K$
+
+The largest difference is observed with the Dickinson-Seller model in which single scattering albedo is used to derive $\small s$. However, deriving the single scattering albedo is not straightforward and solution offered in Sellers (1985)  underestimates $\small s$ in comparison to other methods particularly when leaf transmittance is low (Yuan *et al*. 2017). the forward scattering coefficient is given by $\small s^,=\omega K-s$.
+
+Solving the differential equations for a two-stream model is not entirely straightforward, but is achieved by setting boundary conditions at the bottom and the top of the canopy. A full explanation of their derivation is given in Sellers (1985) and Yuan et al (2017). Only the final equations are presented here. These are as follows:
+
+$$R_i^{d\uparrow}=R_0^{d\downarrow}[(1-F_G^{\frac{1}{K(0)}})(p_1\exp(-h\tilde{P_i})+p_2\exp(h\tilde{P_i}))+\alpha_GF_G^{\frac{1}{K(0)}}]+R_b^{d\uparrow}$$
+$$R_i^{d\downarrow}=R_0^{d\downarrow}[p_3\exp(-h\tilde{P_i})+p_4\exp(h\tilde{P_i})+F_G^{\frac{1}{K(0)}}]+R_b^{d\downarrow}$$
+where $\small R_i^{d\uparrow}$ is upward diffuse radiation and $\small R_i^{d\downarrow}$ is downward diffuse at $\small i$, $R_0^{d\downarrow}$ is downward diffuse at the top of the canopy, $\small F_G^{\frac{1}{K(0)}}$ represents radiation passing through canopy gaps, $\small \alpha_G$ is ground reflectance and $\small R_b^{d\uparrow}$ and $\small R_b^{d\downarrow}$ are the contribution of direct radiation to the diffuse upward and downward flux respectively given by
+
+$$R_b^{d\uparrow}=R_0^{b\downarrow}[(1-F_G^{\frac{1}{K(0)}})(\frac{p_5}{\sigma_p}\exp(-K\tilde{P_i})+p_6\exp(-h\tilde{P_i})+p_7\exp(h\tilde{P_i}))+\alpha_GF_G^{\frac{1}{K(0)}}]$$
+and 
+
+$$R_b^{d\downarrow}=R_0^{b\downarrow}[(1-F_G^{\frac{1}{K(0)}})(\frac{p_8}{\sigma_p}\exp(-K\tilde{P_i})+p_9\exp(-h\tilde{P_i})+p_{10}\exp(h\tilde{P_i})+F_G^{\frac{1}{K(0)}}]$$
+and the equations for calculating albedos are given by 
+
+$$\alpha_d=(1-F_G^{\frac{1}{K(0)}})(p_1+p_2)+F_G^{\frac{1}{K(0)}}$$
+and 
+
+$$\alpha_b=(1-F_G^{K_c})(\frac{p_5}{\sigma_p}+p_6+p_7)+F_G^{K_c}$$
+where $\small \alpha_d$ is white-sky albedo (that reflecting diffuse radiation) and $\small \alpha_b$ is blue-sky radiation (That reflecting direct radiation) The total albedo is given by
+
+$$\alpha=f_d\alpha_d+(1-f_d)\alpha_b$$
+where $\small f_d$ is the diffuse radiation fraction given by $\small R_0^{d\downarrow}/R_{sw}^\downarrow$.
+
+The derivation of the terms $p_{1..10}$ is given below. 
+
+<div class="col2">
+
+**Diffuse components**:  
+$$\small p_1=\frac{\gamma}{D_1S_1}(u_1-h)$$    
+$$\small p_2=\frac{-\gamma S_1}{D_1}(u_1+h)$$      
+$$\small p_3=\frac{1}{D_2S_1}(u_2+h)$$    
+$$\small p_4=-\frac{S_1}{D_2}(u_2-h)$$  
+$$\small D_1=\frac{1}{S_1}(\alpha+\gamma+h)(u_1-h)-S_1(\alpha+\gamma-h)(u_1-h)$$  
+$$\small D_2=\frac{1}{S1}(u_2+h)-S_1(u_2-h)$$  
+$$\small S_1=\exp(-hP_{AI})$$  
+$$\small S_2=\exp(-KP_{AI})$$  
+$$\small u_1=\alpha_p+\gamma\lgroup1-\frac{1}{\alpha_G}\rgroup$$  
+$$\small u_2=\alpha_p+\gamma(1-\alpha_G)$$  
+$$\small h=\sqrt{a^2+2a\gamma}$$  
+**Direct components**:  
+$$\small p_5=-s(a+\gamma-K)-\gamma s^,$$  
+$$\small p_6=\frac{1}{D_1}[\frac{v_1}{S_1}(u_1-h)-S_2v_2(a+\gamma-h)]$$  
+$$\small p_7=-\frac{1}{D_1}[v_1S_1(u_1+h)-S_2v_2(a+\gamma+h)]$$  
+$$\small p_8=s^,(a+\gamma+K)-\gamma s$$  
+$$\small p_9=-\frac{1}{D_2}[\frac{p_8}{\sigma_pS_1}(u_2+h)+v_3]$$  
+$$\small p_{10}=-\frac{1}{D_2}[\frac{p_8S_1}{\sigma_p}(u_2-h)+v_3]$$
+$$\small v_1=s-\frac{p_5(a+\gamma+K)}{\sigma_p}$$  
+$$\small v_2=s-\gamma-\frac{p_5}{\sigma_p}(u_1+K)$$  
+$$\small v_3=S_2\lgroup s^,+\gamma\alpha_G^*-\frac{p_8}{\sigma_p}(u_2-K)\rgroup$$  
+$$\small \sigma_p=K^2+a^2-(a+\gamma)^2$$  
+$$\small $$     
+
+</div>
+
+Here $\small \alpha^*_G$ is the bluesky albedo of the gorund surface, effectively the the ground reflectance $\small \alpha_G$ adjusted for inclination given by $\small \alpha_G\cos Z/s_c$  
 
 
-\begin{equation}
-\alpha=f_{Rd} \alpha_d+(1-f_{Rd} \alpha_b)
-\end{equation}
+### Longwave and emitted radiation
+Leafs and other elements of the canopy typically have very low reflectance to longwave radiation so there is limited scattering of longwave radiation. In consequence, the longwave radiation streams within the canopy can be thought of as originating from three sources. Firstly from the ground surface, where incident longwave radiation at any given height below canopy is determined by ground temperature and the tranmission of radiation from the ground surface. The second is from all the individual canopy elements, which in turn is determined by the temperature of those surfaces and tranmission from those surfaces. The third is downward from the sky, which is determined by the effective sky temperature and tranmission from the sky. 
 
-where $\small f_{Rd}$ is the fraction of diffusive radiation given by $\small f_{Rd}=\downarrow R_{dif}/\downarrow R_{sw}$ where $\small \downarrow R_{dif}$ is downward diffuse radiation. Here $\small \alpha_d$ and $\small \alpha_b$ are white-sky and blue-sky albedo respectively given by
+Dividing the canopy into $\small n$ layers and defining $\small \Delta P_i$ as the total one sided plant area within a layer $\small i$, the downward flux of radiation $\small R_j^{\downarrow lw}$ at $\small j$ is given by
 
-\begin{equation}
-\alpha_d=(1-f_{dg})(p_1+p_2)+f_{dg}
-\alpha_b=(1-f_{bg})(\frac{p_5}{\sigma_p}+p_6+p_7)+f_{bg}
+$$R_j^{\downarrow lw}=(1-F_G^{\frac{1}{K(0)}})\tau_{j,h}R_{lw}^\downarrow+F_G^{\frac{1}{K(0)}}+\sum_{i=j}^{i=n}\Delta \tilde{P}_i \tau_{i,j}\varepsilon_i\sigma T_i^4)$$
+and the upward flux $\small R_j^{\uparrow lw}$ is given by
 
-Here $\small p_1$ and $\small p_2$ are parameters of the two-stream model derived from canopy properties (see below) and $\small f_{dg}$ and (1-f_{bg}) are the fraction of direct and diffuse radiation passing through larger gaps in the canopy.
+$$R_j^{\uparrow lw}=(1-F_G^{\frac{1}{K(0)}'})\tau_{0,j}\varepsilon_G\sigma T_G^4+F_G^{\frac{1}{K(0)}'}+\sum_{i=0}^{i=j}\Delta \tilde{P}_i \tau_{i,j}\varepsilon_i\sigma T_i^4)$$
+where $\small F_G^{\frac{1}{K(0)}'}$ is transmission of radiation through larger gaps in the canopy from the ground surface, $\small \tau_{0,j}$ is transmission from the ground surface to $\small j$ given by $\small \exp(-\tilde{P}_{0,j})$ where $\small \tilde{P}_{0,j}$ is the total one sided plant area between $\small 0$ and $\small j$, $\small \tau_{j,h}$ is transmission from the top of the canopy at height $\small h$ to $\small j$ given by $\small \exp(-\tilde{P}_{j,h})$ where $\small \tilde{P}_{j,h}$ is the total one sided plant area between $\small j$ and $\small h$ and $\small \tau_{i,j}$ is transmission between $\small i$ and $\small j$ given by $\small \exp(-\tilde{P}_{i,j})$ where $\small \tilde{P}_{i,j}$ is the total one sided plant area between $\small i$ and $\small j$. $\small \varepsilon_G$ and $\small \varepsilon_i$ are  the emissivities of the ground surface and canopy elements respectively, $\small \sigma$ the Stefan–Boltzmann constant and $\small T_G$ and $\small T_i$ are absolute temperatures of the ground surface and canopy elements respectively in Kelvin. Here plant areas $\small \tilde{P}$ refer to the plant areas concentrated into non-gaps.
 
+In order to calculate the longwave radiation incident on a canopy element one must know the vertical temperature profile of canopy elements, but in order to calculate this, one must know the longwave radiation absorbed by that element. Resultantly the model is run iteratively.
 
+Emitted radiation is simply given by 
 
+$$R_{lw}^\uparrow=\varepsilon_v\sigma T_C^4$$
+where $\small \varepsilon_v$ is emissivity of the canopy surface and $\small T_C$ the absolute temperature of the canopy surface.
 
+## Sensible Heat
+From Fourier’s and Fick’s laws, the diffusive eddy transport of heat is described by $\small H=\tilde{\rho}c_p(dT/dz)$ where $\small \tilde{\rho}$ is the molar density of air ($\small mol·m^{-3}$), $\small dT⁄dz$ the rate of change in temperature $\small T$ ($\small K$) with height $\small z$ ($\small m$) and $\small K_H$ is eddy thermal diffusivity ($\small m^2·s^{-1}$). However, in practical terms, as reference air temperature (i.e. that recorded by a weather station) is measured at some height above canopy, it is more convenient to describe the sensible flux in the form $\small H=(\tilde{\rho}c_)⁄r_{Ha})(T_H-T_A)$ where $\small r_{Ha}$ is the resistance to heat transfer ($s·m^{-1}$), the average of the inverse of thermal diffusivity derived by integration between two heights.
 
--(dR_i^(d↑))/(dP_AI )=-(a+γ) R_i^(d↓)+sR_i^(b↓)
-(dR_i^(d↓))/(dP_AI )=-(a+γ) R_i^(d↓)+γR_i^(d↑)+s^' R_i^(b↓)
-
-where R_i^(d↑) is upward diffuse radiation intercepted by canopy element i (i.e. that reflected upward by foliage and the ground surface), R_i^(d↓) is downward diffuse radiation, R_i^(b↓) is downward direct radiation and P_AI  is the one-sided plant area per unit ground area. The terms in the equation represent the upward (top equation) and downward (bottom equation) attenuation of radiation through the canopy, the re-scattering of upward diffuse radiation in an upward direction (and vis-versa), and the upward scattering of downward radiation and vis-versa. There is also a contribution of direct radiation to the upward and downward diffuse fluxes, as once scattered, these approximate a diffuse flux. Here a=(1-ω) is the absorption coefficient for incoming diffuse radiation per unit leaf area, where ω=α_P+τ_P, and α_P is canopy element reflectance and τ_P is canopy element transmittance. The backward scattering coefficient γ is given by  0.5(ω+Jδ) where δ=α_P-τ_P and J is an integral function of the inclination distribution of canopy elements, approximated as J=cos⁡〖θ_P 〗 where θ_P is the mean inclination angle of canopy elements in the zenith direction. From Campbell (1990), θ_P=9.65(3+x)^1.65, where x is the ratio of average projected canopy elements on horizontal surfaces (x=0 for perfectly vertically-orientated foliage, x=∞ for perfectly horizontal orientated foliage and x=1 for a spherical distribution). The backward scattering coefficient s is given by 0.5(ω+Jδ⁄K)K and the forward scattering coefficient s^' is given by ωK-s where K is the extinction coefficient of the canopy. For a given zenith angle Z, from Campbell (1986) and Campbell & Norman (2012), K is approximated by
-
-K=√(x^2+tan^2⁡Z )/(x+1.774(x+1.182)-0.733)
-Canopy albedo is then derived as
-α=(α_d R_0^(d↓)+α_b R_0^(b↓))/(R_0^(d↓)+R_0^(b↓) )
-
-where R_0^(d↓) and R_0^(b↓) are diffuse and direct radiation above the canopy and α_d and α_b are the ‘white-sky’ and ‘black-sky’ albedos respectively given by α_d=p_1+p_2+〖F_G〗^(1/(K(Z=0))) and α_d=p_5⁄σ_P +p_6+p_7+〖F_G〗^((K(Z))/(K(Z=0))), where F_G is fraction of the canopy that is unobscured by vegetation when the sun is at its zenith. The derivation of p_(1..7) and σ_P are shown in Table S1. 
-
-
-
-
-Radiation absorbed by the ground surface is then given by
-
-R_abs^G=+ε_G R_G^(lw↓)+(1-α_G )(R_G^(b↓)+R_G^(d↓) )
-where R_G^(lw↓) is downward longwave radiation reaching the ground surface, R_G^(b↓) is the downward flux of direct radiation reaching the ground surface and α_G is the user-specified reflectance of the ground surface.

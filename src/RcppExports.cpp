@@ -41,6 +41,25 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// clearskyradCpp
+std::vector<double> clearskyradCpp(std::vector<int> year, std::vector<int> month, std::vector<int> day, std::vector<double> lt, double lat, double lon, std::vector<double> tc, std::vector<double> rh, std::vector<double> pk);
+RcppExport SEXP _micropoint_clearskyradCpp(SEXP yearSEXP, SEXP monthSEXP, SEXP daySEXP, SEXP ltSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP tcSEXP, SEXP rhSEXP, SEXP pkSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::vector<int> >::type year(yearSEXP);
+    Rcpp::traits::input_parameter< std::vector<int> >::type month(monthSEXP);
+    Rcpp::traits::input_parameter< std::vector<int> >::type day(daySEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type lt(ltSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type tc(tcSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type rh(rhSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type pk(pkSEXP);
+    rcpp_result_gen = Rcpp::wrap(clearskyradCpp(year, month, day, lt, lat, lon, tc, rh, pk));
+    return rcpp_result_gen;
+END_RCPP
+}
 // zeroplanedisCpp
 double zeroplanedisCpp(double h, double pai);
 RcppExport SEXP _micropoint_zeroplanedisCpp(SEXP hSEXP, SEXP paiSEXP) {
@@ -391,6 +410,7 @@ END_RCPP
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_solpositionCpp", (DL_FUNC) &_micropoint_solpositionCpp, 6},
     {"_micropoint_solarindexCpp", (DL_FUNC) &_micropoint_solarindexCpp, 5},
+    {"_micropoint_clearskyradCpp", (DL_FUNC) &_micropoint_clearskyradCpp, 9},
     {"_micropoint_zeroplanedisCpp", (DL_FUNC) &_micropoint_zeroplanedisCpp, 2},
     {"_micropoint_roughlengthCpp", (DL_FUNC) &_micropoint_roughlengthCpp, 4},
     {"_micropoint_dpsimCpp", (DL_FUNC) &_micropoint_dpsimCpp, 1},

@@ -1,3 +1,124 @@
+#' @title runs checks on microclimate input data
+#' @description The function `runchecksfun` runs checks on the microclimate model
+#' inputs
+#' @param climdata a data.frame of hourly weather as in the example dataset
+#' `climdata` (see details)
+#' @param vegp an object of class vegparams or forestparams formatted as for the inbuilt example
+#' datasets `vegparams` or `forestparams` (see details).
+#' @param groundp an object of class groundparams formatted as for the inbuilt
+#' example dataset `groundparams`.
+#' @param latitude (decimal degrees) - used for radiation checks
+#' @param longitude (decimal degrees) - used for radiation checks
+#' @details this function runs checks on provided data testing whether provided data lie within plausable ranges
+#' and returning errors or warnings accordingly. The original data are returned as a list with
+#' some values capped if checks fail.
+runchecksfun <- function(climdata, vegp, groundp, lat, long) {
+  # run checks in vegp
+  if (vegp$h < 0) stop("vegp$h must be positive")
+  if (vegp$pai < 0) stop("vegp$pai must be positive")
+  if (vegp$pai > 50) warning("vegp$pai seems too high")
+  if (vegp$x < 0) stop("vegp$x must be positive")
+  if (vegp$clump < 0) stop("vegp$clump must be between 0 and 1")
+  if (vegp$clump > 1) stop("vegp$clump must be between 0 and 1")
+  if (vegp$lref < 0) stop("vegp$lref must be between 0 and 1")
+  if (vegp$lref > 1) stop("vegp$lref must be between 0 and 1")
+  if (vegp$ltra < 0) stop("vegp$ltra must be between 0 and 1")
+  if (vegp$ltra > 1) stop("vegp$ltra must be between 0 and 1")
+  if (vegp$ltra+vegp$lref > 1) stop("vegp$ltra + vegp$lref cannot be greater than 1")
+  if (vegp$leafd > 5) warning("vegp$leafd seems too large")
+  if (vegp$em < 0) stop("vegp$em must be between 0 and 1")
+  if (vegp$em > 1) stop("vegp$em must be between 0 and 1")
+  if (vegp$gsmax < 0) stop("vegp$gsmax cannot be negative")
+  if (vegp$gsmax < 0.01) warning("vegp$gsmax seems low")
+  if (vegp$gsmax > 2) warning("vegp$gsmax seems high")
+  if (vegp$q50 < 0) stop("vegp$q50 cannot be negative")
+  if (vegp$q50 > 500) warning("vegp$q5 seems high")
+  if (length(vegp$skew) > 0) {
+    if (vegp$skew<0) stop("vegp$skew cannot be negative")
+    if (vegp$skew>10) stop("vegp$skew cannot exceed 10")
+  }
+  if (length(vegp$spread) > 0) {
+    if (vegp$spread<0) stop("vegp$spread cannot be negative")
+    if (vegp$spread>100) stop("vegp$spread cannot exceed 100")
+  }
+  # run checks in groundp
+  if (groundp$gref < 0.0001) stop("groundp$gref cannot be less than 0.0001")
+  if (groundp$gref > 1) stop("groundp$gref cannot be greater than 1")
+  if (groundp$slope < 0) stop("groundp$slope cannot be negative")
+  if (groundp$slope > 180) stop("groundp$slope cannot be grewater than 180")
+  if (groundp$slope > 90) warning("model not tested with groundp$slope > 90")
+  if (groundp$aspect < 0) {
+    warning("aspect adjusted to range 0-360 degrees")
+    groundp$aspect<-groundp$aspect%%360
+  }
+  if (groundp$aspect > 360) {
+    warning("aspect adjusted to range 0-360 degrees")
+    groundp$aspect<-groundp$aspect%%360
+  }
+  if (groundp$em < 0) stop("groundp$em must be between zero and 1")
+  if (groundp$em > 1) stop("groundp$em must be between zero and 1")
+  if (groundp$rho < 0) stop("groundp$rho cannot be negative")
+  if (groundp$rho > 2.5) warning("groundp$rho seems high. Check units")
+  if (groundp$Vm < 0) stop("groundp$Vm must be between 0 and 1")
+  if (groundp$Vm > 1) stop("groundp$Vm must be between 0 and 1")
+  if (groundp$Vq < 0) stop("groundp$Vq must be between 0 and 1")
+  if (groundp$Vq > 1) stop("groundp$Vq must be between 0 and 1")
+  if (groundp$Mc < 0) stop("groundp$Mc must be between 0 and 1")
+  if (groundp$Mc > 1) stop("groundp$Mc must be between 0 and 1")
+  if (groundp$b < 0) stop("groundp$b must be positive")
+  if (groundp$b > 10) warning("groundp$b seems high")
+  if (groundp$Psie > 0) stop("groundp$Psie must be negative")
+  if (groundp$Smax < 0) stop("groundp$Smax must be between 0 and 1")
+  if (groundp$Smax > 1) stop("groundp$Smax must be between 0 and 1")
+  if (groundp$Smin < 0) stop("groundp$Smin must be between 0 and 1")
+  if (groundp$Smin > 1) stop("groundp$Smin must be between 0 and 1")
+  if (groundp$Smin > groundp$Smax) stop("groundp$Smin cannot be greater than groundp$Smax")
+  if (groundp$alpha < 0) stop("groundp$alpha must be positive")
+  if (groundp$alpha > 0.2) warning("groundp$alpha seems high")
+  if (groundp$n < 0) stop("groundp$n must be positive")
+  if (groundp$n > 5) warning("groundp$n seems high")
+  if (groundp$Ksat < 0) stop("groundp$Ksat must be positive")
+  if (groundp$Ksat > 2000) warning("groundp$Ksat seems high. Check units")
+  # Check climate data
+  tme<-as.POSIXlt(climdata$obs_time,tz="UTC")
+  if (min(climdata$temp) < -65) warning("Minumum temperature seems low")
+  if (max(climdata$temp) > 65) warning("Maximum temperature seems high")
+  if (min(climdata$relhum) < 15) warning("Minumum relative humidity seems low")
+  if (min(climdata$relhum) < 0) stop("Relative humidity cannot be negative")
+  if (max(climdata$relhum) > 100) {
+    warning("Maximum relative humidity cannot exceed 100. Capping at 100")
+    s<-which(climdata$relhum>100)
+    climdata$relhum[s]<-100
+  }
+  if (max(climdata$relhum) > 100) {
+    warning("Maximum relative humidity cannot exceed 100. Capping at 100")
+    s<-which(climdata$relhum>100)
+    climdata$relhum[s]<-100
+  }
+  if (min(climdata$pres) < 80) warning("Minumum pressure seems low. OK if site at high altitude")
+  if (max(climdata$pres) > 108.4) warning("Maximum pressure seems high")
+  lt<-tme$hour+tme$min/60+tme$sec/3600
+  csr<-clearskyradCpp(tme$year+1900,tme$mon+1,tme$mday,lt,lat,long,climdata$temp,climdata$relhum,climdata$pres)
+  s<-which(climdata$swdown > csr)
+  if (length(s) > 0) {
+    warning("Downward shortwave radiation higher than expected clear-sky radiation. Capping at clear-sky value")
+    climdata$swdown[s]<-csr[s]
+  }
+  s2<-which(climdata$difrad > climdata$swdown)
+  if (length(s2) > 0) {
+    warning("Diffuse radiation higher than total downward radiation. Capping at downward radiation")
+    climdata$difrad[s2]<-climdata$swdown[s2]
+  }
+  lwup<-5.67*10^-8*(climdata$temp+273.15)^4
+  s<-which(climdata$lwdown > (lwup*1.1))
+  if (length(s) > 0) warning("Downward longwave radiation seems high given air temperature")
+  if (min(climdata$windspeed) < 0) stop("Wind speed cannot be negative")
+  if (max(climdata$windspeed) > 55) warning("Maximum wind speed seems high")
+  if (min(climdata$precip) < 0) stop("Precipitation cannot be negative")
+  if (max(climdata$precip) > 150) warning("Maximum precipitation rate seems high")
+  return(list(climdata=climdata,vegp=vegp,gorundp=groundp))
+}
+
 #' @title runs point microclimate model
 #' @description The function `runpointmodel` runs the point microclimate model
 #' above or below ground.
@@ -61,8 +182,14 @@
 #'   lat =49.96807, long= -5.215668)
 #' plot(mout$tair,type="l")
 runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, zref = 2, uref = zref, soilm = NA, surfwet = NA, dTmx = 25,
-                        maxiter = 20, n = 20) {
+                        maxiter = 20, n = 20, runchecks = FALSE) {
 
+  if (runchecks) {
+    rcd<-runchecksfun(climdata, vegp, groundp, lat, long)
+    climdata<-rcd$climdata
+    vegp<-rcd$vegp
+    groundp<-rcd$groundp
+  }
   # generate paii if doesn't exist'
   if (class(paii) == "logical") {
     paii<-PAIgeometry(vegp$pai, vegp$skew, vegp$spread, n)

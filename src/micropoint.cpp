@@ -79,7 +79,33 @@ double solarindexCpp(double slope, double aspect, double zen, double azi, bool s
                 sin(slope * M_PI / 180) * cos((azi - aspect) * M_PI / 180);
         }
     }
+    if (si < 0.0) si = 0.0;
     return si;
+}
+// ** Calculate clear sky radiation ** //
+// [[Rcpp::export]]
+std::vector<double> clearskyradCpp(std::vector<int> year, std::vector<int> month, std::vector<int> day,
+    std::vector<double> lt, double lat, double lon, std::vector<double> tc, std::vector<double> rh, 
+    std::vector<double> pk)
+{
+    std::vector<double> Ic(year.size());
+    for (size_t i = 0; i < Ic.size(); ++i) {
+        std::vector<double> sp = solpositionCpp(lat, lon, year[i], month[i], day[i], lt[i]);
+        double zen = sp[0];
+        double z = zen * M_PI / 180.0;
+        if (zen <= 90.0) {
+            double m = 35 * cos(z) * pow(1224 * cos(z) * cos(z) + 1, -0.5);
+            double TrTpg = 1.021 - 0.084 * sqrt(m * 0.00949 * pk[i] + 0.051);
+            double xx = log(rh[i] / 100) + ((17.27 * tc[i]) / (237.3 + tc[i]));
+            double Td = (237.3 * xx) / (17.27 - xx);
+            double u = exp(0.1133 - log(3.78) + 0.0393 * Td);
+            double Tw = 1 - 0.077 * pow(u * m, 0.3);
+            double Ta = 0.935 * m;
+            double od = TrTpg * Tw * Ta;
+            Ic[i] = 1352.778 * cos(z) * od;
+        }
+    }
+    return Ic;
 }
 // ** Calculate canopy extinction coefficient for sloped ground surfaces ** //
 std::vector<double> cankCpp(double zen, double x, double si) {
@@ -231,6 +257,7 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             double zen = solp[0];
             double azi = solp[1];
             double si = solarindexCpp(slope, aspect, zen, azi);
+            if (zen > 90.0) zen = 90.0;
             // Calculate canopy extinction coefficient
             std::vector<double> kp = cankCpp(zen, x, si);
             double k = kp[0];
@@ -238,10 +265,12 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             double k0 = kp[2];
             double Kc = kd / k0;
             // Calculate two-stream parameters (direct)      
-            double gref2 = 1 - (((1 - gref) * cos(zen * M_PI / 180)) / si);
-            if (std::isinf(gref2)) gref2 = gref;
-            if (gref2 < 0) gref2 = 0;
-            if (gref2 > 1) gref2 = 1;
+            double gref2 = 1 - (1 - gref) * si;
+            if (gref2 < 0.01) gref2 = 0.01;
+            //double gref2 = 1 - (((1 - gref) * cos(zen * M_PI / 180)) / si);
+            //if (std::isinf(gref2)) gref2 = gref;
+            //if (gref2 < 0.2 * gref) gref2 = 0.2 * gref;
+            //if (gref2 > 0.95) gref2 = 0.95;
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
             std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
             double p5 = tspdir[0];
@@ -271,7 +300,6 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             radGsw[i] = (1 - gref) * (Rdbm * cos(zen * M_PI / 180) * dirr + Rddm * Rdif[i] + Rbgm * si * dirr);
             // Radiation absorbed by canopy
             radCsw[i] = (1 - albedo[i]) * (dirr * cos(zen * M_PI / 180) + Rdif[i]);
-            //radCsw[i] = (dirr * cos(zen * M_PI / 180);
         }
         else {
             radGsw[i] = 0;
@@ -936,6 +964,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         double zen = solp[0];
         double azi = solp[1];
         double si = solarindexCpp(slope, aspect, zen, azi);
+        if (zen > 90.0) zen = 90.0;
         // Calculate two-stream parameters (diffuse)
         std::vector<double> tspdif = twostreamdifCpp(pait, om, a, gma, h, gref);
         std::vector<double> tspdifPAR = twostreamdifCpp(pait, omp, ap, gmap, hp, gref);
@@ -946,9 +975,8 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         double k0 = kp[2];
         double Kc = kd / k0;
         // Calculate two-stream parameters (direct)      
-        double gref2 = 1 - ((1 - gref) * cos(zen * M_PI / 180) / si);
-        if (gref2 < 0) gref2 = 0;
-        if (gref2 > 1) gref2 = 1;
+        double gref2 = 1 - (1 - gref) * si;
+        if (gref2 < 0.01) gref2 = 0.01;
         double sig = kd * kd + gma * gma - pow((a + gma), 2);
         double sigp = kd * kd + gmap * gmap - pow(ap + gmap, 2);
         std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
