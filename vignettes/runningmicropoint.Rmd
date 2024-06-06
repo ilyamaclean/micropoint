@@ -238,13 +238,13 @@ cl <- vegparams$clump
 Kc <- with(twostreamp, kkd$kd / kkd$k0)
 albd <- with(twostreamp, p1 + p2 + cl^2 * groundparams$gref)
 # and `black-sky` albedo (Directional Hemispherical Reflectance) 
-albb <- with(twostreamp, p5 / sig + p6 + p7 + cl^Kc * gref2)
+albb <- with(twostreamp, p5 / sig + p6 + p7 + cl^Kc * groundparams$gref)
 # Calculate and plot blue-sky albedo
 Rbeam <- with(climdata,(swdown - difrad)) / cos(solar$zen * pi / 180)
-alb <- with(climdata, (albd * difrad + albb * Rbeam) / (swdown + Rbeam))
+alb <- with(climdata, (albd * difrad + albb * (swdown - difrad)) / swdown)
 # Set blue-sky albedo to be white-sky albedo when direct radiation is zero
-dni<-with(climdata, swdown - difrad)
-alb[dni == 0] <- albd
+drad<-with(climdata, swdown - difrad)
+alb[drad == 0] <- albd
 par(mar = c(6, 6, 3, 3))
 plot(alb ~ as.POSIXct(tme), type="l", cex.axis = 2, cex.lab = 2,
      xlab = "Month", ylab = "Albedo", ylim = c(0, 1))

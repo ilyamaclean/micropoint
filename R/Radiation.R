@@ -152,8 +152,6 @@ twostreamparams<-function(vegp,groundp,solar) {
   kkd<-.cank2(solar$zen,vegp$x,si)
   # === (1c) Adjust paramaters for gap fraction and inclined surface
   pai_t<-with(vegp,(pai/(1-clump)))
-  gref2 = 1 - (1 - groundp$gref) * si
-  gref2[gref2 < 0.01]<-0.01
   # === (1d) Calculate two stream base parameters
   om<-with(vegp,lref+ltra)
   a<-1-om
@@ -179,10 +177,6 @@ twostreamparams<-function(vegp,groundp,solar) {
   p3<-(1/(D2*S1))*(u2+h)
   p4<-(-S1/D2)*(u2-h)
   # === (1f) Calculate Direct radiation parameters
-  u1<-a+gma*(1-1/gref2)
-  u2<-a+gma*(1-gref2)
-  D1<-(a+gma+h)*(u1-h)*1/S1-(a+gma-h)*(u1+h)*S1
-  D2<-(u2+h)*1/S1-(u2-h)*S1
   p5<- -s*(a+gma-kkd$kd)-gma*sstr
   v1<-s-(p5*(a+gma+kkd$kd))/sig
   v2<-s-gma-(p5/sig)*(u1+kkd$kd)

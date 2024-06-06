@@ -186,7 +186,7 @@ std::vector<double> twostreamdifCpp(double pait, double om, double a, double gma
     return params;
 }
 // ** Calculates parameters for direct radiation using two-stream model ** //
-std::vector<double> twostreamdirCpp(double pait, double om, double a, double gma, double J, double del, double h, double gref2,
+std::vector<double> twostreamdirCpp(double pait, double om, double a, double gma, double J, double del, double h, double gref,
     double k, double kd, double sig)
 {
     // Calculate base parameters
@@ -196,8 +196,8 @@ std::vector<double> twostreamdirCpp(double pait, double om, double a, double gma
     double S1 = exp(-h * pait);
     double S2 = exp(-kd * pait);
     // Calculate parameters
-    double u1 = a + gma * (1 - 1 / gref2);
-    double u2 = a + gma * (1 - gref2);
+    double u1 = a + gma * (1 - 1 / gref);
+    double u2 = a + gma * (1 - gref);
     double D1 = (a + gma + h) * (u1 - h) * 1 / S1 - (a + gma - h) * (u1 + h) * S1;
     double D2 = (u2 + h) * 1 / S1 - (u2 - h) * S1;
     double p5 = -ss * (a + gma - kd) - gma * sstr;
@@ -206,7 +206,7 @@ std::vector<double> twostreamdirCpp(double pait, double om, double a, double gma
     double p6 = (1 / D1) * ((v1 / S1) * (u1 - h) - (a + gma - h) * S2 * v2);
     double p7 = (-1 / D1) * ((v1 * S1) * (u1 + h) - (a + gma + h) * S2 * v2);
     double p8 = sstr * (a + gma + kd) - gma * ss;
-    double v3 = (sstr + gma * gref2 - (p8 / sig) * (u2 - kd)) * S2;
+    double v3 = (sstr + gma * gref - (p8 / sig) * (u2 - kd)) * S2;
     double p9 = (-1 / D2) * ((p8 / (sig * S1)) * (u2 + h) + v3);
     double p10 = (1 / D2) * (((p8 * S1) / sig) * (u2 - h) + v3);
     // Define and return output variable
@@ -265,10 +265,8 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             double k0 = kp[2];
             double Kc = kd / k0;
             // Calculate two-stream parameters (direct)      
-            double gref2 = 1 - (1 - gref) * si;
-            if (gref2 < 0.01) gref2 = 0.01;
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
-            std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
+            std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, k, kd, sig);
             double p5 = tspdir[0];
             double p6 = tspdir[1];
             double p7 = tspdir[2];
@@ -278,7 +276,7 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             // Calculate albedo
             double albd = (1 - cld) * (p1 + p2) + cld * gref;
             double clb = pow(clump, Kc);
-            double albb = (1 - clb) * (p5 / sig + p6 + p7) + clb * gref2;
+            double albb = (1 - clb) * (p5 / sig + p6 + p7) + clb * gref;
             if (std::isinf(albb)) albb = albd;
             double Rbeam = (Rsw[i] - Rdif[i]) / cos(zen * M_PI / 180);
             // Contribution of direct to downward diffuse stream
@@ -294,7 +292,7 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             radGsw[i] = RdifG + RdirG;
             // Radiation absorbed by canopy
             double RdifC = (1 - albd) * Rdif[i];
-            double RdirC = (1 - albb) * Rbeam;
+            double RdirC = (1 - albb) * Rbeam * si;
             radCsw[i] = RdifC + RdirC;
             albedo[i] = 1 - (radCsw[i] / Rsw[i]);
             if (albedo[i] > 1) albedo[i] = albd;
@@ -975,12 +973,10 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         double k0 = kp[2];
         double Kc = kd / k0;
         // Calculate two-stream parameters (direct)      
-        double gref2 = 1 - (1 - gref) * si;
-        if (gref2 < 0.01) gref2 = 0.01;
         double sig = kd * kd + gma * gma - pow((a + gma), 2);
         double sigp = kd * kd + gmap * gmap - pow(ap + gmap, 2);
-        std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
-        std::vector<double> tspdirPAR = twostreamdirCpp(pait, omp, ap, gmap, J, delp, hp, gref2, k, kd, sigp);
+        std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, k, kd, sig);
+        std::vector<double> tspdirPAR = twostreamdirCpp(pait, omp, ap, gmap, J, delp, hp, gref, k, kd, sigp);
         // ~~ Direct beam above canopy
         double Rb0 = (Rsw - Rdif) / cos(zen * M_PI / 180);
         // Extract two-stream parameters
@@ -1839,10 +1835,8 @@ Rcpp::DataFrame Atground(double lat, double lon, DataFrame obstime, DataFrame cl
             double k0 = kp[2];
             double Kc = kd / k0;
             // Calculate two-stream parameters (direct)      
-            double gref2 = 1 - (1 - gref) * si;
-            if (gref2 < 0.01) gref2 = 0.01;
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
-            std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
+            std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, k, kd, sig);
             double p5 = tspdir[0];
             double p6 = tspdir[1];
             double p7 = tspdir[2];
