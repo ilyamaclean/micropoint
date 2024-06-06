@@ -104,7 +104,7 @@ Each of the equation's components describes a different physical process. In bot
 
 $\small a$ is given by $\small a=(1-\omega)$ where $\small \omega$ is the single scattering albedo of individual canopy elements given by $\small \omega=\alpha_P+\tau_P$ where $\small \alpha_P$ is canopy element reflectance and $\small \tau_P$ is canopy element transmittance, both provided as user inputs. 
 
-$\small \gamma$ is given by $\small \gamma=0.5(\omega+J\delta)$ where $\small \delta$ is given by $\small \delta=\alpha_P-\tau_P$ and  $\small J$ is an integral function of the inclination distribution of canopy elements approximated by $\small J=\cos \hat{\Theta}_P$ where $\small \hat{\Theta}_P$ is the mean inclination angle of canopy elements in the zenith direction. From Campbell (1990) $\small \hat{\Theta}_P=9.65(3+x)^{1.65}$.  
+$\small \gamma$ is given by $\small \gamma=0.5(\omega+J\delta)$ where $\small \delta$ is given by $\small \delta=\alpha_P-\tau_P$ and  $\small J$ is an integral function of the inclination distribution of canopy elements approximated by $\small J=\cos^2 \hat{\Theta}_P$ where $\small \hat{\Theta}_P$ is the mean inclination angle of canopy elements in the zenith direction. From Campbell (1990) $\small \hat{\Theta}_P=9.65(3+x)^{1.65}$.  
 
 From Verhoef (1984) and Pinty et al (2006) $\small s=0.5(\omega+\frac{J\delta}{K})K$
 

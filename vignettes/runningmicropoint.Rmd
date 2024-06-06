@@ -50,15 +50,15 @@ In the code below, the point microclimate model is used to derive microclimate e
 library(micropoint)
 mout <- runpointmodel(climdata, reqhgt = 1, forestparams, paii = NA,  groundparams, lat =49.96807, long= -5.215668)
 tme <- as.POSIXct(climdata$obs_time)
-plot(mout$tair ~ tme, type="l", xlab = "MOnth", ylab = "Air emperature",
-     ylim = c(-5, 35), col = "red")
+plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air emperature",
+     ylim = c(-5, 30), col = "red")
 par(new = TRUE)
 plot(climdata$temp ~ tme, type="l", xlab = "", ylab = "",
-     ylim = c(-5, 35), col = rgb(0, 0, 0, 0.5))
+     ylim = c(-5, 30), col = rgb(0, 0, 0, 0.5))
 ```
 ![](images/plot0a.png)
 
-Overall, air temperature below canopy (red line) tracks reference air temperature quite closely (grey line), but there are a few instances where temperatures get much hotter. These are normally instances where wind speed is low and downward solar radiation is particularly high. We show this below. Here the hour of the maximum temperature anomaly is calculated and the radiation and wind speed of that hour are displayed on frequency histograms of radiation and wind speed of all hours. The vertical temperature profile is then plotted using the inbuilt function for doing so. 
+Overall, air temperature below canopy (red line) tracks reference air temperature quite closely (grey line), but there are a few instances where temperatures gets a bit hotter. These are normally instances where wind speed is low and downward solar radiation is particularly high. We show this below. Here the hour of the maximum temperature anomaly is calculated and the radiation and wind speed of that hour are displayed on frequency histograms of radiation and wind speed of all hours. The vertical temperature profile is then plotted using the inbuilt function for doing so. 
 
 ```{r eval=FALSE}
 # Inspect radiation and radiation at time of greatest temperature anomaly
@@ -225,21 +225,23 @@ Individual components of the big-leaf model are described briefly.
 
 ### Radiation
 The starting point for the big-leaf model is to estimate the flux density of radiation absorbed by the canopy and ground surface. A variant of the 
-Dickenson-Sellers two-stream approximation model (Sellers 1985 *Int. J. Remote Sens.* 6: 1335–1372) as described in  Yuan *et al*. (2017) *J Adv Model Earth Sys* 9: 113-29 is used but with the following augmentations. First the model accommodates sloped ground surfaces beneath the canopy. Second the model allows for a none-random distribution of leaf foliage with radiation penetrating directly through larger canopy gaps. Largely, the more elegant means of calculation of absorption and transmission of direct solar radiation as a function of leaf inclination angles proposed by Campbell (1986) *Agri Forest Meteorol* 36: 317-321 is used. As the calculation of absorbed radiation aslso depends on downward longwave radiation, which in turn depends on canopy temperature, the function is embedded in the iterative C++ workflow. However, the hard work is done by function [twostreamparams()], which derives the parameters of the two-stream model/, and R verison of wihch is included with the package. An illustration of how these parameters are used ot calculate albedo is provided below, though users are referred to Yuan *et al* or to https://rpubs.com/ilyamaclean/1107820 for a full explanation. 
+Dickenson-Sellers two-stream approximation model (Sellers 1985 *Int. J. Remote Sens.* 6: 1335–1372) as described in  Yuan *et al*. (2017) *J Adv Model Earth Sys* 9: 113-29 is used but with the following augmentations. First the model accommodates sloped ground surfaces beneath the canopy. Second the model allows for a none-random distribution of leaf foliage with radiation penetrating directly through larger canopy gaps. Largely, the more elegant means of calculation of absorption and transmission of direct solar radiation as a function of leaf inclination angles proposed by Campbell (1986) *Agri Forest Meteorol* 36: 317-321 is used. As the calculation of absorbed radiation aslso depends on downward longwave radiation, which in turn depends on canopy temperature, the function is embedded in the iterative C++ workflow. However, the hard work is done by function [twostreamparams()], which derives the parameters of the two-stream model/, and R verison of which is included with the package. An illustration of how these parameters are used ot calculate albedo is provided below, though users are referred to Yuan *et al* or to https://rpubs.com/ilyamaclean/1107820 for a full explanation. 
 
 ```{r eval=FALSE}
-# Run two-sream model with inbuilt datasets
+# Run two-stream model with inbuilt datasets
 tme <- as.POSIXlt(climdata$obs_time, tz="UTC")
 # POSIXlt object used in place of year:
 solar <- solarposition(49.96807, -5.215668, year=tme)
 twostreamp <- twostreamparams(vegparams, groundparams, solar)
-# Calculate white- and black-sky albedo
+# Calculate `white-sky' albedo (Bi-Hemispherical Reflectance) 
 cl <- vegparams$clump
 Kc <- with(twostreamp, kkd$kd / kkd$k0)
 albd <- with(twostreamp, p1 + p2 + cl^2 * groundparams$gref)
+# and `black-sky` albedo (Directional Hemispherical Reflectance) 
 albb <- with(twostreamp, p5 / sig + p6 + p7 + cl^Kc * gref2)
 # Calculate and plot blue-sky albedo
-alb <- with(climdata, (albd * difrad + albb * (swdown - difrad)) / swdown)
+Rbeam <- with(climdata,(swdown - difrad)) / cos(solar$zen * pi / 180)
+alb <- with(climdata, (albd * difrad + albb * Rbeam) / (swdown + Rbeam))
 # Set blue-sky albedo to be white-sky albedo when direct radiation is zero
 dni<-with(climdata, swdown - difrad)
 alb[dni == 0] <- albd
@@ -302,7 +304,7 @@ mout <- runpointmodel(climdata, reqhgt = 1, forestparams, paii = NA,  groundpara
 ed<-Sys.time()
 ed-st
 # Run model for a year dividing canopy into 50 layers
-# Takes ~45 seconds
+# Takes ~40 seconds
 st<-Sys.time()
 mout <- runpointmodel(climdata, reqhgt = 1, forestparams, paii = NA,  groundparams, lat =49.96807, long= -5.215668, n = 50)
 ed<-Sys.time()
@@ -312,11 +314,11 @@ xx1 <- plotprofile(climdata, hr = 4091, plotout = "tair", forestparams, paii = N
 xx2 <- plotprofile(climdata, hr = 4091, plotout = "tair", forestparams, paii = NA, groundparams, lat =49.96807, long= -5.215668, n = 25)
 xx3 <- plotprofile(climdata, hr = 4091, plotout = "tair", forestparams, paii = NA, groundparams, lat =49.96807, long= -5.215668, n = 1000)
 par(mfrow = c(1, 1), mar = c(6, 6, 3, 3))
-plot(z ~ var, data = xx1, xlab = "Air temperature", ylab = "Height", xlim = c(20, 25), ylim = c(0, 12), type = "l", lty = 3, lwd = 2, cex.axis = 2, cex.lab = 2)
+plot(z ~ var, data = xx1, xlab = "Air temperature", ylab = "Height", xlim = c(20, 24), ylim = c(0, 12), type = "l", lty = 3, lwd = 2, cex.axis = 2, cex.lab = 2)
 par(new=TRUE)
-plot(z ~ var, data = xx2, xlab = "", ylab = "", xlim = c(20, 25), ylim = c(0, 12), type = "l", lty = 2, lwd = 2, cex.axis = 2, cex.lab = 2)
+plot(z ~ var, data = xx2, xlab = "", ylab = "", xlim = c(20, 24), ylim = c(0, 12), type = "l", lty = 2, lwd = 2, cex.axis = 2, cex.lab = 2)
 par(new=TRUE)
-plot(z ~ var, data = xx3, xlab = "", ylab = "", xlim = c(20, 25), ylim = c(0, 12), type = "l", lty = 1, lwd = 2, cex.axis = 2, cex.lab = 2)
+plot(z ~ var, data = xx3, xlab = "", ylab = "", xlim = c(20, 24), ylim = c(0, 12), type = "l", lty = 1, lwd = 2, cex.axis = 2, cex.lab = 2)
 ```
 ![](images/plot7.png)
 One can see that 

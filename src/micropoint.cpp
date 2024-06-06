@@ -267,10 +267,6 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             // Calculate two-stream parameters (direct)      
             double gref2 = 1 - (1 - gref) * si;
             if (gref2 < 0.01) gref2 = 0.01;
-            //double gref2 = 1 - (((1 - gref) * cos(zen * M_PI / 180)) / si);
-            //if (std::isinf(gref2)) gref2 = gref;
-            //if (gref2 < 0.2 * gref) gref2 = 0.2 * gref;
-            //if (gref2 > 0.95) gref2 = 0.95;
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
             std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
             double p5 = tspdir[0];
@@ -284,22 +280,26 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
             double clb = pow(clump, Kc);
             double albb = (1 - clb) * (p5 / sig + p6 + p7) + clb * gref2;
             if (std::isinf(albb)) albb = albd;
-            double dirr = Rsw[i] - Rdif[i];
-            albedo[i] = (dirr * albb + Rdif[i] * albd) / Rsw[i];
-            if (albedo[i] > 1) albedo[i] = albd;
-            if (albedo[i] > 0.99) albedo[i] = 0.99;
-            if (albedo[i] < 0.01) albedo[i] = 0.01;
+            double Rbeam = (Rsw[i] - Rdif[i]) / cos(zen * M_PI / 180);
             // Contribution of direct to downward diffuse stream
             double Rdbm = (1 - clb) * ((p8 / sig) * exp(-kd * pait) + p9 * exp(-h * pait) + p10 * exp(h * pait)) + clb;
-            if (Rdbm < 0) Rdbm = 0;
-            if (Rdbm > 1) Rdbm = 1;
+            if (Rdbm < 0.0) Rdbm = 0.0;
+            if (Rdbm > 1.0) Rdbm = 1.0;
             // Downward direct stream
             double Rbgm = (1 - clb) * exp(-kd * pait) + clb;
             if (Rbgm > 1) Rbgm = 1;
             // Radiation absorbed by ground
-            radGsw[i] = (1 - gref) * (Rdbm * cos(zen * M_PI / 180) * dirr + Rddm * Rdif[i] + Rbgm * si * dirr);
+            double RdifG = (1 - gref) * (Rdbm * Rbeam + Rddm * Rdif[i]);
+            double RdirG = (1 - gref) * (Rbgm * Rbeam * si);
+            radGsw[i] = RdifG + RdirG;
             // Radiation absorbed by canopy
-            radCsw[i] = (1 - albedo[i]) * (dirr * cos(zen * M_PI / 180) + Rdif[i]);
+            double RdifC = (1 - albd) * Rdif[i];
+            double RdirC = (1 - albb) * Rbeam;
+            radCsw[i] = RdifC + RdirC;
+            albedo[i] = 1 - (radCsw[i] / Rsw[i]);
+            if (albedo[i] > 1) albedo[i] = albd;
+            if (albedo[i] > 0.99) albedo[i] = 0.99;
+            if (albedo[i] < 0.01) albedo[i] = 0.01;
         }
         else {
             radGsw[i] = 0;
@@ -1363,9 +1363,12 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
         if (tleafn[i] < tmn) tmn = tleafn[i];
         if (tairn[i] > tmx) tairn[i] = tmx;
         if (tairn[i] < tmn) tairn[i] = tmn;
+        // Cap at dewpoint
+        //double tdew = dewpointCpp(tairn[i], ean[i]);
+        //if (tairn[i] < tdew) tairn[i] = tdew;
         // Calculate emx
-        double emx = satvapCpp(tleafn[i]);
-        double emn = satvapCpp(tleafn[i]) * 0.1;
+        double emx = satvapCpp(tairn[i]);
+        double emn = satvapCpp(tairn[i]) * 0.1;
         if (ean[i] > emx) ean[i] = emx;
         if (ean[i] < emn) ean[i] = emn;
         // Calculate mxdif
@@ -1593,7 +1596,10 @@ DataFrame BelowCanopy(double reqhgt, double zref, double lat, double lon, DataFr
         Rlwupo[hr] = Rlwup[whichz];
     }
     std::vector<double> relhum(tc.size());
-    for (size_t hr = 0; hr < tc.size(); ++hr) relhum[hr] = (eao[hr] / satvapCpp(tairo[hr])) * 100.0;
+    for (size_t hr = 0; hr < tc.size(); ++hr) {
+        relhum[hr] = (eao[hr] / satvapCpp(tairo[hr])) * 100.0;
+        if (relhum[hr] > 100.0) relhum[hr] = 100.0;
+    }
     Rcpp::DataFrame out;
     out["tair"] = Rcpp::wrap(tairo);
     out["tleaf"] = Rcpp::wrap(tleafo);
@@ -1833,10 +1839,8 @@ Rcpp::DataFrame Atground(double lat, double lon, DataFrame obstime, DataFrame cl
             double k0 = kp[2];
             double Kc = kd / k0;
             // Calculate two-stream parameters (direct)      
-            double gref2 = 1 - (((1 - gref) * cos(zen * M_PI / 180)) / si);
-            if (std::isinf(gref2)) gref2 = gref;
-            if (gref2 < 0) gref2 = 0;
-            if (gref2 > 1) gref2 = 1;
+            double gref2 = 1 - (1 - gref) * si;
+            if (gref2 < 0.01) gref2 = 0.01;
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
             std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref2, k, kd, sig);
             double p5 = tspdir[0];

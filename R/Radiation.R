@@ -152,8 +152,8 @@ twostreamparams<-function(vegp,groundp,solar) {
   kkd<-.cank2(solar$zen,vegp$x,si)
   # === (1c) Adjust paramaters for gap fraction and inclined surface
   pai_t<-with(vegp,(pai/(1-clump)))
-  gref2<-1-(((1-groundp$gref)*cos(solar$zen*pi/180))/si)
-  gref2[is.infinite(gref2)]<-groundp$gref
+  gref2 = 1 - (1 - groundp$gref) * si
+  gref2[gref2 < 0.01]<-0.01
   # === (1d) Calculate two stream base parameters
   om<-with(vegp,lref+ltra)
   a<-1-om
