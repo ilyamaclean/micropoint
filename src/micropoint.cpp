@@ -116,18 +116,24 @@ std::vector<double> cankCpp(double zen, double x, double si) {
     if (x == 1.0) {
         k = 1 / (2 * cos(Z));
     }
-    else if (x == 0.0) {
-        k = 2 / (M_PI * tan(0.5 * M_PI - Z));
-    }
     else if (std::isinf(x)) {
-        k = 1;
+        k = 1.0;
     }
     else {
         k = sqrt(x * x + (tan(Z) * tan(Z))) / (x + 1.774 * pow((x + 1.182), -0.733));
     }
     if (k > 6000.0) k = 6000;
     // Calculate adjusted k
-    double k0 = sqrt(x * x) / (x + 1.774 * pow((x + 1.182), -0.733));
+    double k0;
+    if (x == 1.0) {
+        k0 = 0.5;
+    }
+    else if (std::isinf(x)) {
+        k0 = 1.0;
+    }
+    else {
+        k0 = sqrt(x * x) / (x + 1.774 * pow((x + 1.182), -0.733));
+    }
     double kd;
     if (si == 0) {
         kd = 1;
@@ -230,9 +236,12 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
     double om = lref + ltra;
     double a = 1 - om;
     double del = lref - ltra;
-    double mla = 9.65 * pow((3 + x), -1.65);
-    if (mla > M_PI / 2) mla = M_PI / 2;
-    double J = cos(mla) * cos(mla);
+    double J = 1.0 / 3.0;
+    if (x != 1.0) {
+        double mla = 9.65 * pow((3 + x), -1.65);
+        if (mla > M_PI / 2) mla = M_PI / 2;
+        J = cos(mla) * cos(mla);
+    }
     double gma = 0.5 * (om + J * del);
     double h = sqrt(a * a + 2 * a * gma);
     // Calculate two-stream parameters (diffuse)

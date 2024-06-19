@@ -42,3 +42,13 @@ struct Lang {
     std::vector<double> Rlwup;
     double mxdif;
 };
+struct Lang2 {
+    std::vector<double> tleaf;
+    std::vector<double> tair;
+    std::vector<double> ea;
+    std::vector<double> uz;
+    std::vector<double> Rlwdown;
+    std::vector<double> Rlwup;
+    std::vector<double> csnowdepth;
+    double mxdif;
+};
