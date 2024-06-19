@@ -65,7 +65,7 @@ ignored and taken from length of `paii`.}
 \value{
 a list of the following
 \describe{
- \item{z}{height above gorund (m)}
+ \item{z}{height above ground (m)}
  \item{var}{one of leaf temperature (degrees C, air temperature (degrees C),
  vapour pressure (kPa) or relative humidity (percentage) for eahc height `z`}
 }
