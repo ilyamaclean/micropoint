@@ -229,6 +229,8 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
     bigleafvars$surfwet<-trc*swet+(1-trc)*rmu
   } else bigleafvars$surfwet<-surfwet
   # Run point model
+  vegpp[11]<-vegp$lref/2
+  vegpp[12]<-vegp$ltra/2
   modp<-runmodel(reqhgt,zref,lat,long,obstime,climdata,bigleafvars,maxiter,vegpp,paii,groundpp)
   obs_time<-tme
   modp<-cbind(obs_time,modp)
@@ -268,7 +270,7 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
 #' are plotted from the ground to two metres above canopy.
 #' @return a list of the following
 #' \describe{
-#'  \item{z}{height above gorund (m)}
+#'  \item{z}{height above ground (m)}
 #'  \item{var}{one of leaf temperature (degrees C, air temperature (degrees C),
 #'  vapour pressure (kPa) or relative humidity (percentage) for eahc height `z`}
 #' }
@@ -334,6 +336,8 @@ plotprofile<-function(climdata, hr, plotout = "tair", vegp, paii = NA, groundp, 
   reqhgt<-vegp$h/2
   n<-length(paii)
   zb<-(c(1:n)/n)*vegp$h
+  vegpp[11]<-vegp$lref/2
+  vegpp[12]<-vegp$ltra/2
   below<-SmallLeafOne(reqhgt,zref,lat,long,obsvars,climvars,bigleafvarsone,maxiter,wc,vegpp,
                       paii,groundpp,tleaf,tair,ea,surfwet[hr],zb)
   if (plotout == "tleaf") {
