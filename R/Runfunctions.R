@@ -116,7 +116,7 @@ runchecksfun <- function(climdata, vegp, groundp, lat, long) {
   if (max(climdata$windspeed) > 55) warning("Maximum wind speed seems high")
   if (min(climdata$precip) < 0) stop("Precipitation cannot be negative")
   if (max(climdata$precip) > 150) warning("Maximum precipitation rate seems high")
-  return(list(climdata=climdata,vegp=vegp,gorundp=groundp))
+  return(list(climdata=climdata,vegp=vegp,groundp=groundp))
 }
 
 #' @title runs point microclimate model

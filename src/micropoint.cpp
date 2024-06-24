@@ -1891,7 +1891,6 @@ Rcpp::DataFrame Atground(double lat, double lon, DataFrame obstime, DataFrame cl
     out["Rlwup"] = Rcpp::wrap(Rlwup);
     return out;
 }
-
 // Run below or above canopy model for all time steps;
 // [[Rcpp::export]]
 Rcpp::DataFrame runmodel(double reqhgt, double zref, double lat, double lon, DataFrame obstime, DataFrame climdata, DataFrame bigleafvars,
