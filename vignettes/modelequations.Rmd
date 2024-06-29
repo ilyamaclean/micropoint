@@ -372,7 +372,7 @@ $\small \alpha_G$ is ground reflectance. Here $\small \tau_d={F_G}^{2m_z}$ is tr
 $$R_i^{db\uparrow}=R_0^{b\downarrow}[(1-\tau_i^b)(\frac{p_5}{\sigma_p}\exp(-K\tilde{P_i})+p_6\exp(-h\tilde{P_i})+p_7\exp(h\tilde{P_i}))+\alpha_G\tau_i^b]$$
 and
 
-$$R_i^{db\downarrow}=R_0^{b\downarrow}[(1-\tau_i^b)(\frac{p_8}{\sigma_p}\exp(-K\tilde{P_i})+p_9\exp(-h\tilde{P_i})+p_{10}\exp(h\tilde{P_i})+\tau_i^b]$$
+$$R_i^{db\downarrow}=R_0^{b\downarrow}[(1-\tau_i^b)(\frac{p_8}{\sigma_p}\exp(-K\tilde{P_i})+p_9\exp(-h\tilde{P_i})+p_{10}\exp(h\tilde{P_i})]$$
 The equations for calculating albedos are given by
 
 $$\alpha_d=(1-\tau_0^d)(p_1+p_2)+\tau_0^b$$ and

@@ -172,11 +172,11 @@ mout1 <- runpointmodel(climdata, reqhgt = 0.06, vegparams, paii,  groundparams, 
 mout2 <- runpointmodel(climdata, reqhgt = 0.18, vegparams, paii,  groundparams, lat =49.96807, long= -5.215668)
 tme <- as.POSIXct(climdata$obs_time)
 par(mfrow = c(1, 1))
-plot(mout1$tair ~ tme, type="l", xlab = "Month", ylab = "Air emperature",
-     ylim = c(-5, 45), col = rgb(1, 0, 0, 0.5))
+plot(mout1$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
+     ylim = c(-5, 40), col = rgb(1, 0, 0, 0.5))
 par(new = TRUE)
 plot(mout2$tair ~ tme, type="l", xlab = "", ylab = "",
-     ylim = c(-5, 45), col = rgb(0, 0, 1, 0.5))
+     ylim = c(-5, 40), col = rgb(0, 0, 1, 0.5))
 ```
 ![](images/plot2.png)
 Users also have a convenient wrapper function that can be used, for any given hour, to plot the vertical distribution of air temperature, leaf temperature,  relative humidity or vapour pressure within the canopy as illustrated below.

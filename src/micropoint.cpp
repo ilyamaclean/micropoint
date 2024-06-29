@@ -231,87 +231,108 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
     std::vector<int> year, std::vector<int> month, std::vector<int> day, std::vector<double> lt,
     std::vector<double> Rsw, std::vector<double> Rdif)
 {
-    // Calculate time-invariant variables
-    double pait = pai / (1 - clump);
-    double om = lref + ltra;
-    double a = 1 - om;
-    double del = lref - ltra;
-    double J = 1.0 / 3.0;
-    if (x != 1.0) {
-        double mla = 9.65 * pow((3 + x), -1.65);
-        if (mla > M_PI / 2) mla = M_PI / 2;
-        J = cos(mla) * cos(mla);
-    }
-    double gma = 0.5 * (om + J * del);
-    double h = sqrt(a * a + 2 * a * gma);
-    // Calculate two-stream parameters (diffuse)
-    std::vector<double> tspdif = twostreamdifCpp(pait, om, a, gma, h, gref);
-    double p1 = tspdif[0];
-    double p2 = tspdif[1];
-    double p3 = tspdif[2];
-    double p4 = tspdif[3];
-    // ** Downward diffuse stream
-    double cld = clump * clump;
-    double  Rddm = (1 - cld) * (p3 * exp(-h * pait) + p4 * exp(h * pait)) + cld;
-    if (Rddm > 1) Rddm = 1;
-    // Calculate time-variant two-stream parameters (direct)
     // ** Define variables
     std::vector<double> radGsw(Rsw.size());
     std::vector<double> radCsw(Rsw.size());
     std::vector<double> albedo(Rsw.size());
-    for (size_t i = 0; i < Rsw.size(); ++i) {
-        if (Rsw[i] > 0) {
-            // Calculate solar variables
-            std::vector<double> solp = solpositionCpp(lat, lon, year[i], month[i], day[i], lt[i]);
-            double zen = solp[0];
-            double azi = solp[1];
-            double si = solarindexCpp(slope, aspect, zen, azi);
-            if (zen > 90.0) zen = 90.0;
-            // Calculate canopy extinction coefficient
-            std::vector<double> kp = cankCpp(zen, x, si);
-            double k = kp[0];
-            double kd = kp[1];
-            double k0 = kp[2];
-            double Kc = kd / k0;
-            // Calculate two-stream parameters (direct)      
-            double sig = kd * kd + gma * gma - pow((a + gma), 2);
-            std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, k, kd, sig);
-            double p5 = tspdir[0];
-            double p6 = tspdir[1];
-            double p7 = tspdir[2];
-            double p8 = tspdir[3];
-            double p9 = tspdir[4];
-            double p10 = tspdir[5];
-            // Calculate albedo
-            double albd = (1 - cld) * (p1 + p2) + cld * gref;
-            double clb = pow(clump, Kc);
-            double albb = (1 - clb) * (p5 / sig + p6 + p7) + clb * gref;
-            if (std::isinf(albb)) albb = albd;
-            double Rbeam = (Rsw[i] - Rdif[i]) / cos(zen * M_PI / 180);
-            // Contribution of direct to downward diffuse stream
-            double Rdbm = (1 - clb) * ((p8 / sig) * exp(-kd * pait) + p9 * exp(-h * pait) + p10 * exp(h * pait)) + clb;
-            if (Rdbm < 0.0) Rdbm = 0.0;
-            if (Rdbm > 1.0) Rdbm = 1.0;
-            // Downward direct stream
-            double Rbgm = (1 - clb) * exp(-kd * pait) + clb;
-            if (Rbgm > 1) Rbgm = 1;
-            // Radiation absorbed by ground
-            double RdifG = (1 - gref) * (Rdbm * Rbeam + Rddm * Rdif[i]);
-            double RdirG = (1 - gref) * (Rbgm * Rbeam * si);
-            radGsw[i] = RdifG + RdirG;
-            // Radiation absorbed by canopy
-            double RdifC = (1 - albd) * Rdif[i];
-            double RdirC = (1 - albb) * Rbeam * si;
-            radCsw[i] = RdifC + RdirC;
-            albedo[i] = 1 - (radCsw[i] / Rsw[i]);
-            if (albedo[i] > 1) albedo[i] = albd;
-            if (albedo[i] > 0.99) albedo[i] = 0.99;
-            if (albedo[i] < 0.01) albedo[i] = 0.01;
+    if (pai > 0.0) {
+        // Calculate time-invariant variables
+        double pait = pai / (1 - clump);
+        double om = lref + ltra;
+        double a = 1 - om;
+        double del = lref - ltra;
+        double J = 1.0 / 3.0;
+        if (x != 1.0) {
+            double mla = 9.65 * pow((3 + x), -1.65);
+            if (mla > M_PI / 2) mla = M_PI / 2;
+            J = cos(mla) * cos(mla);
         }
-        else {
-            radGsw[i] = 0;
-            radCsw[i] = 0;
-            albedo[i] = lref;
+        double gma = 0.5 * (om + J * del);
+        double h = sqrt(a * a + 2 * a * gma);
+        // Calculate two-stream parameters (diffuse)
+        std::vector<double> tspdif = twostreamdifCpp(pait, om, a, gma, h, gref);
+        double p1 = tspdif[0];
+        double p2 = tspdif[1];
+        double p3 = tspdif[2];
+        double p4 = tspdif[3];
+        // ** Downward diffuse stream
+        double cld = clump * clump;
+        double  Rddm = (1 - cld) * (p3 * exp(-h * pait) + p4 * exp(h * pait)) + cld;
+        if (Rddm > 1) Rddm = 1;
+        // Calculate time-variant two-stream parameters (direct)
+        for (size_t i = 0; i < Rsw.size(); ++i) {
+            if (Rsw[i] > 0) {
+                // Calculate solar variables
+                std::vector<double> solp = solpositionCpp(lat, lon, year[i], month[i], day[i], lt[i]);
+                double zen = solp[0];
+                double azi = solp[1];
+                double si = solarindexCpp(slope, aspect, zen, azi);
+                if (zen > 90.0) zen = 90.0;
+                // Calculate canopy extinction coefficient
+                std::vector<double> kp = cankCpp(zen, x, si);
+                double k = kp[0];
+                double kd = kp[1];
+                double k0 = kp[2];
+                double Kc = kd / k0;
+                // Calculate two-stream parameters (direct)      
+                double sig = kd * kd + gma * gma - pow((a + gma), 2);
+                std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, k, kd, sig);
+                double p5 = tspdir[0];
+                double p6 = tspdir[1];
+                double p7 = tspdir[2];
+                double p8 = tspdir[3];
+                double p9 = tspdir[4];
+                double p10 = tspdir[5];
+                // Calculate albedo
+                double albd = (1 - cld) * (p1 + p2) + cld * gref;
+                double clb = pow(clump, Kc);
+                double albb = (1 - clb) * (p5 / sig + p6 + p7) + clb * gref;
+                if (std::isinf(albb)) albb = albd;
+                double Rbeam = (Rsw[i] - Rdif[i]) / cos(zen * M_PI / 180);
+                // Contribution of direct to downward diffuse stream
+                double Rdbm = (1 - clb) * ((p8 / sig) * exp(-kd * pait) + p9 * exp(-h * pait) + p10 * exp(h * pait)); // no addition of clb as no contribution in gaps
+                if (Rdbm < 0.0) Rdbm = 0.0;
+                if (Rdbm > 1.0) Rdbm = 1.0;
+                // Downward direct stream
+                double Rbgm = (1 - clb) * exp(-kd * pait) + clb;
+                if (Rbgm > 1) Rbgm = 1;
+                // Radiation absorbed by ground
+                double RdifG = (1 - gref) * (Rdbm * Rbeam + Rddm * Rdif[i]);
+                double RdirG = (1 - gref) * (Rbgm * Rbeam * si);
+                radGsw[i] = RdifG + RdirG;
+                // Radiation absorbed by canopy
+                double RdifC = (1 - albd) * Rdif[i];
+                double RdirC = (1 - albb) * Rbeam * si;
+                radCsw[i] = RdifC + RdirC;
+                albedo[i] = 1 - (radCsw[i] / Rsw[i]);
+                if (albedo[i] > 1) albedo[i] = albd;
+                if (albedo[i] > 0.99) albedo[i] = 0.99;
+                if (albedo[i] < 0.01) albedo[i] = 0.01;
+            }
+            else {
+                radGsw[i] = 0;
+                radCsw[i] = 0;
+                albedo[i] = lref;
+            }
+        }
+    }
+    else {
+        for (size_t i = 0; i < Rsw.size(); ++i) {
+            albedo[i] = gref;
+            if (Rsw[i] > 0) {
+                std::vector<double> solp = solpositionCpp(lat, lon, year[i], month[i], day[i], lt[i]);
+                double zen = solp[0];
+                double azi = solp[1];
+                double si = solarindexCpp(slope, aspect, zen, azi);
+                if (zen > 90.0) zen = 90.0;
+                double dirr = (Rsw[i] - Rdif[i]) / cos(zen * M_PI / 180.0);
+                radGsw[i] = (1 - gref) * (Rdif[i] + si * dirr);
+                radCsw[i] = radGsw[i];
+            }
+            else {
+                radGsw[i] = 0;
+                radCsw[i] = 0;
+            }
         }
     }
     radmodel out;
@@ -1025,7 +1046,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
             if (Rdbm < 0) Rdbm = 0;
             if (Rdbm > Rb0) Rdbm = Rb0;
             // Contribution of direct to upward diffuse
-            double Rubm = ((1 - trcb) * ((p5 / sig) * exp(-kd * paia) + p6 * exp(-h * paia) + p7 * exp(h * paia)) + trcb) * Rb0;
+            double Rubm = ((1 - trcb) * ((p5 / sig) * exp(-kd * paia) + p6 * exp(-h * paia) + p7 * exp(h * paia))) * Rb0; // no addition of trcb as no contribution in gaps
             if (Rubm < 0) Rubm = 0;
             if (Rubm > Rb0) Rubm = Rb0;
             // Downward diffuse
