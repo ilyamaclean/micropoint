@@ -12,6 +12,7 @@
 #' @details this function runs checks on provided data testing whether provided data lie within plausable ranges
 #' and returning errors or warnings accordingly. The original data are returned as a list with
 #' some values capped if checks fail.
+#' @export
 runchecksfun <- function(climdata, vegp, groundp, lat, long) {
   # run checks in vegp
   if (vegp$h < 0) stop("vegp$h must be positive")
