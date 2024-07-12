@@ -16,7 +16,11 @@
 #' and returning errors or warnings accordingly. The original data are returned as a list with
 #' some values capped if checks fail.
 runchecksfun <- function(climdata, vegp, groundp, lat, long) {
-  # run checks in vegp
+  # check for NAS in climate data
+  cd<-climdata[,2:10]
+  s<-which(is.na(cd))
+  if (length(s) > 0) stop("climdata contains NAs")
+   # run checks in vegp
   if (vegp$h < 0) stop("vegp$h must be positive")
   if (vegp$pai < 0) stop("vegp$pai must be positive")
   if (vegp$pai > 50) warning("vegp$pai seems too high")
