@@ -31,7 +31,7 @@ runchecksfun <- function(climdata, vegp, groundp, lat, long) {
   if (vegp$lref > 1) stop("vegp$lref must be between 0 and 1")
   if (vegp$ltra < 0) stop("vegp$ltra must be between 0 and 1")
   if (vegp$ltra > 1) stop("vegp$ltra must be between 0 and 1")
-  if (vegp$ltra+vegp$lref > 1) stop("vegp$ltra + vegp$lref cannot be greater than 1")
+  if (vegp$ltra+vegp$lref > 0.8) stop("vegp$ltra + vegp$lref should not exceed 0.8")
   if (vegp$leafd > 5) warning("vegp$leafd seems too large")
   if (vegp$em < 0) stop("vegp$em must be between 0 and 1")
   if (vegp$em > 1) stop("vegp$em must be between 0 and 1")
@@ -189,7 +189,7 @@ runchecksfun <- function(climdata, vegp, groundp, lat, long) {
 #'   lat =49.96807, long= -5.215668)
 #' plot(mout$tair,type="l")
 runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, zref = 2, uref = zref, soilm = NA, surfwet = NA, dTmx = 25,
-                        maxiter = 20, n = 20, runchecks = FALSE) {
+                        maxiter = 20, n = 20, runchecks = TRUE) {
 
   if (runchecks) {
     rcd<-runchecksfun(climdata, vegp, groundp, lat, long)
