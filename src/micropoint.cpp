@@ -1123,7 +1123,6 @@ LWweights lwradweights(std::vector<double> paii) {
     for (size_t i = 0; i < paii.size(); ++i) {
         trg[i] = exp(-paib[i]);
         trh[i] = exp(-paia[i]);
-        trf[i] = 2 - trg[i] - trh[i];
     }
     NumericMatrix wgt(n, n);
     for (int i = 0; i < n; ++i) {
@@ -1134,7 +1133,7 @@ LWweights lwradweights(std::vector<double> paii) {
             sum_xx += xx[j];
         }
         for (int j = 0; j < n; ++j) {
-            wgt(i, j) = (xx[j] / sum_xx) * trf[i];
+            wgt(i, j) = (xx[j] / sum_xx);
         }
     }
     LWweights out;

@@ -88,6 +88,9 @@ runchecksfun <- function(climdata, vegp, groundp, lat, long) {
   if (groundp$Ksat > 2000) warning("groundp$Ksat seems high. Check units")
   # Check climate data
   tme<-as.POSIXlt(climdata$obs_time,tz="UTC")
+  nn<-length(tme)
+  if (nn%%24 !=0) stop("Data must be provided for complete days")
+  if (tme$hour[1] != 0) stop("Data must start at midnight UTC")
   if (min(climdata$temp) < -65) warning("Minumum temperature seems low")
   if (max(climdata$temp) > 65) warning("Maximum temperature seems high")
   if (min(climdata$relhum) < 15) warning("Minumum relative humidity seems low")

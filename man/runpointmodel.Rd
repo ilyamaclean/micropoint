@@ -19,7 +19,7 @@ runpointmodel(
   dTmx = 25,
   maxiter = 20,
   n = 20,
-  runchecks = FALSE
+  runchecks = TRUE
 )
 }
 \arguments{
