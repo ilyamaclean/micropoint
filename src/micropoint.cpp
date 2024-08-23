@@ -1156,12 +1156,21 @@ radmodel3 RadiationSmallLeafLWCpp(std::vector<double> paii, double lwdown, doubl
     {
         double lwsky = lwdown * wgts.trh[i];
         double lwgro = groundem * sb * wgts.trg[i] * pow(tground + 273.15, 4);
+        double smd = 0;
+        double smu = 0;
+        for (size_t j = i; j < paii.size(); ++j) smd = smd + wgts.wgt(i, j);
+        for (size_t j = 0; j <= i; ++j) smu = smu + wgts.wgt(i, j);
+        double mua = 1.0;
+        double mub = 1.0;
+        if (smd > 0) mua = 1 / smd;
+        if (smu > 0) mub = 1 / smu;
         double lwfd = 0;
         double lwfu = 0;
+        // Calculate weighted longwave radiation for foliage
         for (size_t j = i; j < paii.size(); ++j) lwfd = lwfd + wgts.wgt(i, j) * sb * pow(tleaf[j] + 273.15, 4);
         for (size_t j = 0; j <= i; ++j) lwfu = lwfu + wgts.wgt(i, j) * sb * pow(tleaf[j] + 273.15, 4);
-        lwupper[i] = lwsky + lwfd * vegem;
-        lwunder[i] = lwgro + lwfu * vegem;
+        lwupper[i] = lwsky + (1 - wgts.trh[i]) * lwfd * mua * vegem;
+        lwunder[i] = lwgro + (1 - wgts.trg[i]) * lwfu * mub * vegem;
     }
     radmodel3 out;
     out.Rlwdown = lwupper;

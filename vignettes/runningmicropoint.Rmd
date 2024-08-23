@@ -50,7 +50,7 @@ In the code below, the point microclimate model is used to derive microclimate e
 library(micropoint)
 mout <- runpointmodel(climdata, reqhgt = 1, forestparams, paii = NA,  groundparams, lat =49.96807, long= -5.215668)
 tme <- as.POSIXct(climdata$obs_time)
-plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air emperature",
+plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
      ylim = c(-5, 30), col = "red")
 par(new = TRUE)
 plot(climdata$temp ~ tme, type="l", xlab = "", ylab = "",
