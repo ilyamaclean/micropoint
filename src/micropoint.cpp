@@ -1099,42 +1099,32 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
 }
 // ** Calculate longwave radiation weights ** //
 LWweights lwradweights(std::vector<double> paii) {
+    // Calculate pai above and below
     std::vector<double> paib(paii.size());
     paib[0] = paii[0];
     for (size_t i = 1; i < paii.size(); ++i) paib[i] = paib[i - 1] + paii[i];
     double pait = paib[paib.size() - 1];
     std::vector<double> paia(paii.size());
     for (size_t i = 0; i < paii.size(); ++i) paia[i] = pait - paib[i];
-    // Initialise transmission matrix
+    // Initialise wgt matrix
     int n = paii.size();
-    NumericMatrix tr(n, n);
+    // Calculate relative weighting from each foliage element to every other
+    NumericMatrix wgt(n, n);
     for (size_t i = 0; i < paii.size(); ++i) {
         for (size_t j = 0; j < paii.size(); ++j) {
             double pai = 0;
             if (i > j) pai = paib[i] - paib[j];
             if (i < j) pai = paia[i] - paia[j];
-            tr(i, j) = exp(-pai);
+            double tr = exp(-pai);
+            wgt(i, j) = tr * paii[j];
         }
     }
-    // Calculate what total weighting from foliage should be
+    // Calculate transmission from ground and canopy
     std::vector<double> trg(paii.size());
     std::vector<double> trh(paii.size());
-    std::vector<double> trf(paii.size());
     for (size_t i = 0; i < paii.size(); ++i) {
         trg[i] = exp(-paib[i]);
         trh[i] = exp(-paia[i]);
-    }
-    NumericMatrix wgt(n, n);
-    for (int i = 0; i < n; ++i) {
-        std::vector<double> xx(n);
-        double sum_xx = 0.0;
-        for (int j = 0; j < n; ++j) {
-            xx[j] = tr(i, j) * paii[j];
-            sum_xx += xx[j];
-        }
-        for (int j = 0; j < n; ++j) {
-            wgt(i, j) = (xx[j] / sum_xx);
-        }
     }
     LWweights out;
     out.trg = trg;
@@ -1154,23 +1144,27 @@ radmodel3 RadiationSmallLeafLWCpp(std::vector<double> paii, double lwdown, doubl
     std::vector<double> lwunder(paii.size());
     for (size_t i = 0; i < paii.size(); ++i)
     {
+        // longwave radiation downward from sky
         double lwsky = lwdown * wgts.trh[i];
-        double lwgro = groundem * sb * wgts.trg[i] * pow(tground + 273.15, 4);
+        // longwave radiation upward from ground
+        double lwgro = groundem * sb * pow(tground + 273.15, 4) * wgts.trg[i];
+        // Calculate multipliers for foliage radiation 
+        // ** Calculate sums of weights
         double smd = 0;
         double smu = 0;
         for (size_t j = i; j < paii.size(); ++j) smd = smd + wgts.wgt(i, j);
         for (size_t j = 0; j <= i; ++j) smu = smu + wgts.wgt(i, j);
         double mua = 1.0;
         double mub = 1.0;
-        if (smd > 0) mua = 1 / smd;
-        if (smu > 0) mub = 1 / smu;
+        if (smd > 0) mua = (1 / smd) * (1 - wgts.trh[i]);
+        if (smu > 0) mub = (1 / smu) * (1 - wgts.trg[i]);
+        // Calculate summed longwave radiation for foliage
         double lwfd = 0;
         double lwfu = 0;
-        // Calculate weighted longwave radiation for foliage
         for (size_t j = i; j < paii.size(); ++j) lwfd = lwfd + wgts.wgt(i, j) * sb * pow(tleaf[j] + 273.15, 4);
         for (size_t j = 0; j <= i; ++j) lwfu = lwfu + wgts.wgt(i, j) * sb * pow(tleaf[j] + 273.15, 4);
-        lwupper[i] = lwsky + (1 - wgts.trh[i]) * lwfd * mua * vegem;
-        lwunder[i] = lwgro + (1 - wgts.trg[i]) * lwfu * mub * vegem;
+        lwupper[i] = lwsky + lwfd * mua * vegem;
+        lwunder[i] = lwgro + lwfu * mub * vegem;
     }
     radmodel3 out;
     out.Rlwdown = lwupper;
