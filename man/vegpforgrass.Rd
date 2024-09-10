@@ -7,7 +7,7 @@
 vegpforgrass(hgt, n = 20)
 }
 \arguments{
-\item{hgt}{grass height (m)}
+\item{hgt}{grass height (m) - of tallest grass spike (~1.5x drop disk measured height)}
 
 \item{n}{Number of plant area index values to generate. Default: 20 (see details)}
 }

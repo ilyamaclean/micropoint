@@ -55,7 +55,7 @@ PAIgeometry <- function(PAI, skew, spread, n = 1000) {
 }
 #' @title Generates plant area index profile for grass habitat
 #' @description Generates a vector of length `n` of plausible plant area index values
-#' @param hgt grass height (m)
+#' @param hgt grass height (m) - of tallest grass spike (~1.5x drop disk measured height)
 #' @param n Number of plant area index values to generate. Default: 1000 (see details)
 #' @param PAI Optionally total plant area index of canopy.
 #' @param fraccover OPtionally grass fractional cover
@@ -95,7 +95,7 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA) {
 #' @description Generates an object of class
 #' `vegparams` and a vector of of length `n` of plausible plant
 #' area index values for grassy vegetation.
-#' @param hgt grass height (m)
+#' @param hgt grass height (m) - of tallest grass spike (~1.5x drop disk measured height)
 #' @param n Number of plant area index values to generate. Default: 20 (see details)
 #' @return a vector of length `n` of plant area index values the sum of which equals `PAI`
 #' @details a list comrpising the following:

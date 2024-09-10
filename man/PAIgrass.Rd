@@ -7,7 +7,7 @@
 PAIgrass(hgt, n = 1000, PAI = NA, fraccover = NA)
 }
 \arguments{
-\item{hgt}{grass height (m)}
+\item{hgt}{grass height (m) - of tallest grass spike (~1.5x drop disk measured height)}
 
 \item{n}{Number of plant area index values to generate. Default: 1000 (see details)}
 
