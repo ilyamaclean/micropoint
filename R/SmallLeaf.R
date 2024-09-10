@@ -53,3 +53,75 @@ PAIgeometry <- function(PAI, skew, spread, n = 1000) {
   y<-PAI/sum(y)*y
   y
 }
+#' @title Generates plant area index profile for grass habitat
+#' @description Generates a vector of length `n` of plausible plant area index values
+#' @param hgt grass height (m)
+#' @param n Number of plant area index values to generate. Default: 1000 (see details)
+#' @param PAI Optionally total plant area index of canopy.
+#' @param fraccover OPtionally grass fractional cover
+#' @return a vector of length `n` of plant area index values the sum of which equals `PAI`
+#' @details if `PAI` is not supplied it is estimated from `fraccover`, which must
+#' be between 0.001 and 0.9999. If neither `PAI` or `fraccover` is supplied, `PAI`
+#' is estimated using a simple allometric relationship with sward height,
+#' derived from field measurements from a meadow in northern Spain.
+#' @examples
+#' paii <- PAIgrass(hgt = 0.25, n = 1000)
+#' folden <- paii * 1000
+#' z <- (c(1:1000) / 1000) * 0.25
+#' plot(z ~ folden, type = "l", main = sum(paii)) # plots foliage density
+PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA) {
+  # Generate profile
+  z<-c(0:50)/50
+  ifd<-  17.35889*z+(1/4.8)
+  folden<-1/ifd
+  plot(z~folden)
+  folden<-spline(folden,n=n)$y
+  # Calculate PAI
+  if (is.na(PAI)) {
+    if (is.na(fraccover) == FALSE) {
+      if (fraccover<0.0001) stop("fraccover must be greater than 0.0001")
+      if (fraccover>0.9999) stop("fraccover must be less than 0.9999")
+      PAI<- -log(1-fraccover)/0.9867526
+    }  else {
+      lpai<- -8.9388+1.3898 *log(hgt*1000)
+      PAI<-exp(lpai)
+    }
+  }
+  # rescale foliage density profile
+  paii<-(folden/sum(folden))*PAI
+  return(paii)
+}
+#' @title Generates vegetation parameters for grass
+#' @description Generates an object of class
+#' `vegparams` and a vector of of length `n` of plausible plant
+#' area index values for grassy vegetation.
+#' @param hgt grass height (m)
+#' @param n Number of plant area index values to generate. Default: 20 (see details)
+#' @return a vector of length `n` of plant area index values the sum of which equals `PAI`
+#' @details a list comrpising the following:
+#' \describe{
+#'  \item{vegp}{An object of vegetation parameters for running the microclimate model}
+#'  \item{paii}{a vector of length `n` of plant area index values}
+#' }
+#' @examples
+#' vp <- vegpforgrass(0.25, 20)
+#' vegp <- vp$vegp
+#' paii <- vp$paii
+#' mout <- runpointmodel(climdata, reqhgt = 0.12, vegp, paii,  groundparams, lat = 49.96807, long= -5.215668)
+#' tme <- as.POSIXct(climdata$obs_time)
+#' plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
+#'      ylim = c(-5, 40), col = "red")
+vegpforgrass <- function(hgt, n = 20) {
+  lpai<- -8.9388+1.3898 *log(hgt*1000)
+  PAI<-exp(lpai)
+  vegp<-list(h=hgt,pai=PAI,x=0.161808,
+             clump=0.3,lref=0.25,ltra=0.22,
+             leafd=0.08*hgt,em=0.97,
+             gsmax=0.38,q50=100)
+  class(vegp)<-"vegparams"
+  paii<-PAIgrass(hgt, n)
+  return(list(vegp=vegp,paii=paii))
+}
+
+
+
