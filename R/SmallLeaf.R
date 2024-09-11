@@ -102,6 +102,8 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #' area index values for grassy vegetation.
 #' @param hgt grass height (m) - of tallest grass spike (~1.5x drop disk measured height)
 #' @param n Number of plant area index values to generate. Default: 20 (see details)
+#' @param PAI optionally total plant area index value for grass. Estimated
+#' from vegetation height if not supplied.
 #' @param taper parameter controlling how tapered the plant area index
 #' is towards the top. A value of one is typical of grass. Lower values give
 #' a more even spread. Cannot be negative or zero.
@@ -119,7 +121,7 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #' tme <- as.POSIXct(climdata$obs_time)
 #' plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
 #'      ylim = c(-5, 40), col = "red")
-vegpforgrass <- function(hgt, n = 20, taper = 1) {
+vegpforgrass <- function(hgt, n = 20, PAI = NA, taper = 1) {
   lpai<- -8.9388+1.3898 *log(hgt*1000)
   PAI<-exp(lpai)
   vegp<-list(h=hgt,pai=PAI,x=0.161808,
@@ -127,7 +129,7 @@ vegpforgrass <- function(hgt, n = 20, taper = 1) {
              leafd=0.08*hgt,em=0.97,
              gsmax=0.38,q50=100)
   class(vegp)<-"vegparams"
-  paii<-PAIgrass(hgt, n, taper = taper)
+  paii<-PAIgrass(hgt, n, PAI = PAI, taper = taper)
   return(list(vegp=vegp,paii=paii))
 }
 
