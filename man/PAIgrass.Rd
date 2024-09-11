@@ -4,7 +4,7 @@
 \alias{PAIgrass}
 \title{Generates plant area index profile for grass habitat}
 \usage{
-PAIgrass(hgt, n = 1000, PAI = NA, fraccover = NA)
+PAIgrass(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1)
 }
 \arguments{
 \item{hgt}{grass height (m) - of tallest grass spike (~1.5x drop disk measured height)}
@@ -13,7 +13,11 @@ PAIgrass(hgt, n = 1000, PAI = NA, fraccover = NA)
 
 \item{PAI}{Optionally total plant area index of canopy.}
 
-\item{fraccover}{OPtionally grass fractional cover}
+\item{fraccover}{Optionally grass fractional cover}
+
+\item{taper}{parameter controlling how tapered the plant area index
+is towards the top. A value of one is typical of grass. Lower values give
+a more even spread. Cannot be negative or zero.}
 }
 \value{
 a vector of length `n` of plant area index values the sum of which equals `PAI`

@@ -4,12 +4,16 @@
 \alias{vegpforgrass}
 \title{Generates vegetation parameters for grass}
 \usage{
-vegpforgrass(hgt, n = 20)
+vegpforgrass(hgt, n = 20, taper = 1)
 }
 \arguments{
 \item{hgt}{grass height (m) - of tallest grass spike (~1.5x drop disk measured height)}
 
 \item{n}{Number of plant area index values to generate. Default: 20 (see details)}
+
+\item{taper}{parameter controlling how tapered the plant area index
+is towards the top. A value of one is typical of grass. Lower values give
+a more even spread. Cannot be negative or zero.}
 }
 \value{
 a vector of length `n` of plant area index values the sum of which equals `PAI`
