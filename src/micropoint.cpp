@@ -870,7 +870,6 @@ DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, doubl
     std::vector<double> Rh(tc.size());
     std::vector<double> Uz(tc.size());
     double d = zeroplanedisCpp(0.12, 1);
-    std::vector<double> zm(tc.size());
     for (size_t i = 0; i < tc.size(); ++i) {
         double zm = roughlengthCpp(0.12, 1, d, psih[i]);
         double zh = 0.2 * zm;
@@ -879,10 +878,13 @@ DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, doubl
         Tz[i] = (Tc[i] - tc[i]) * (1 - lnr) + tc[i];
         // Humidity
         double ea = satvapCpp(tc[i]) * rh[i] / 100;
-        double es = satvapCpp(Tc[i]);
+        double es = satvapCpp(Tc[i]) * sqrt(rh[i] / 100);
         double ez = ea + (es - ea) * (1 - lnr);
         es = satvapCpp(Tz[i]);
         Rh[i] = (ez / es) * 100;
+        // Cap Rh
+        if (Rh[i] < 0.25 * rh[i]) Rh[i] = 0.25 * rh[i];
+        if (Rh[i] > 100.0) Rh[i] = 100.0;
         // Wind speed
         double lnru = log((zout - d) / zm) / log((uzin - d) / zm);
         Uz[i] = ws[i] * lnru;
