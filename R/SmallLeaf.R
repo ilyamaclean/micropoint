@@ -67,8 +67,9 @@ PAIgeometry <- function(PAI, skew, spread, n = 1000) {
 #' be between 0.001 and 0.9999. If neither `PAI` or `fraccover` is supplied, `PAI`
 #' is estimated using a simple allometric relationship with sward height,
 #' derived from field measurements from a meadow in northern Spain.
-#' @examples
+#' @rdname PAIgrass
 #' @export
+#' @examples
 #' paii <- PAIgrass(hgt = 0.25, n = 1000)
 #' folden <- paii * 1000
 #' z <- (c(1:1000) / 1000) * 0.25
@@ -114,6 +115,7 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #'  \item{vegp}{An object of vegetation parameters for running the microclimate model}
 #'  \item{paii}{a vector of length `n` of plant area index values}
 #' }
+#' @rdname vegpforgrass
 #' @export
 #' @examples
 #' vp <- vegpforgrass(0.25, 20)
@@ -134,6 +136,3 @@ vegpforgrass <- function(hgt, n = 20, PAI = NA, taper = 1) {
   paii<-PAIgrass(hgt, n, PAI = PAI, taper = taper)
   return(list(vegp=vegp,paii=paii))
 }
-
-
-
