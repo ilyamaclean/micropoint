@@ -61,8 +61,8 @@ BigLeafCpp <- function(obstime, climdata, vegp, groundp, soilm, lat, lon, dTmx =
     .Call(`_micropoint_BigLeafCpp`, obstime, climdata, vegp, groundp, soilm, lat, lon, dTmx, zref, maxiter, bwgt, tol, gmn, yearG)
 }
 
-weatherhgtCpp <- function(obstime, climdata, zin, uzin, zout, lat, lon) {
-    .Call(`_micropoint_weatherhgtCpp`, obstime, climdata, zin, uzin, zout, lat, lon)
+weatherhgtCpp <- function(obstime, climdata, zin, uzin, zout, lat, lon, yearG = TRUE) {
+    .Call(`_micropoint_weatherhgtCpp`, obstime, climdata, zin, uzin, zout, lat, lon, yearG)
 }
 
 soilmCpp <- function(climdata, rmu, mult, pwr, Smax, Smin, Ksat, a) {

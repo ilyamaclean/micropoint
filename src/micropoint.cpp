@@ -852,7 +852,7 @@ Rcpp::List BigLeafCpp(DataFrame obstime, DataFrame climdata, std::vector<double>
 }
 // Perform weather height adjustment
 // [[Rcpp::export]]
-DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, double uzin, double zout, double lat, double lon)
+DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, double uzin, double zout, double lat, double lon, bool yearG = true)
 {
     std::vector<double> tc = climdata["temp"];
     std::vector<double> rh = climdata["relhum"];
@@ -861,7 +861,7 @@ DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, doubl
     std::vector<double> groundp({ 0.15,0.0, 180.0,0.97,1.529643,0.509,0.06,0.5422,5.2,-5.6,0.419,0.074 });
     std::vector<double> soilm(tc.size(), 0.2); // Initialize soilm with size and value 0.2
     // Run point model
-    Rcpp::List bigleafp = BigLeafCpp(obstime, climdata, vegp, groundp, soilm, lat, lon, 25, 2, 20, 0.5, 0.5, 0.1);
+    Rcpp::List bigleafp = BigLeafCpp(obstime, climdata, vegp, groundp, soilm, lat, lon, 25, 2, 20, 0.5, 0.5, 0.1, yearG);
     // Extract things needed from list
     std::vector<double> psih = Rcpp::as<std::vector<double>>(bigleafp["psih"]);
     std::vector<double> Tc = Rcpp::as<std::vector<double>>(bigleafp["Tc"]);
