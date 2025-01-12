@@ -10,7 +10,7 @@ A list of  the following objects:
   \item{gref}{ground reflectance}
   \item{slope}{slope of ground surface (deg)}
   \item{aspect}{aspect of ground surface (deg from north)}
-  \item{em}{emissvity of gorund surface}
+  \item{em}{emissivity of ground surface}
   \item{rho}{Soil bulk density (Mg / m^3)}
   \item{Vm}{Volumetric mineral fraction of soil}
   \item{Vq}{Volumetric quartz fraction of soil}
