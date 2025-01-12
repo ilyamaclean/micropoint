@@ -211,10 +211,16 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
   # Create vectors of vegp and groundp
   vegpp<-as.vector(unlist(vegp))
   groundpp<-as.vector(unlist(groundp))
+  climsave<-climdata
   if (vegp$h > zref) {
     climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
+    s<-which(is.na(climdata$temp))
+    climdata$temp[s]<-climsave$temp[s]
+    s<-which(is.na(climdata$relhum))
+    climdata$relhum[s]<-climsave$relhum[s]
     zref<-vegp$h
   }
+  climsave<-NULL
   climdata$windspeed[climdata$windspeed<0.5]<-0.5
   if (class(soilm)=="logical") {
     soiltype<-.soilmatch(groundp)
