@@ -13,6 +13,44 @@ knitr::opts_chunk$set(
   comment = "#>"
 )
 ```
+<style>
+  body {
+    text-align: justify;
+  }
+  
+  .col2 {
+    columns: 2 200px;         /* number of columns and width in pixels */
+    -webkit-columns: 2 200px; /* chrome, safari */
+    -moz-columns: 2 200px;    /* firefox */
+  }
+  
+  .leg {
+    font-size: 12px;
+  }
+
+  img {
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 100%;
+    height: auto;
+  }
+
+  .figure {
+    text-align: center;
+    margin: 20px 0;
+  }
+
+  .figure img {
+    display: inline-block;
+    vertical-align: middle;
+  }
+
+  .figure figcaption {
+    font-size: 12px;
+    text-align: center;
+  }
+</style>
 * [Overview](#overview)
 * [Quick start](#quick-start)
 * [Model inputs](#model-inputs)
@@ -44,7 +82,14 @@ In line with standard approaches for mechanistic microclimate modelling, the mod
 ## Quick start
 In this section brief instructions for running the `micropoint` model are provided. The rest of the vignette is devoted to providing more in-depth instruction. Three sets of input variables are needed: (1) a dataset of hourly weather, (2) a dataset of vegetation parameters and (3) a dataset of soil and ground surface properties. The datasets should have the same format and units as the example datasets included with the package and more details on these is provided below. 
 
-In the code below, the point microclimate model is used to derive microclimate estimates one meter above ground for a 10m tall forest canopy using the default inputs and inbuilt datasets. Air temperature (red) is plotted, but the model returns a wider range of outputs (see below). 
+To start, install the package form Github as follows
+
+```{r eval=FALSE}
+require(devtools)
+devtools::install_github("ilyamaclean/micropoint")
+```
+
+In the code below, the point microclimate model is run and  used to derive microclimate estimates one meter above ground for a 10m tall forest canopy using the default inputs and inbuilt datasets. Air temperature (red) is plotted, but the model returns a wider range of outputs (see below). 
 
 ```{r eval=FALSE}
 library(micropoint)

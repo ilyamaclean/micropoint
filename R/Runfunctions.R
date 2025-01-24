@@ -214,12 +214,12 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
   climsave<-climdata
   if (vegp$h > zref) {
     climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
-    s<-which(is.na(climdata$temp))
-    climdata$temp[s]<-climsave$temp[s]
-    s<-which(is.na(climdata$relhum))
-    climdata$relhum[s]<-climsave$relhum[s]
-    s<-which(is.na(climdata$windspeed))
-    climdata$windspeed[s]<-climsave$windspeed[s]
+    #s<-which(is.na(climdata$temp))
+    #climdata$temp[s]<-climsave$temp[s]
+    #s<-which(is.na(climdata$relhum))
+    #climdata$relhum[s]<-climsave$relhum[s]
+    #s<-which(is.na(climdata$windspeed))
+    #climdata$windspeed[s]<-climsave$windspeed[s]
     zref<-vegp$h
   }
   climsave<-NULL
