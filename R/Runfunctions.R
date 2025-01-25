@@ -410,3 +410,36 @@ plotprofile<-function(climdata, hr, plotout = "tair", vegp, paii = NA, groundp, 
   }
   return(list(z=zz,var=out))
 }
+#' @title apply diurnal temperature range correction to climate data
+#' @description The function `dtr_correct` applies a correction to temperature
+#' and relative humidity to enable more realistic height adjustments
+#' @param climdata a data.frame of hourly weather as in the example dataset
+#' `climdata` (see details)
+#' @param zref height above ground (m) of e.g. temperature measurements in `climdata`
+#' @param uref height above ground (m) of wind speed measurements in `climdata` (if different from zref)
+#' @param lat latitude (decimal degrees). Negative south of the equator.
+#' @param long longitude (decimal degrees). Negative west of the Greenwich Meridian.
+#' @param details Climate datasets derived from e.g. ERA5 or NCEP/NOAA often
+#' underestimate the diurnal temperature range in coastal areas, where a grid
+#' cell is classified as sea. When running the microclimate model in areas with
+#' tall vegetation, an automatic height adjustment is performed to derive estimates
+#' of wind speed, temperature and relative humidity at the top of the canopy. This
+#' is achieved by assuming land surface properties typical of a weather station and
+#' extrapolating the vertical profiles upwards. However, in instances where the original
+#' climate dataset significantly underestimates the diurnal temperature range, this
+#' can cause problems. When extrapolated upward, the temperature profiles become
+#' too variable and hence a warning is given. This function corrects diurnal temperatures ranges by adopting
+#' the following rational: temperatures at greater height will always will always
+#' have a lower diurnal temperature range than at lower heights as the diurnal cycle
+#' is caused by absorption of radiation by the ground surface. The diurnal temperature
+#' range is incrementally adjusted until this is achieved.
+dtr_correct <- function(climdata, zref, uzref = zref, lat, long) {
+  # Create obs_time data.frame
+  tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
+  obstime <- data.frame(year = tme$year +1900,
+                        month = tme$mon + 1,
+                        day = tme$mday,
+                        hour = tme$hour + tme$min / 60 + tme$sec / 3600)
+  climdatan <- dtr_correctCpp(obstime, climdata, zref, uzref, zref * 5, lat, long, FALSE)
+  return(climdatan)
+}

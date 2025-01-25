@@ -262,9 +262,9 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// dtr_correct
-DataFrame dtr_correct(DataFrame obstime, DataFrame climdata, double zin, double uzin, double zout, double lat, double lon, bool yearG);
-RcppExport SEXP _micropoint_dtr_correct(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP zinSEXP, SEXP uzinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP yearGSEXP) {
+// dtr_correctCpp
+DataFrame dtr_correctCpp(DataFrame obstime, DataFrame climdata, double zin, double uzin, double zout, double lat, double lon, bool yearG);
+RcppExport SEXP _micropoint_dtr_correctCpp(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP zinSEXP, SEXP uzinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP yearGSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -276,7 +276,7 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type lat(latSEXP);
     Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
     Rcpp::traits::input_parameter< bool >::type yearG(yearGSEXP);
-    rcpp_result_gen = Rcpp::wrap(dtr_correct(obstime, climdata, zin, uzin, zout, lat, lon, yearG));
+    rcpp_result_gen = Rcpp::wrap(dtr_correctCpp(obstime, climdata, zin, uzin, zout, lat, lon, yearG));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -468,7 +468,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_weatherhgtCpp", (DL_FUNC) &_micropoint_weatherhgtCpp, 8},
     {"_micropoint_meandtrCpp", (DL_FUNC) &_micropoint_meandtrCpp, 1},
     {"_micropoint_adjustdtrCpp", (DL_FUNC) &_micropoint_adjustdtrCpp, 2},
-    {"_micropoint_dtr_correct", (DL_FUNC) &_micropoint_dtr_correct, 8},
+    {"_micropoint_dtr_correctCpp", (DL_FUNC) &_micropoint_dtr_correctCpp, 8},
     {"_micropoint_soilmCpp", (DL_FUNC) &_micropoint_soilmCpp, 8},
     {"_micropoint_CanopyWindCpp", (DL_FUNC) &_micropoint_CanopyWindCpp, 2},
     {"_micropoint_SmallLeafOne", (DL_FUNC) &_micropoint_SmallLeafOne, 20},

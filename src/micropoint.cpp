@@ -968,27 +968,26 @@ std::vector<double> adjustrelhum(std::vector<double> tc,
 }
 // Correct dtr when applying weather height adjustment
 // [[Rcpp::export]]
-DataFrame dtr_correct(DataFrame obstime, DataFrame climdata,
+DataFrame dtr_correctCpp(DataFrame obstime, DataFrame climdata,
     double zin, double uzin, double zout, double lat, double lon,
     bool yearG = true)
 {
     int iter = 0;
     int tst = 1;
     double dtrc = 1.0;
-    std::vector<double> tc = climdata["temp"];
+    DataFrame climdatan = clone(climdata);
+    std::vector<double> tc = climdatan["temp"];
     std::vector<double> tcn = tc;
-    std::vector<double> rh = climdata["relhum"];
+    std::vector<double> rh = climdatan["relhum"];
     while (tst > 0) {
-        DataFrame climdata2 = weatherhgtCpp(obstime, climdata, zin, uzin, zout,
+        DataFrame climdata2 = weatherhgtCpp(obstime, climdatan, zin, uzin, zout,
             lat, lon, yearG);
         std::vector<double> tc2 = climdata2["temp"];
         double dtrr = meandtrCpp(tc2) / meandtrCpp(tcn);
         if (dtrr > 1.0) {
             dtrc += 0.1;
             tcn = adjustdtrCpp(tc, dtrc);
-            rh = adjustrelhum(tc, tcn, rh);
-            climdata["temp"] = tcn;
-            climdata["relhum"] = rh;
+            climdatan["temp"] = tcn;
         }
         else {
             tst = 0;
@@ -996,7 +995,9 @@ DataFrame dtr_correct(DataFrame obstime, DataFrame climdata,
         ++iter;
         if (iter > 20) tst = 0;
     }
-    return climdata;
+    rh = adjustrelhum(tc, tcn, rh);
+    climdatan["relhum"] = rh;
+    return climdatan;
 }
 // Soil moisture model
 // [[Rcpp::export]]
