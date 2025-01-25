@@ -239,6 +239,47 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// meandtrCpp
+double meandtrCpp(std::vector<double> temp);
+RcppExport SEXP _micropoint_meandtrCpp(SEXP tempSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::vector<double> >::type temp(tempSEXP);
+    rcpp_result_gen = Rcpp::wrap(meandtrCpp(temp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// adjustdtrCpp
+std::vector<double> adjustdtrCpp(std::vector<double> temp, double dtrc);
+RcppExport SEXP _micropoint_adjustdtrCpp(SEXP tempSEXP, SEXP dtrcSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::vector<double> >::type temp(tempSEXP);
+    Rcpp::traits::input_parameter< double >::type dtrc(dtrcSEXP);
+    rcpp_result_gen = Rcpp::wrap(adjustdtrCpp(temp, dtrc));
+    return rcpp_result_gen;
+END_RCPP
+}
+// dtr_correct
+DataFrame dtr_correct(DataFrame obstime, DataFrame climdata, double zin, double uzin, double zout, double lat, double lon, bool yearG);
+RcppExport SEXP _micropoint_dtr_correct(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP zinSEXP, SEXP uzinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP yearGSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< double >::type zin(zinSEXP);
+    Rcpp::traits::input_parameter< double >::type uzin(uzinSEXP);
+    Rcpp::traits::input_parameter< double >::type zout(zoutSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< bool >::type yearG(yearGSEXP);
+    rcpp_result_gen = Rcpp::wrap(dtr_correct(obstime, climdata, zin, uzin, zout, lat, lon, yearG));
+    return rcpp_result_gen;
+END_RCPP
+}
 // soilmCpp
 std::vector<double> soilmCpp(DataFrame climdata, double rmu, double mult, double pwr, double Smax, double Smin, double Ksat, double a);
 RcppExport SEXP _micropoint_soilmCpp(SEXP climdataSEXP, SEXP rmuSEXP, SEXP multSEXP, SEXP pwrSEXP, SEXP SmaxSEXP, SEXP SminSEXP, SEXP KsatSEXP, SEXP aSEXP) {
@@ -425,6 +466,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_mayCpp", (DL_FUNC) &_micropoint_mayCpp, 1},
     {"_micropoint_BigLeafCpp", (DL_FUNC) &_micropoint_BigLeafCpp, 14},
     {"_micropoint_weatherhgtCpp", (DL_FUNC) &_micropoint_weatherhgtCpp, 8},
+    {"_micropoint_meandtrCpp", (DL_FUNC) &_micropoint_meandtrCpp, 1},
+    {"_micropoint_adjustdtrCpp", (DL_FUNC) &_micropoint_adjustdtrCpp, 2},
+    {"_micropoint_dtr_correct", (DL_FUNC) &_micropoint_dtr_correct, 8},
     {"_micropoint_soilmCpp", (DL_FUNC) &_micropoint_soilmCpp, 8},
     {"_micropoint_CanopyWindCpp", (DL_FUNC) &_micropoint_CanopyWindCpp, 2},
     {"_micropoint_SmallLeafOne", (DL_FUNC) &_micropoint_SmallLeafOne, 20},

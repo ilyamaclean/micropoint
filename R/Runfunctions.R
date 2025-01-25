@@ -214,12 +214,23 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
   climsave<-climdata
   if (vegp$h > zref) {
     climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
-    #s<-which(is.na(climdata$temp))
-    #climdata$temp[s]<-climsave$temp[s]
-    #s<-which(is.na(climdata$relhum))
-    #climdata$relhum[s]<-climsave$relhum[s]
-    #s<-which(is.na(climdata$windspeed))
-    #climdata$windspeed[s]<-climsave$windspeed[s]
+    s<-which(is.na(climdata$temp))
+    climdata$temp[s]<-climsave$temp[s]
+    s<-which(is.na(climdata$relhum))
+    climdata$relhum[s]<-climsave$relhum[s]
+    s<-which(is.na(climdata$windspeed))
+    climdata$windspeed[s]<-climsave$windspeed[s]
+    # run dtr checks
+    if (runchecks) {
+      dtro<-meandtrCpp(climsave$temp)
+      dtrn<-meandtrCpp(climdata$temp)
+      if (dtrn > dtro) {
+        txt1 <- "Diurnal temperature range seems lower than it should be, "
+        txt2 <- "which can cause problems when height-corrected weather data. "
+        txt3 <- "Conisder running dtr_correct function on climdata"
+        warning(paste0(txt1,txt2,txt3,"\n"))
+      }
+    }
     zref<-vegp$h
   }
   climsave<-NULL

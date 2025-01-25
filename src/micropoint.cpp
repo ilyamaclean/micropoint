@@ -85,7 +85,7 @@ double solarindexCpp(double slope, double aspect, double zen, double azi, bool s
 // ** Calculate clear sky radiation ** //
 // [[Rcpp::export]]
 std::vector<double> clearskyradCpp(std::vector<int> year, std::vector<int> month, std::vector<int> day,
-    std::vector<double> lt, double lat, double lon, std::vector<double> tc, std::vector<double> rh, 
+    std::vector<double> lt, double lat, double lon, std::vector<double> tc, std::vector<double> rh,
     std::vector<double> pk)
 {
     std::vector<double> Ic(year.size());
@@ -860,6 +860,8 @@ DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, doubl
     std::vector<double> vegp({ 0.12,1,1,0.1,0.4,0.2,0.05,0.97,0.33,100.0 });
     std::vector<double> groundp({ 0.15,0.0, 180.0,0.97,1.529643,0.509,0.06,0.5422,5.2,-5.6,0.419,0.074 });
     std::vector<double> soilm(tc.size(), 0.2); // Initialize soilm with size and value 0.2
+    int hrs = tc.size();
+    if (hrs < 8760) yearG = false;
     // Run point model
     Rcpp::List bigleafp = BigLeafCpp(obstime, climdata, vegp, groundp, soilm, lat, lon, 25, 2, 20, 0.5, 0.5, 0.1, yearG);
     // Extract things needed from list
@@ -895,6 +897,106 @@ DataFrame weatherhgtCpp(DataFrame obstime, DataFrame climdata, double zin, doubl
     climdata_copy["relhum"] = Rh;
     climdata_copy["windspeed"] = Uz;
     return climdata_copy;
+}
+// Calculate mean dtr
+// [[Rcpp::export]]
+double meandtrCpp(std::vector<double> temp) {
+    int ndays = temp.size() / 24;
+    // Calculate daily diurnal temperature range
+    std::vector<double> dtr(ndays);
+    int idx = 0;
+    for (int d = 0; d < ndays; ++d) {
+        double tmx = -999.9;
+        double tmn = 999.9;
+        for (int h = 0; h < 24; ++h) {
+            if (temp[idx] > tmx) tmx = temp[idx];
+            if (temp[idx] < tmn) tmn = temp[idx];
+            ++idx;
+        }
+        dtr[d] = tmx - tmn;
+    }
+    // Calculate mean daily diurnal temperature range
+    double dtrm = 0.0;
+    for (int d = 0; d < ndays; ++d) dtrm += dtr[d];
+    dtrm = dtrm / ndays;
+    return dtrm;
+}
+// Adjust dtr by a fixed amount
+// [[Rcpp::export]]
+std::vector<double> adjustdtrCpp(std::vector<double> temp, double dtrc) {
+    int ndays = temp.size() / 24;
+    // Create new vector
+    std::vector<double> tempadj(temp.size());
+    int idx1 = 0;
+    int idx2 = 0;
+    for (int d = 0; d < ndays; ++d) {
+        // Calculate daily max and min
+        double tmx = -999.9;
+        double tmn = 999.9;
+        for (int h = 0; h < 24; ++h) {
+            if (temp[idx1] > tmx) tmx = temp[idx1];
+            if (temp[idx1] < tmn) tmn = temp[idx1];
+            ++idx1;
+        }
+        // Perform adjustment
+        double tmean = (tmx + tmn) / 2.0;
+        for (int h = 0; h < 24; ++h) {
+            double dif = temp[idx2] - tmean;
+            tempadj[idx2] = (dif * dtrc) + tmean;
+            ++idx2;
+        }
+    }
+    return tempadj;
+}
+// Adjust relative humidity by new temperature
+std::vector<double> adjustrelhum(std::vector<double> tc,
+    std::vector<double> tcn, std::vector<double> rh)
+{
+    // Initialise new relative humidity variable
+    std::vector<double> rhn(tc.size());
+    for (size_t i = 0; i < tc.size(); ++i) {
+        // Calculate vapour pressure
+        double ea = satvapCpp(tc[i]) * (rh[i] / 100.0);
+        // Calculate new relative humidity
+        double esn = satvapCpp(tcn[i]);
+        rhn[i] = (ea / esn) * 100.0;
+        // Set limits
+        if (rhn[i] > 100.0) rhn[i] = 100.0;
+        if (rhn[i] < 25.0) rhn[i] = 25.0;
+    }
+    return rhn;
+}
+// Correct dtr when applying weather height adjustment
+// [[Rcpp::export]]
+DataFrame dtr_correct(DataFrame obstime, DataFrame climdata,
+    double zin, double uzin, double zout, double lat, double lon,
+    bool yearG = true)
+{
+    int iter = 0;
+    int tst = 1;
+    double dtrc = 1.0;
+    std::vector<double> tc = climdata["temp"];
+    std::vector<double> tcn = tc;
+    std::vector<double> rh = climdata["relhum"];
+    while (tst > 0) {
+        DataFrame climdata2 = weatherhgtCpp(obstime, climdata, zin, uzin, zout,
+            lat, lon, yearG);
+        std::vector<double> tc2 = climdata2["temp"];
+        double dtrr = meandtrCpp(tc2) / meandtrCpp(tcn);
+        if (dtrr > 1.0) {
+            dtrc += 0.1;
+            tcn = adjustdtrCpp(tc, dtrc);
+            rh = adjustrelhum(tc, tcn, rh);
+            climdata["temp"] = tcn;
+            climdata["relhum"] = rh;
+        }
+        else {
+            tst = 0;
+        }
+        ++iter;
+        if (iter > 20) tst = 0;
+    }
+    return climdata;
 }
 // Soil moisture model
 // [[Rcpp::export]]

@@ -65,6 +65,18 @@ weatherhgtCpp <- function(obstime, climdata, zin, uzin, zout, lat, lon, yearG = 
     .Call(`_micropoint_weatherhgtCpp`, obstime, climdata, zin, uzin, zout, lat, lon, yearG)
 }
 
+meandtrCpp <- function(temp) {
+    .Call(`_micropoint_meandtrCpp`, temp)
+}
+
+adjustdtrCpp <- function(temp, dtrc) {
+    .Call(`_micropoint_adjustdtrCpp`, temp, dtrc)
+}
+
+dtr_correct <- function(obstime, climdata, zin, uzin, zout, lat, lon, yearG = TRUE) {
+    .Call(`_micropoint_dtr_correct`, obstime, climdata, zin, uzin, zout, lat, lon, yearG)
+}
+
 soilmCpp <- function(climdata, rmu, mult, pwr, Smax, Smin, Ksat, a) {
     .Call(`_micropoint_soilmCpp`, climdata, rmu, mult, pwr, Smax, Smin, Ksat, a)
 }
