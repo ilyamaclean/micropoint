@@ -1426,7 +1426,7 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
         SL[i] = (paii[i] / hgt) * HL.L[i];
         // For near-field correction factor
         double btm = -0.399 * hgt * log(1 - exp(-abs(hgt / 2.0 - z[i]))) / nn;
-        sbtm = sbtm + btm;
+        if (hgt / 2.0 != z[i]) sbtm = sbtm + btm;
         // Compute reference height near - field and far - field
         double Zeta = abs((hgt - z[i]) / (ow[i] * TL));
         double kn = -0.39894 * log(1.0 - exp(-Zeta)) - 0.15623 * exp(-Zeta);
