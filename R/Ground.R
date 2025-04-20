@@ -23,7 +23,7 @@ creategroundp<-function(soiltype) {
   groundp<-list(gref=gref,slope=0,aspect=180,em=em,
                 rho=soilparams$rho[ii],Vm=soilparams$Vm[ii],
                 Vq=soilparams$Vq[ii],Mc=soilparams$Mc[ii],
-                b=soilparams$b[ii],Psie=soilparams$Psie[ii],
+                b=soilparams$b[ii],Psie=soilparams$psi_e[ii]*-1,
                 Smax=soilparams$Smax[ii],Smin=soilparams$Smin[ii],
                 alpha=soilparams$alpha[ii],n=soilparams$n[ii],
                 Ksat=soilparams$Ksat[ii])
