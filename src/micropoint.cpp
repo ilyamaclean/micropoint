@@ -267,7 +267,7 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
                 if (trb > 0.999) trb = 0.999;
                 if (trb < 0.0) trb = 0.0;
                 double Rb = Rbeam * cosz;
-                double trg = trb + exp(-kd * pait); // transmission to ground though gaps and leaves
+                double trg = trb + (1 - trb) * exp(-kd * pait); // transmission to ground though gaps and leaves
                 double Rbc = (trg * si + (1 - trg) * cosz) * Rbeam;
                 // Calculate albedo and ground flux
                 double albb = trd * gref + (1.0 - trd) * (p5 / sig + p6 + p7);
@@ -1187,8 +1187,8 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
             Rswup[i] = Rddu * Rdif + Rdbu * Rb;
             // ~~ Calculate shortwave radiation absorbed by leaf
             double sil = k * cosz;
-            double swupper = (1 - lref) * (Rdifdown[i] + sil * Rdirdown[i]);
-            double swunder = (1 - lref) * Rswup[i];
+            double swupper = a * (Rdifdown[i] + sil * Rdirdown[i]);
+            double swunder = a * Rswup[i];
             Rswabs[i] = 0.5 * (swupper + swunder);
             // **************** Calculate PAR ************************
             // ~~ Calculate normalised diffuse only upward
@@ -1215,8 +1215,8 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
             double PARdn = Rddd * Rdif + Rdbd * Rb;
             double PARup = Rddu * Rdif + Rdbu * Rb;
             // ~~ Calculate PAR absorbed by leaf
-            swupper = (1 - lrefp) * (PARdn + sil * Rdirdown[i]);
-            swunder = (1 - lrefp) * PARup;
+            swupper = ap * (PARdn + sil * Rdirdown[i]);
+            swunder = ap * PARup;
             PAR[i] = 0.5 * (swupper + swunder);
         }
     }
