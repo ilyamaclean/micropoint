@@ -13,7 +13,7 @@ a data frame with the following elements:
  \item{pres}{atmospheric press (kPa)}
  \item{swdown}{Total downward shortwave radiation (W / m^2)}
  \item{difrad}{Total downward diffuse radiation (W / m^2)}
- \item{lwdown}{Total downward shortwave radiation (W / m^2)}
+ \item{lwdown}{Total downward longwave radiation (W / m^2)}
  \item{windspeed}{Wind speed (m/s)}
  \item{winddir}{Wind direction (decimal degrees)}
  \item{precip}{precipitation (mm)}
