@@ -38,10 +38,14 @@ std::vector<double> solpositionCpp(double lat, double lon, int year, int month, 
     double tt = 0.261799 * (st - 12);
     double dec = (M_PI * 23.5 / 180) * cos(2 * M_PI * ((jd - 159.5) / 365.25));
     double coh = sin(dec) * sin(latr) + cos(dec) * cos(latr) * cos(tt);
+    if (coh > 1.0) coh = 1.0;
+    if (coh < -1.0) coh = -1.0;
     double z = acos(coh) * (180 / M_PI);
     // Calculate solar azimuth (degrees)
     double sh = sin(dec) * sin(latr) + cos(dec) * cos(latr) * cos(tt);
-    double hh = atan(sh / sqrt(1 - sh * sh));
+    double denom = 1.0 - sh * sh;
+    if (denom < 0.0) denom = 0.0;
+    double hh = atan(sh / sqrt(denom));
     double sazi = cos(dec) * sin(tt) / cos(hh);
     double cazi = (sin(latr) * cos(dec) * cos(tt) - cos(latr) * sin(dec)) /
         sqrt(pow(cos(dec) * sin(tt), 2) + pow(sin(latr) * cos(dec) * cos(tt) - cos(latr) * sin(dec), 2));
@@ -96,7 +100,8 @@ std::vector<double> clearskyradCpp(std::vector<int> year, std::vector<int> month
         if (zen <= 90.0) {
             double m = 35 * cos(z) * pow(1224 * cos(z) * cos(z) + 1, -0.5);
             double TrTpg = 1.021 - 0.084 * sqrt(m * 0.00949 * pk[i] + 0.051);
-            double xx = log(rh[i] / 100) + ((17.27 * tc[i]) / (237.3 + tc[i]));
+            double rhval = std::max(rh[i], 1e-6);
+            double xx = log(rhval / 100) + ((17.27 * tc[i]) / (237.3 + tc[i]));
             double Td = (237.3 * xx) / (17.27 - xx);
             double u = exp(0.1133 - log(3.78) + 0.0393 * Td);
             double Tw = 1 - 0.077 * pow(u * m, 0.3);
@@ -128,9 +133,9 @@ std::vector<double> cankCpp(double zen, double x, double si) {
     }
     if (k > 6000.0) k = 6000.0;
     // Calculate adjusted k
-    double kd = k * cos(Z) / si;
+    double kd = (si == 0.0) ? 1.0 : k * cos(Z) / si;
     if (si == 0) kd = 1.0;
-    double Kc = 1.0 / si;
+    double Kc = (si == 0.0) ? 600.0 : 1.0 / si;
     if (si == 0.0) Kc = 600.0;
     std::vector<double> kparams(3, 0.0);
     kparams[0] = k;
