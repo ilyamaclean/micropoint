@@ -1322,7 +1322,7 @@ std::vector<double> CanopyWindCpp(double hgt, std::vector<double> paii) {
     // Calculate whole canopy attenuation coefficient
     double pai = 0;
     for (size_t i = 0; i < paii.size(); ++i) pai += paii[i];
-    double Be = 0.205 * pow(pai, 0.445) + 0.1;
+    double Be = sqrt(0.003 + 0.1 * pai);
     double a = pai / hgt;
     double Lc = pow(0.25 * a, -1);
     double Lm = 2 * pow(Be, 3) * Lc;
@@ -1331,7 +1331,7 @@ std::vector<double> CanopyWindCpp(double hgt, std::vector<double> paii) {
     std::vector<double> ati(paii.size());
     double sati = 0;
     for (size_t i = 0; i < paii.size(); ++i) {
-        double Bei = 0.205 * pow(paii[i], 0.445) + 0.1;
+        double Bei = sqrt(0.003 + 0.1 * paii[i]);
         double ai = paii[i] / hgt;
         double Lci = pow(0.25 * ai, -1);
         double Lmi = 2 * pow(Bei, 3) * Lci;
