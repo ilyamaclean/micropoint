@@ -113,3 +113,14 @@ runmodel <- function(reqhgt, zref, lat, lon, obstime, climdata, bigleafvars, ite
     .Call(`_micropoint_runmodel`, reqhgt, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0, a1, bwgt)
 }
 
+BelowCanopyProfile <- function(z, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0 = 0.25, a1 = 1.25, bwgt = 0.5) {
+    .Call(`_micropoint_BelowCanopyProfile`, z, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0, a1, bwgt)
+}
+
+AboveCanopyProfile <- function(zregs, zref, lat, lon, obstime, climdata, bigleafvars, vegp) {
+    .Call(`_micropoint_AboveCanopyProfile`, zregs, zref, lat, lon, obstime, climdata, bigleafvars, vegp)
+}
+
+runmodelProfile <- function(heights, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0 = 0.25, a1 = 1.25, bwgt = 0.5) {
+    .Call(`_micropoint_runmodelProfile`, heights, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0, a1, bwgt)
+}

@@ -382,6 +382,24 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// AboveCanopyProfile
+Rcpp::List AboveCanopyProfile(const std::vector<double>& zregs, double zref, double lat, double lon, DataFrame obstime, DataFrame climdata, DataFrame bigleafvars, const std::vector<double>& vegp);
+RcppExport SEXP _micropoint_AboveCanopyProfile(SEXP zregsSEXP, SEXP zrefSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP bigleafvarsSEXP, SEXP vegpSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type zregs(zregsSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type bigleafvars(bigleafvarsSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type vegp(vegpSEXP);
+    rcpp_result_gen = Rcpp::wrap(AboveCanopyProfile(zregs, zref, lat, lon, obstime, climdata, bigleafvars, vegp));
+    return rcpp_result_gen;
+END_RCPP
+}
 // manCpp
 std::vector<double> manCpp(std::vector<double> x, int n);
 RcppExport SEXP _micropoint_manCpp(SEXP xSEXP, SEXP nSEXP) {
@@ -404,6 +422,30 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< DataFrame >::type bigleafvars(bigleafvarsSEXP);
     Rcpp::traits::input_parameter< std::vector<double> >::type groundp(groundpSEXP);
     rcpp_result_gen = Rcpp::wrap(Belowground(reqhgt, bigleafvars, groundp));
+    return rcpp_result_gen;
+END_RCPP
+}
+// BelowCanopyProfile
+Rcpp::List BelowCanopyProfile(const std::vector<double>& z, double zref, double lat, double lon, DataFrame obstime, DataFrame climdata, DataFrame bigleafvars, int iters, const std::vector<double>& vegp, const std::vector<double>& paii, const std::vector<double>& groundp, double a0, double a1, double bwgt);
+RcppExport SEXP _micropoint_BelowCanopyProfile(SEXP zSEXP, SEXP zrefSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP bigleafvarsSEXP, SEXP itersSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP groundpSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP bwgtSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type z(zSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type bigleafvars(bigleafvarsSEXP);
+    Rcpp::traits::input_parameter< int >::type iters(itersSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type groundp(groundpSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< double >::type bwgt(bwgtSEXP);
+    rcpp_result_gen = Rcpp::wrap(BelowCanopyProfile(z, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0, a1, bwgt));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -448,6 +490,30 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// runmodelProfile
+Rcpp::List runmodelProfile(const std::vector<double>& heights, double zref, double lat, double lon, DataFrame obstime, DataFrame climdata, DataFrame bigleafvars, int iters, const std::vector<double>& vegp, const std::vector<double>& paii, const std::vector<double>& groundp, double a0, double a1, double bwgt);
+RcppExport SEXP _micropoint_runmodelProfile(SEXP heightsSEXP, SEXP zrefSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP bigleafvarsSEXP, SEXP itersSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP groundpSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP bwgtSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type heights(heightsSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type bigleafvars(bigleafvarsSEXP);
+    Rcpp::traits::input_parameter< int >::type iters(itersSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type groundp(groundpSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< double >::type bwgt(bwgtSEXP);
+    rcpp_result_gen = Rcpp::wrap(runmodelProfile(heights, zref, lat, lon, obstime, climdata, bigleafvars, iters, vegp, paii, groundp, a0, a1, bwgt));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_solpositionCpp", (DL_FUNC) &_micropoint_solpositionCpp, 6},
@@ -478,6 +544,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_Belowground", (DL_FUNC) &_micropoint_Belowground, 3},
     {"_micropoint_Atground", (DL_FUNC) &_micropoint_Atground, 7},
     {"_micropoint_runmodel", (DL_FUNC) &_micropoint_runmodel, 14},
+    {"_micropoint_BelowCanopyProfile", (DL_FUNC) &_micropoint_BelowCanopyProfile, 14},
+    {"_micropoint_AboveCanopyProfile", (DL_FUNC) &_micropoint_AboveCanopyProfile, 8},
+    {"_micropoint_runmodelProfile", (DL_FUNC) &_micropoint_runmodelProfile, 14},
     {NULL, NULL, 0}
 };
 
