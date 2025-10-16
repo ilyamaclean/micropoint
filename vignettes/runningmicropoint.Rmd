@@ -177,7 +177,7 @@ z <- c(1:100) / 10
 plot(z ~ paii, type = "l", main = paste("Total PAI:", sum(paii)))
 ```
 
-Several of these vegetation parameters may be unknown, in which case reasonable estimates must be derived. Users will typically know the height of the canopy and width of leaves in the canopy. The plant atrea index may not be known, but can be approximately derived from canopy cover since:
+Several of these vegetation parameters may be unknown, in which case reasonable estimates must be derived. Users will typically know the height of the canopy and width of leaves in the canopy. The plant area index may not be known, but can be approximately derived from canopy cover since:
 
 \begin{equation}
 1-C_{f}=\exp(-P_{AI})

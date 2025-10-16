@@ -1179,7 +1179,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
             if (Rddd > 1.0) Rddd = 1.0;
             if (Rddd < 0.0) Rddd = 1.0;
             // ~~ Calculate normalised contribution of direct to upward diffuse
-            double Rdbu = trdu * gref + (1.0 - trdu) * ((p5 / sig) * exp(-kd * Pia) +
+            double Rdbu = clump * clump * gref + (1.0 - trdu) * ((p5 / sig) * exp(-kd * Pia) +
                 p6 * exp(-h * Pia) + p7 * exp(h * Pia));
             if (Rdbu > amx) Rdbu = amx;
             if (Rdbu < 0.0) Rdbu = 0.0;
@@ -1403,9 +1403,9 @@ canHL CanopyHL(double uh, double pk, radmodel2 swrad, radmodel3 lwrad, std::vect
     return out;
 }
 // Run Langrangian model for one iteration
-Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, double pk, double lwdown, radmodel2 swrad, 
-    std::vector<double> wc, std::vector<double> vegp, std::vector<double> paii, double groundem, std::vector<double> tleaf, 
-    std::vector<double> tair, std::vector<double> ea, double tground, double surfwet, double theta, double psim, double psih, 
+Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, double pk, double lwdown, radmodel2 swrad,
+    std::vector<double> wc, std::vector<double> vegp, std::vector<double> paii, double groundem, std::vector<double> tleaf,
+    std::vector<double> tair, std::vector<double> ea, double tground, double surfwet, double theta, double psim, double psih,
     double phih, std::vector<double> z, double a0 = 0.25, double a1 = 1.25)
 {
     // Extract vegp
