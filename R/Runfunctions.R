@@ -396,7 +396,7 @@ plotprofile<-function(climdata, hr, plotout = "tair", vegp, paii = NA, groundp, 
       if (plotout == "relhum") {
         ta<-climdata$temp[hr]+(microp$Tc[hr]-climdata$temp[hr])*(1-lnr)
         tair<-c(below$tair,ta)
-        relhum<-(.satvap(tair)/ezba)*100
+        relhum<-(ezba/.satvap(tair))*100
         relhum[relhum > 100]<-100
         plot(zz~relhum,type="l", xlab = "Relative humidity (%)",
              ylab = "Height (m)", col = "blue", lwd = 2)

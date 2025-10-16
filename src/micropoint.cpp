@@ -256,7 +256,7 @@ radmodel RadswabsCpp(double pai, double x, double lref, double ltra, double clum
                 std::vector<double> kp = cankCpp(zen, x, si);
                 double kd = kp[1];
                 double Kc = kp[2];
-                // Calculate two-stream parameters (direct)      
+                // Calculate two-stream parameters (direct)
                 double sig = (kd * kd + gma * gma - pow((a + gma), 2.0));
                 std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, kd, sig, u1, S1, D1, D2);
                 double p5 = tspdir[0];
@@ -392,7 +392,7 @@ double dpsihCpp(double ze)
     if (psih > 3) psih = 3;
     return psih;
 }
-// **  Calculate diabatic influencing factor for heat ** //  
+// **  Calculate diabatic influencing factor for heat ** //
 // [[Rcpp::export]]
 double dphihCpp(double ze)
 {
@@ -410,7 +410,7 @@ double dphihCpp(double ze)
     if (phih < 0.5) phih = 0.5;
     return phih;
 }
-// **  Calculate free convection ** //  
+// **  Calculate free convection ** //
 double gfreeCpp(double leafd, double H)
 {
     double d = 0.71 * leafd;
@@ -419,7 +419,7 @@ double gfreeCpp(double leafd, double H)
     if (gha < 0.1) gha = 0.1;
     return gha;
 }
-// **  Calculate molar conductance above canopy ** //  
+// **  Calculate molar conductance above canopy ** //
 double gturbCpp(double uf, double d, double zm, double zref, double ph, double psi_h, double gmin)
 {
     double z0 = 0.2 * zm + d; // heat exchange surface height
@@ -428,7 +428,7 @@ double gturbCpp(double uf, double d, double zm, double zref, double ph, double p
     if (g < gmin) g = gmin;
     return g;
 }
-// **  Stomatal conductance ** //  
+// **  Stomatal conductance ** //
 double stomcondCpp(double Rsw, double gsmax, double q50)
 {
     double rpar = Rsw * 4.6;
@@ -436,7 +436,7 @@ double stomcondCpp(double Rsw, double gsmax, double q50)
     return gs;
 }
 // **  Saturated vapour pressure ** //
-// [[Rcpp::export]]  
+// [[Rcpp::export]]
 double satvapCpp(double tc)
 {
     double es;
@@ -448,8 +448,8 @@ double satvapCpp(double tc)
     }
     return es;
 }
-// **  Dewpoint temperature ** // 
-// [[Rcpp::export]]   
+// **  Dewpoint temperature ** //
+// [[Rcpp::export]]
 double dewpointCpp(double tc, double ea)
 {
     double e0;
@@ -471,7 +471,7 @@ double dewpointCpp(double tc, double ea)
     return Tdew;
 }
 // **  Penman-Monteith equation ** //
-// [[Rcpp::export]]  
+// [[Rcpp::export]]
 double PenmanMonteithCpp(double Rabs, double gHa, double gV, double tc, double te, double pk, double ea, double em, double G, double erh)
 {
     double sb = 5.67 * pow(10, -8);
@@ -490,8 +490,8 @@ double PenmanMonteithCpp(double Rabs, double gHa, double gV, double tc, double t
     double Ts = tc + ((Rabs - Rema - la * (gV / pk) * Da * erh - G) / (cp * (gHa + gR) + la * (gV / pk) * De * erh));
     return Ts;
 }
-// **  Function to compute daily from hourly** // 
-// [[Rcpp::export]]   
+// **  Function to compute daily from hourly** //
+// [[Rcpp::export]]
 std::vector<double> hourtodayCpp(std::vector<double> hourly, std::string stat) {
     int numDays = hourly.size() / 24;
     std::vector<double> daily(numDays * 24, 0.0);
@@ -524,7 +524,7 @@ std::vector<double> hourtodayCpp(std::vector<double> hourly, std::string stat) {
     }
     return daily;
 }
-// **  Function to compute daily from hourly without replicating each value 24 times** //  
+// **  Function to compute daily from hourly without replicating each value 24 times** //
 std::vector<double> hourtodayCpp2(std::vector<double> hourly, std::string stat) {
     int numDays = hourly.size() / 24;
     std::vector<double> daily(numDays, 0.0);
@@ -561,8 +561,8 @@ std::vector<double> hourtodayCpp2(std::vector<double> hourly, std::string stat) 
     }
     return daily;
 }
-// **  Function to compute rolling mean temp ** // 
-// [[Rcpp::export]] 
+// **  Function to compute rolling mean temp ** //
+// [[Rcpp::export]]
 std::vector<double> maCpp(std::vector<double> x, int n) {
     std::vector<double> y(x.size());
     int m = x.size();
@@ -575,8 +575,8 @@ std::vector<double> maCpp(std::vector<double> x, int n) {
     }
     return y;
 }
-// **  Function to compute rolling mean yearly ** // 
-// [[Rcpp::export]]  
+// **  Function to compute rolling mean yearly ** //
+// [[Rcpp::export]]
 std::vector<double> mayCpp(std::vector<double> x) {
     // Calculate daily mean
     int numDays = x.size() / 24;
@@ -598,7 +598,7 @@ std::vector<double> mayCpp(std::vector<double> x) {
     }
     return z;
 }
-// **  Function to compute ground heat flux ** //  
+// **  Function to compute ground heat flux ** //
 Gmodel GFluxCpp(std::vector<double> Tg, std::vector<double> soilm, double rho, double Vm, double Vq, double Mc,
     std::vector<double> Gmax, std::vector<double> Gmin, int iter, bool yearG = true) {
     // Time invariant variables
@@ -753,7 +753,7 @@ Rcpp::List BigLeafCpp(DataFrame obstime, DataFrame climdata, std::vector<double>
             double zm = roughlengthCpp(h, pai, d, psih[i]);
             uf[i] = (0.4 * wspeed[i]) / (log((zref - d) / zm) + psim[i]);
             if (uf[i] < 0.0002) uf[i] = 0.0002;
-            double gmin = gfreeCpp(leafd, abs(H[i])) * 2 * pai;
+            double gmin = gfreeCpp(leafd, std::fabs(H[i])) * 2 * pai;
             double ph = phairCpp(tcc[i], pk[i]);
             double gHa = gturbCpp(uf[i], d, zm, zref, ph, psih[i], gmin);
             double gC = stomcondCpp(Rsw[i], gsmax * 3, q50 * 3);
@@ -775,8 +775,8 @@ Rcpp::List BigLeafCpp(DataFrame obstime, DataFrame climdata, std::vector<double>
             Tcn = tc[i] + dTc;
             Tgn = tc[i] + dTg;
             // Run tests for convergence
-            double tst2 = abs(Tcn - Tc[i]);
-            double tst3 = abs(Tgn - Tg[i]);
+            double tst2 = std::fabs(Tcn - Tc[i]);
+            double tst3 = std::fabs(Tgn - Tg[i]);
             if (tst2 > tst) tst = tst2;
             if (tst3 > tst) tst = tst3;
             // Reassign Tc and Tg using bwgt
@@ -1064,7 +1064,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         for (size_t i = 1; i < paii.size(); ++i) {
             z[i] = ((i + 1) / nn) * hgt;
             pai += paii[i];
-            double newdif = abs(z[i] - reqhgt);
+            double newdif = std::fabs(z[i] - reqhgt);
             if (newdif < mindif) {
                 whichz = i;
                 mindif = newdif;
@@ -1073,7 +1073,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         z[whichz] = reqhgt;
         // Calculate and adjust pait
         double pait = pai / (1 - clump);
-        // Calculate additional variables  
+        // Calculate additional variables
         double om = lref + ltra;
         double del = lref - ltra;
         double a = 1 - om;
@@ -1085,7 +1085,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         }
         double gma = 0.5 * (om + J * del);
         double h = sqrt(a * a + 2 * a * gma);
-        // Calculate additional variables (PAR) 
+        // Calculate additional variables (PAR)
         double omp = lrefp + ltrap;
         double delp = lrefp - ltrap;
         double ap = 1 - om;
@@ -1124,7 +1124,7 @@ radmodel2 RadiationSmallLeafSWCpp(double lat, double lon, int year, int month, i
         double k = kp[0];
         double kd = kp[1];
         double Kc = kp[2];
-        // Calculate two-stream parameters (direct)      
+        // Calculate two-stream parameters (direct)
         double sig = kd * kd + gma * gma - pow((a + gma), 2);
         double sigp = kd * kd + gmap * gmap - pow(ap + gmap, 2);
         std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, kd, sig, u1R, S1R, D1R, D2R);
@@ -1285,7 +1285,7 @@ radmodel3 RadiationSmallLeafLWCpp(std::vector<double> paii, double lwdown, doubl
 {
     // Calculate longwave radiation weights
     LWweights wgts = lwradweights(paii);
-    // ** Longwave 
+    // ** Longwave
     double sb = 5.67 * pow(10, -8);
     std::vector<double> lwupper(paii.size());
     std::vector<double> lwunder(paii.size());
@@ -1295,7 +1295,7 @@ radmodel3 RadiationSmallLeafLWCpp(std::vector<double> paii, double lwdown, doubl
         double lwsky = lwdown * wgts.trh[i];
         // longwave radiation upward from ground
         double lwgro = groundem * sb * pow(tground + 273.15, 4) * wgts.trg[i];
-        // Calculate multipliers for foliage radiation 
+        // Calculate multipliers for foliage radiation
         // ** Calculate sums of weights
         double smd = 0;
         double smu = 0;
@@ -1371,7 +1371,7 @@ canHL CanopyHL(double uh, double pk, radmodel2 swrad, radmodel3 lwrad, std::vect
         // Conductance for heat
         uz[i] = wc[i] * uh;
         double gHa = 1.4 * 0.135 * std::sqrt(uz[i] / (0.71 * leafd));
-        double gFo = 1.4 * 0.05 * pow(abs(tleaf[i] - tair[i]) / (0.71 * leafd), 0.25);
+        double gFo = 1.4 * 0.05 * pow(std::fabs(tleaf[i] - tair[i]) / (0.71 * leafd), 0.25);
         if (gFo > gHa) gHa = gFo;
         if (gHa < 0.25) gHa = 0.25;
         // Conductance for vapour
@@ -1467,10 +1467,10 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
         ST[i] = (paii[i] / hgt) * HL.H[i];
         SL[i] = (paii[i] / hgt) * HL.L[i];
         // For near-field correction factor
-        double btm = -0.399 * hgt * log(1 - exp(-abs(hgt / 2.0 - z[i]))) / nn;
+        double btm = -0.399 * hgt * log(1 - exp(-std::fabs(hgt / 2.0 - z[i]))) / nn;
         if (hgt / 2.0 != z[i]) sbtm = sbtm + btm;
         // Compute reference height near - field and far - field
-        double Zeta = abs((hgt - z[i]) / (ow[i] * TL));
+        double Zeta = std::fabs((hgt - z[i]) / (ow[i] * TL));
         double kn = -0.39894 * log(1.0 - exp(-Zeta)) - 0.15623 * exp(-Zeta);
         if (z[i] < hgt) {
             CnzrT = CnzrT + (ST[i] / ow[i]) * (kn * ((hgt - z[i]) / (ow[i] * TL)) + kn * ((hgt + z[i]) / (ow[i] * TL)));
@@ -1501,7 +1501,7 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
         double CnL = 0.0;
         for (size_t j = 0; j < tair.size(); ++j) {
             if (i != j) {
-                double Zeta = abs((z[i] - z[j]) / (ow[j] * TL));
+                double Zeta = std::fabs((z[i] - z[j]) / (ow[j] * TL));
                 double kn = -0.39894 * log(1.0 - exp(-Zeta)) - 0.15623 * exp(-Zeta);
                 CnT = CnT + (ST[j] / ow[j]) * (kn * ((z[i] - z[j]) / (ow[j] * TL)) + kn * ((z[i] + z[j]) / (ow[j] * TL)));
                 CnL = CnL + (SL[j] / ow[j]) * (kn * ((z[i] - z[j]) / (ow[j] * TL)) + kn * ((z[i] + z[j]) / (ow[j] * TL)));
@@ -1547,9 +1547,9 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
         if (ean[i] > emx) ean[i] = emx;
         if (ean[i] < emn) ean[i] = emn;
         // Calculate mxdif
-        if (abs(tairn[i] - tair[i]) > mxdif) mxdif = abs(tairn[i] - tair[i]);
-        if (abs(tleafn[i] - tleaf[i]) > mxdif) mxdif = abs(tleafn[i] - tleaf[i]);
-        if (abs(ean[i] - ea[i]) > mxdif) mxdif = abs(ean[i] - ea[i]);
+        if (std::fabs(tairn[i] - tair[i]) > mxdif) mxdif = std::fabs(tairn[i] - tair[i]);
+        if (std::fabs(tleafn[i] - tleaf[i]) > mxdif) mxdif = std::fabs(tleafn[i] - tleaf[i]);
+        if (std::fabs(ean[i] - ea[i]) > mxdif) mxdif = std::fabs(ean[i] - ea[i]);
     }
     Lang out;
     out.tleaf = tleafn;
@@ -1564,8 +1564,8 @@ Lang LangrangianOne(double reqhgt, double uh, double th, double tlh, double eh, 
 // Run below canopy model for one step;
 // [[Rcpp::export]]
 Rcpp::List SmallLeafOne(double reqhgt, double zref, double lat, double lon, std::vector<double> obsvars,
-    std::vector<double> climvars, std::vector<double> bigleafvars, int maxiters, std::vector<double> wc, std::vector<double> vegp, 
-    std::vector<double> paii, std::vector<double> groundp, std::vector<double> tleaf, std::vector<double> tair, std::vector<double> ea, 
+    std::vector<double> climvars, std::vector<double> bigleafvars, int maxiters, std::vector<double> wc, std::vector<double> vegp,
+    std::vector<double> paii, std::vector<double> groundp, std::vector<double> tleaf, std::vector<double> tair, std::vector<double> ea,
     double surfwet, std::vector<double> z, double a0 = 0.25, double a1 = 1.25, double bwgt = 0.5)
 {
     // Extract obsvars
@@ -1574,9 +1574,9 @@ Rcpp::List SmallLeafOne(double reqhgt, double zref, double lat, double lon, std:
     int day = obsvars[2];
     double hour = obsvars[3];
     // Extract climvars
-    double tc = climvars[0]; 
-    double rh = climvars[1]; 
-    double pk = climvars[2]; 
+    double tc = climvars[0];
+    double rh = climvars[1];
+    double pk = climvars[2];
     double Rsw = climvars[3];
     double Rdif = climvars[4];
     double lwdown = climvars[5];
@@ -1717,7 +1717,7 @@ DataFrame BelowCanopy(double reqhgt, double zref, double lat, double lon, DataFr
     double nn = static_cast<double>(paii.size());
     for (size_t i = 0; i < paii.size(); ++i) {
         z[i] = (static_cast<double>(i + 1) / nn) * veg_height;
-        double newdif = std::abs(z[i] - reqhgt);
+        double newdif = std::fabs(z[i] - reqhgt);
         if (newdif < mindif) {
             whichz = static_cast<int>(i);
             mindif = newdif;
@@ -1859,8 +1859,8 @@ Rcpp::DataFrame AboveCanopy(double reqhgt, double zref, double lat, double lon, 
     out["Rlwup"] = Rcpp::wrap(Rlwup);
     return out;
 }
-// **  Function to compute rolling mean yearly ** // 
-// [[Rcpp::export]]  
+// **  Function to compute rolling mean yearly ** //
+// [[Rcpp::export]]
 std::vector<double> manCpp(std::vector<double> x, int n) {
     std::vector<double> z(x.size());
     // Calculate rolling mean if n < 48
@@ -2020,7 +2020,7 @@ Rcpp::DataFrame Atground(double lat, double lon, DataFrame obstime, DataFrame cl
             std::vector<double> kp = cankCpp(zen, x, si);
             double kd = kp[1];
             double Kc = kp[2];
-            // Calculate two-stream parameters (direct)      
+            // Calculate two-stream parameters (direct)
             double sig = kd * kd + gma * gma - pow((a + gma), 2);
             std::vector<double> tspdir = twostreamdirCpp(pait, om, a, gma, J, del, h, gref, kd, sig, u1, S1, D1, D2);
             double p5 = tspdir[0];
