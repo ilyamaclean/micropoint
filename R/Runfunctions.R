@@ -209,8 +209,12 @@ runpointmodel<-function(climdata,  reqhgt, vegp, paii = NA, groundp, lat, long, 
   obstime<-data.frame(year=tme$year+1900,month=tme$mon+1,day=tme$mday,hour=tme$hour+tme$min/60+tme$sec/3600)
   climdata$obs_time<-NULL
   # Create vectors of vegp and groundp
-  vegpp<-as.vector(unlist(vegp))
-  groundpp<-as.vector(unlist(groundp))
+  vegpp <- c(vegp$h, vegp$pai, vegp$x, vegp$clump, vegp$lref, vegp$ltra,
+             vegp$leafd, vegp$em, vegp$gsmax, vegp$q50)
+  groundpp <- c(groundp$gref, groundp$slope, groundp$aspect, groundp$em,
+                groundp$rho, groundp$Vm, groundp$Vq, groundp$Mc, groundp$b,
+                groundp$Psie, groundp$Smax, groundp$Smin, groundp$alpha,
+                groundp$n, groundp$Ksat)
   climsave<-climdata
   if (vegp$h > zref) {
     climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
@@ -327,8 +331,12 @@ plotprofile<-function(climdata, hr, plotout = "tair", vegp, paii = NA, groundp, 
   obstime<-data.frame(year=tme$year+1900,month=tme$mon+1,day=tme$mday,hour=tme$hour+tme$min/60+tme$sec/3600)
   climdata$obs_time<-NULL
   # Create vectors of vegp and groundp
-  vegpp<-as.vector(unlist(vegp))
-  groundpp<-as.vector(unlist(groundp))
+  vegpp <- c(vegp$h, vegp$pai, vegp$x, vegp$clump, vegp$lref, vegp$ltra,
+             vegp$leafd, vegp$em, vegp$gsmax, vegp$q50)
+  groundpp <- c(groundp$gref, groundp$slope, groundp$aspect, groundp$em,
+                groundp$rho, groundp$Vm, groundp$Vq, groundp$Mc, groundp$b,
+                groundp$Psie, groundp$Smax, groundp$Smin, groundp$alpha,
+                groundp$n, groundp$Ksat)
   if (vegp$h > zref) {
     climdata<-weatherhgtCpp(obstime, climdata, zref, uref, vegp$h, lat, long)
     zref<-vegp$h
