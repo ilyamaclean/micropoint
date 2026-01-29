@@ -1850,7 +1850,7 @@ Rcpp::DataFrame AboveCanopy(double reqhgt, double zref, double lat, double lon, 
     Rcpp::DataFrame out;
     out["tair"] = Rcpp::wrap(tair);
     out["tcanopy"] = Rcpp::wrap(Tc);
-    out["relhum"] = Rcpp::wrap(ez);
+    out["relhum"] = Rcpp::wrap(relhum);
     out["windspeed"] = Rcpp::wrap(uz);
     out["Rdirdown"] = Rcpp::wrap(Rdir);
     out["Rdifdown"] = Rcpp::wrap(Rdif);
