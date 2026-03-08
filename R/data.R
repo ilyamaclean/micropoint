@@ -124,3 +124,25 @@
 #'   \item{q50}{value of PAR when stomatal conductances is at 50 percent of its maximum value (micro mol/m^2/s)}
 #' }
 "vegparams"
+#'
+#' A dataset used to assign extended vegetation parameters by plant functional type
+#'
+#' A data.frame of extended parameters for running the advanced microclimate model
+#'
+#' @format A data.frame with the following elements:
+#' \describe{
+#'   \item{varname}{Short name of vegetation parameter used by model}
+#'   \item{Description}{Description of short name}
+#'   \item{units}{Parameter units}
+#'   \item{BET.Tr}{Parameter values for Broadleaf Evergreen Trees (Tropical)}
+#'   \item{BET.Te}{Parameter values for Broadleaf Evergreen Trees (Temperate)}
+#'   \item{BDT}{Parameter values for Broadleaf Deciduous Trees}
+#'   \item{NET}{Parameter values for Needleleaf Evergreen Trees}
+#'   \item{NDT}{Parameter values for Needleleaf Deciduous Trees}
+#'   \item{C3}{Parameter values for C3 Grasses}
+#'   \item{C4}{Parameter values for C4 Grasses}
+#'   \item{ESh}{Parameter values for Evergreen Shrubs}
+#'   \item{DSh}{Parameter values for Deciduous Shrubs}
+#'   \item{multiplier}{value of PAR when stomatal conductances is at 50 percent of its maximum value (micro mol/m^2/s)}
+#' }
+"PFTparams"

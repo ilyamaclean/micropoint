@@ -63,7 +63,7 @@ runchecksfun <- function(climdata, vegp, groundp, lat, long) {
     groundp$aspect<-groundp$aspect%%360
   }
   if (groundp$em < 0) stop("groundp$em must be between zero and 1")
-  if (groundp$em > 1) stop("groundp$em must be between zero and 1")
+  if (groundp$em > 1) stop("groundp$em must be be?tween zero and 1")
   if (groundp$rho < 0) stop("groundp$rho cannot be negative")
   if (groundp$rho > 2.5) warning("groundp$rho seems high. Check units")
   if (groundp$Vm < 0) stop("groundp$Vm must be between 0 and 1")

@@ -448,6 +448,320 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// satvapCpp2
+double satvapCpp2(double tc);
+RcppExport SEXP _micropoint_satvapCpp2(SEXP tcSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type tc(tcSEXP);
+    rcpp_result_gen = Rcpp::wrap(satvapCpp2(tc));
+    return rcpp_result_gen;
+END_RCPP
+}
+// geometricCpp
+std::vector<double> geometricCpp(int n, double totalDepth);
+RcppExport SEXP _micropoint_geometricCpp(SEXP nSEXP, SEXP totalDepthSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type n(nSEXP);
+    Rcpp::traits::input_parameter< double >::type totalDepth(totalDepthSEXP);
+    rcpp_result_gen = Rcpp::wrap(geometricCpp(n, totalDepth));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Tabove
+double Tabove(double za, double zref, double th, double tref, double hgt, double pai);
+RcppExport SEXP _micropoint_Tabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP hgtSEXP, SEXP paiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type za(zaSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type th(thSEXP);
+    Rcpp::traits::input_parameter< double >::type tref(trefSEXP);
+    Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
+    Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
+    rcpp_result_gen = Rcpp::wrap(Tabove(za, zref, th, tref, hgt, pai));
+    return rcpp_result_gen;
+END_RCPP
+}
+// RHabove
+double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai);
+RcppExport SEXP _micropoint_RHabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP rhSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP tzSEXP, SEXP relhumSEXP, SEXP hgtSEXP, SEXP paiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type za(zaSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type rh(rhSEXP);
+    Rcpp::traits::input_parameter< double >::type th(thSEXP);
+    Rcpp::traits::input_parameter< double >::type tref(trefSEXP);
+    Rcpp::traits::input_parameter< double >::type tz(tzSEXP);
+    Rcpp::traits::input_parameter< double >::type relhum(relhumSEXP);
+    Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
+    Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
+    rcpp_result_gen = Rcpp::wrap(RHabove(za, zref, rh, th, tref, tz, relhum, hgt, pai));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Uabove
+double Uabove(double za, double zref, double uh, double uref, double hgt, double pai, double LL);
+RcppExport SEXP _micropoint_Uabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP uhSEXP, SEXP urefSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type za(zaSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type uh(uhSEXP);
+    Rcpp::traits::input_parameter< double >::type uref(urefSEXP);
+    Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
+    Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
+    Rcpp::traits::input_parameter< double >::type LL(LLSEXP);
+    rcpp_result_gen = Rcpp::wrap(Uabove(za, zref, uh, uref, hgt, pai, LL));
+    return rcpp_result_gen;
+END_RCPP
+}
+// reverseCumsum
+std::vector<double> reverseCumsum(const std::vector<double>& paii);
+RcppExport SEXP _micropoint_reverseCumsum(SEXP paiiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const std::vector<double>& >::type paii(paiiSEXP);
+    rcpp_result_gen = Rcpp::wrap(reverseCumsum(paii));
+    return rcpp_result_gen;
+END_RCPP
+}
+// profilebareR
+List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z, double zref, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double zm, int maxNrIterations, double tolerance);
+RcppExport SEXP _micropoint_profilebareR(SEXP hourtoplotSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP zSEXP, SEXP zrefSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP zmSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< size_t >::type hourtoplot(hourtoplotSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type z(zSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< double >::type zm(zmSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(profilebareR(hourtoplot, obstime, climdata, soilc, z, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance));
+    return rcpp_result_gen;
+END_RCPP
+}
+// profileR
+List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii20, std::vector<double> paii, std::vector<double> Lfrac20, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations, double tolerance, double a0, double a1, bool C3);
+RcppExport SEXP _micropoint_profileR(SEXP hourtoplotSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paii20SEXP, SEXP paiiSEXP, SEXP Lfrac20SEXP, SEXP LfracSEXP, SEXP zrefSEXP, SEXP CaSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< size_t >::type hourtoplot(hourtoplotSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii20(paii20SEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac20(Lfrac20SEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type Ca(CaSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(profileR(hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
+// RunBareR
+DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List soilc, double zref, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double zm, int maxNrIterations, double tolerance);
+RcppExport SEXP _micropoint_RunBareR(SEXP reqhgtSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP zrefSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP zmSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type reqhgt(reqhgtSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< double >::type zm(zmSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(RunBareR(reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance));
+    return rcpp_result_gen;
+END_RCPP
+}
+// RunModelR
+Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc, Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations, double tolerance, double a0, double a1, bool C3);
+RcppExport SEXP _micropoint_RunModelR(SEXP reqhgtSEXP, SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zrefSEXP, SEXP CaSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type reqhgt(reqhgtSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type Ca(CaSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
+// WeatherhgtCpp2
+List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zin, double zout, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double CO2ppm);
+RcppExport SEXP _micropoint_WeatherhgtCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP CO2ppmSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zin(zinSEXP);
+    Rcpp::traits::input_parameter< double >::type zout(zoutSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< double >::type CO2ppm(CO2ppmSEXP);
+    rcpp_result_gen = Rcpp::wrap(WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, lon, SoilTempIni, SoilThetaIni, CO2ppm));
+    return rcpp_result_gen;
+END_RCPP
+}
+// RunBelowFullBare
+List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z, double zref, double zm, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations, double tolerance);
+RcppExport SEXP _micropoint_RunBelowFullBare(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP zSEXP, SEXP zrefSEXP, SEXP zmSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type z(zSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type zm(zmSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance));
+    return rcpp_result_gen;
+END_RCPP
+}
+// RunBelowFull
+List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations, double tolerance, double a0, double a1, bool C3);
+RcppExport SEXP _micropoint_RunBelowFull(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zrefSEXP, SEXP CaSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type Ca(CaSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
+// clearskyradCpp2
+std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon);
+RcppExport SEXP _micropoint_clearskyradCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP latSEXP, SEXP lonSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    rcpp_result_gen = Rcpp::wrap(clearskyradCpp2(obstime, climdata, lat, lon));
+    return rcpp_result_gen;
+END_RCPP
+}
+// difpropCpp
+std::vector<double> difpropCpp(DataFrame obstime, std::vector<double> swrad, double lat, double lon);
+RcppExport SEXP _micropoint_difpropCpp(SEXP obstimeSEXP, SEXP swradSEXP, SEXP latSEXP, SEXP lonSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type swrad(swradSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    rcpp_result_gen = Rcpp::wrap(difpropCpp(obstime, swrad, lat, lon));
+    return rcpp_result_gen;
+END_RCPP
+}
+// solaltCpp
+std::vector<double> solaltCpp(DataFrame obstime, double lat, double lon);
+RcppExport SEXP _micropoint_solaltCpp(SEXP obstimeSEXP, SEXP latSEXP, SEXP lonSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    rcpp_result_gen = Rcpp::wrap(solaltCpp(obstime, lat, lon));
+    return rcpp_result_gen;
+END_RCPP
+}
+// expand_outputCpp
+NumericMatrix expand_outputCpp(const NumericMatrix& mat, int nout);
+RcppExport SEXP _micropoint_expand_outputCpp(SEXP matSEXP, SEXP noutSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< const NumericMatrix& >::type mat(matSEXP);
+    Rcpp::traits::input_parameter< int >::type nout(noutSEXP);
+    rcpp_result_gen = Rcpp::wrap(expand_outputCpp(mat, nout));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_solpositionCpp", (DL_FUNC) &_micropoint_solpositionCpp, 6},
@@ -478,6 +792,23 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_Belowground", (DL_FUNC) &_micropoint_Belowground, 3},
     {"_micropoint_Atground", (DL_FUNC) &_micropoint_Atground, 7},
     {"_micropoint_runmodel", (DL_FUNC) &_micropoint_runmodel, 14},
+    {"_micropoint_satvapCpp2", (DL_FUNC) &_micropoint_satvapCpp2, 1},
+    {"_micropoint_geometricCpp", (DL_FUNC) &_micropoint_geometricCpp, 2},
+    {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 6},
+    {"_micropoint_RHabove", (DL_FUNC) &_micropoint_RHabove, 9},
+    {"_micropoint_Uabove", (DL_FUNC) &_micropoint_Uabove, 7},
+    {"_micropoint_reverseCumsum", (DL_FUNC) &_micropoint_reverseCumsum, 1},
+    {"_micropoint_profilebareR", (DL_FUNC) &_micropoint_profilebareR, 13},
+    {"_micropoint_profileR", (DL_FUNC) &_micropoint_profileR, 20},
+    {"_micropoint_RunBareR", (DL_FUNC) &_micropoint_RunBareR, 12},
+    {"_micropoint_RunModelR", (DL_FUNC) &_micropoint_RunModelR, 18},
+    {"_micropoint_WeatherhgtCpp2", (DL_FUNC) &_micropoint_WeatherhgtCpp2, 13},
+    {"_micropoint_RunBelowFullBare", (DL_FUNC) &_micropoint_RunBelowFullBare, 12},
+    {"_micropoint_RunBelowFull", (DL_FUNC) &_micropoint_RunBelowFull, 17},
+    {"_micropoint_clearskyradCpp2", (DL_FUNC) &_micropoint_clearskyradCpp2, 4},
+    {"_micropoint_difpropCpp", (DL_FUNC) &_micropoint_difpropCpp, 4},
+    {"_micropoint_solaltCpp", (DL_FUNC) &_micropoint_solaltCpp, 3},
+    {"_micropoint_expand_outputCpp", (DL_FUNC) &_micropoint_expand_outputCpp, 2},
     {NULL, NULL, 0}
 };
 
