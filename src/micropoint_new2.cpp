@@ -1047,7 +1047,7 @@ static double soilrelhumCpp(const soilpstruct& soilp, double Tsoil, double theta
 {
     double psiw = soilp.psie[0] * std::pow(theta / soilp.thetaS[0], -soilp.b[0]);
     double Tk = Tsoil + 273.15;
-    double hr = std::exp(0.018 * psiw / (8.310001 * Tk));
+    double hr = std::exp(Mw * psiw / (RgasC * Tk));
     return hr;
 }
 static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
@@ -2121,6 +2121,436 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     onestepin.error = dif;
     return onestepin;
 
+}
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// ****************************************** Ecotherm model *********************************************************** //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+static silstruct silhouette(double zenr, double azir, double height, double width, double length,
+    double adir = 0.0, double atilt = 0.0, std::string position = "fixed")
+{
+    // Compute semi-axis (converted from cm to m)
+    double A = length / 200.0;
+    double B = width / 200.0;
+    double C = height / 200.0;
+    // Convert directions to radians
+    double adirr = adir * torad;
+    double atiltr = atilt * torad;
+    silstruct out;
+    // Calculate surface area using Knud Thomsens formula for ellipsoid
+    double P = 1.6075;  // Approximation constant
+    out.A = 4 * pi * std::pow((std::pow(A, P) * std::pow(B, P) +
+        std::pow(A, P) * std::pow(C, P) +
+        std::pow(B, P) * std::pow(C, P)) / 3, 1.0 / P);
+    out.V = (4.0 / 3.0) * pi * A * B * C;
+    if (position == "max") { // assume solar radiation maximised
+        out.silA = pi * std::max({ B * C, A * C, A * B });
+    }
+    else if (position == "min") { // assume solar radiation minimised
+        out.silA = pi * std::min({ B * C, A * C, A * B });
+    }
+    else if (position == "randomdir") { // direction (horizontal rotation) assumed random
+        double phi = std::acos(std::cos(zenr) * std::cos(-atiltr) +
+            std::sin(zenr) * std::sin(-atiltr) * std::cos(azir));
+        double M = std::sin(phi);
+        double N = std::cos(phi);
+        out.silA = pi * std::sqrt(
+            0.5 * M * M * (B * B * C * C + C * C * A * A) +
+            N * N * A * A * B * B);
+    }
+    else if (position == "random") { // direction and tilt assumed random
+        out.silA = pi * std::sqrt((A * A * B * B + A * A * C * C + B * B * C * C) / 3.0);
+    }
+    else if (position == "fixed") {
+        // Calculate silhouette area
+        double theta = (adirr - azir);
+        double phi = std::acos(std::cos(zenr) * std::cos(-atiltr) +
+            std::sin(zenr) * std::sin(-atiltr) * cos(theta));
+        double L = cos(theta) * sin(phi);
+        double M = sin(theta) * sin(phi);
+        double N = cos(phi);
+        out.silA = pi * std::sqrt(L * L * B * B * C * C +
+            M * M * C * C * A * A +
+            N * N * A * A * B * B);
+    }
+    else Rcpp::stop("Position not recongised");
+    return out;
+}
+// Compute characteristic dimension of animal
+static double chardim(double wdir, double zenr, double azir, double height, double width, double length,
+    double adir = 0.0, double atilt = 0.0, std::string position = "fixed")
+{
+    // Compute projected area in direction of wind flow (horizontal)
+    if (position == "max") {
+        if (length <= width && length <= height) {
+            // Beam along A-axis
+            adir = azir * 180.0 / pi;
+            atilt = (pi / 2.0 - zenr) * 180.0 / pi;
+        }
+        else if (width <= length && width <= height) {
+            // Beam along B-axis
+            adir = (azir + pi / 2.0) * 180.0 / pi;
+            atilt = 90.0;
+        }
+        else {
+            // Beam along C-axis
+            adir = azir * 180.0 / pi;
+            atilt = -zenr * 180 / pi;
+        }
+        position = "fixed";
+    }
+    if (position == "min") {
+        if (length >= width && length >= height) {
+            // Beam along A-axis
+            adir = azir * 180.0 / pi;
+            atilt = (pi / 2.0 - zenr) * 180.0 / pi;
+        }
+        else if (width >= length && width >= height) {
+            // Beam along B-axis
+            adir = (azir + pi / 2.0) * 180.0 / pi;
+            atilt = 90.0;
+        }
+        else {
+            // Beam along C-axis
+            adir = azir * 180.0 / pi;
+            atilt = -zenr * 180.0 / pi;
+        }
+        position = "fixed";
+    }
+    silstruct sa = silhouette(pi / 2.0, wdir, height, width, length, adir, atilt, position);
+    // Compute characteristic 
+    double d = sa.V / sa.silA;
+    return d;
+}
+// Compute animal boundary layer resistance
+static double animalrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
+{
+    double Tk = tair + 273.15;
+    // Compute thermal diffusivity
+    double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6);
+    // Compute kinematic viscosity
+    double v = 1.326 * std::pow(10.0, -5.0) * std::pow(Tk / 273.15, 1.5) * (393.55 / (Tk + 120.0));
+    // Compute Reynolds number
+    double Re = (uz * d) / v;
+    // Compute Prandlt number
+    double Pr = v / Kh;
+    // Compute Nusselt number for forced convection
+    double Nuf;
+    if (Re > 2e5) {
+        Nuf = 0.37 * std::pow(Re, 0.6) * std::pow(Pr, 1.0 / 3.0) + 9.08;
+    }
+    else if (Re > 1000) {
+        Nuf = 2.0 + (0.48 * std::pow(Re, 0.6) - 11.31) * std::pow(Pr, 1.0 / 3.0);
+    }
+    else {
+        Nuf = 2.0 + 0.6 * sqrt(Re) * pow(Pr, 1.0 / 3.0);
+    }
+    // Compute Grashof number 
+    double Gr = (g * std::pow(d, 3.0) * dT) / (Tk * v * v);
+    // Compute Nusselt number for free convection
+    double Nun = std::pow(0.825 + (0.387 * std::pow(Gr * Pr, 1.0 / 6.0)) /
+        std::pow(1.0 + std::pow(0.492 / Pr, 9.0 / 16.0), 8.0 / 27.0), 2.0);
+    // Compute Nusselt number (mixed forced and free)
+    double Nu = std::pow(std::pow(Nuf, 3.0) + std::pow(Nun, 3.0), 1.0 / 3.0);
+    // Compute boundary layer resistance
+    double rHa = d / (Kh * Nu);
+    if (rHa > rHmax) rHa = rHmax;
+    return rHa;
+}
+// Calculate water diffusivity
+double Dw_waterVapour(double Tf, double pk)
+{
+    const double D0 = 2.26e-5;   // m^2 s^-1 at 273.15 K and 101325 Pa
+    const double T0 = 273.15;    // reference temperature (K)
+    const double P0 = 101325.0;  // reference pressure (Pa)
+    double Tfk = Tf + 273.15;
+    double Pa = pk * 1000.0;
+    return D0 * std::pow(Tfk / T0, 1.75) * (P0 / Pa);
+}
+// Compute body temperature of animal
+// [[Rcpp::export]]
+double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh,
+    double rHa, double height, double wetfrac, double confrac, double M, double em = 0.97, double k = 0.5,
+    double surfrh = 1.0)
+{
+    double Tbody = Ta;
+    double cp = cpairCpp(Ta);
+    double ph = phairCpp(Ta, pk);
+    double dT = Ts - Ta; // difference contact surface and air temperature
+    double cd = 1.0 - confrac;
+    double ea = satvapCpp2(Ta);
+    double Da = ea * (1.0 - rh / 100.0); // Vapour pressure deficit
+    double Dac = surfrh * satvapCpp2(Tf) - ea; // contact Vapour pressure deficit
+    // latent heat exchange through a contact interface
+    double keff = k / (0.5 * height);
+    // Calculate mus
+    double mr = cd * em * sb; // emmited ratiation mu
+    double mrc = confrac * em * sb; // emmited ratiation mu
+    double mc = keff * confrac; // conductance my
+    double mv = ph * cp * cd / rHa;
+    double la = (Tbody >= 0.0) ? 45068.7 - 42.8428 * Tbody : 51078.69 - 4.338 * Tbody - 0.06367 * Tbody * Tbody;
+    double ml = (ph * la * wetfrac * cd) / (rHa * pk);
+    double Dw = Dw_waterVapour(Tf, pk);
+    double mlc = (la * Dw * wetfrac * confrac * 1000.0) / (0.5 * height * (Ts + 273.15) * RgasC);
+    double DeV = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5); // Slope of the saturated vapour pressure curve (Lv)
+    double DeC = satvapCpp2(Tf + 0.5) - satvapCpp2(Tf - 0.5); // Slope of the saturated vapour pressure curve (Lc)
+        // Calculate various contributions
+    double top = (Rabs + M - mr * radem(Ta) - mrc * radem(Ta) - mc * dT - ml * Da - mlc * Dac);
+    double btm = 4.0 * mr * std::pow(Te + 273.15, 3.0) + 4.0 * mrc * std::pow(Tf + 273.15, 3.0) +
+        mc + mv + ml * DeV + surfrh * mlc * DeC;
+    Tbody = Ta + top / btm;
+    return (Tbody);
+}
+static inline void aitkin_weightdif_scalar(
+    double oldv,
+    double& newv,   // raw new value on input, updated in place
+    WAitkenStateScalar& st,
+    double backweight_min = 0.10,
+    double backweight_max = 0.98
+)
+{
+    // Residual for current iteration
+    double r = newv - oldv;
+    // Convert stored omega limits to backweight limits
+    // backweight = 1 - omega
+    double omega_max = 1.0 - backweight_min;
+    double omega_min = 1.0 - backweight_max;
+    // ---- First iteration ----
+    if (!st.have_prev) {
+        double omega = std::max(omega_min, std::min(st.omega, omega_max));
+        st.r_prev = r;
+        newv = oldv + omega * r;
+        st.omega = omega;
+        st.have_prev = true;
+        return;
+    }
+    // ---- Learn omega (scalar Aitken) ----
+    double dr = r - st.r_prev;
+    double omega = st.omega;
+
+    if (dr != 0.0) {
+        omega = -st.omega * (st.r_prev / dr);
+    }
+    // Clamp through backweight limits
+    omega = std::max(omega_min, std::min(omega, omega_max));
+    // ---- Apply update ----
+    st.r_prev = r;
+    newv = oldv + omega * r;
+    st.omega = omega;
+}
+// Computes animal metabolic rate in W
+double metabolic_rate(double volume, double rho, double Q10, double a0, double b, double Tref, double Tbody)
+{
+    // compute mass
+    double m = volume * rho;
+    // Compute metabolic rate
+    double M = a0 * std::pow(m, b) * std::pow(Q10, (Tbody - Tref) / 10.0);
+    return M;
+}
+// Position details:
+// one of fixed (constant adir and atilt assumed), 
+// max (animal seeks to maximize radiation absorption)
+// min (animal seeks to minimize radiation absorption)
+// randomdir (animal maintains tilt, but adir is random)
+// random (animal has random atilt and adir)
+// [[Rcpp::export]]
+Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List animal,
+    double lat, // Latitude (decimal degrees)
+    double lon, // longitude decimal degrees
+    double leaft, // leaf transmittance
+    int maxIter = 100, // max number of iterations
+    double tolerance = 1e-2) // error tolerence for convergence
+{
+    // Extract from obstime data.frame
+    std::vector<int> year = obstime["year"];
+    std::vector<int> month = obstime["month"];
+    std::vector<int> day = obstime["day"];
+    std::vector<double> hour = obstime["hour"];
+    // Extract from climdata data.frame
+    std::vector<double> Rdirdown = climdata["Rdirdown"]; // Direct downward radiation flux perpendicular to solar beam (W/m^2)
+    std::vector<double> Rdifdown = climdata["Rdifdown"]; // Diffuse downward radiation flux (W/m^2)
+    std::vector<double> Rswup = climdata["Rswup"]; // Upward shortwave radiation flux  (W/m^2)
+    std::vector<double> Rlwdown = climdata["Rlwdown"]; // Downward lognwave flux (W/m^2)
+    std::vector<double> Rlwup = climdata["Rlwup"]; // Upward longwave flux (W/m^2)
+    std::vector<double> uz = climdata["uz"]; // Wind speed at height of animal (m/s
+    std::vector<double> wdir = climdata["wdir"]; // wind direction (only needed if position = fixed
+    std::vector<double> Ta = climdata["Ta"]; // Air temperature (deg C)
+    std::vector<double> Ts = climdata["Ts"]; // Surface temperature (only needed if confrac > 0)
+    std::vector<double> rh = climdata["rh"]; // Air relative humidity (percentage)
+    std::vector<double> pk = climdata["pk"]; // Atmospheric pressure (kPa)
+    std::vector<double> surfrh = climdata["surfrh"]; // Surface relative humidity (0-1)
+    // Extract animal parameters
+    double height = animal["height"]; // height of animal (cm)
+    double width = animal["width"]; // width of animal (cm)
+    double length = animal["len"]; // length of animal (cm)
+    double refl = animal["refl"]; // reflectance of animal (0-1)
+    double confrac = animal["confrac"]; // fraction of animal in direct contact with surface
+    double skinwetfrac = animal["skinwetfrac"]; // fraction of skin surface acting like a freely evaporating surface (0 for most animals, 1 for amphibians)
+    double em = animal["em"]; // emissvity of animal 
+    double rho = animal["rho"]; // animal density (kg / m^3)
+    double volume = animal["volume"]; // animal volume (m^3)
+    double area = animal["area"]; // animal surface area (m^2)
+    double Q10 = animal["Q10"]; // factor by which metabolic rate changes for a 10 degrees C temperature increase
+    double a0 = animal["a0"]; // normalization constant at reference temperature for calculating metabolic rate
+    double b = animal["b"]; // mass scaling exponent for calculating metabolic rate
+    double Tref = animal["Tref"]; // reference metabolic calibration temperature (deg C)
+    double adir = animal["adir"]; // direction animal is facing relative to north (ignored if position != fixed)
+    double atilt = animal["atilt"]; // direction of tilt of longest axis of animal relative to horizontal (ignored if position = random)
+    double k = animal["k"]; // animal heat conductance W/m
+    std::string position = animal["position"]; // see details above
+    // Varibles needed
+    size_t n = Ta.size();
+    double latr = lat * torad;
+    double lonr = lon * torad;
+    Rcpp::NumericVector Tbody(n);
+    for (size_t i = 0; i < n; ++i) {
+        Tbody[i] = Ta[i] + 3.0;
+        double dT = Tbody[i] - Ta[i]; // initial animal air temperature difference
+        // Calculate solar position
+        solmodel solp = solpositionCpp2(latr, lonr, year[i], month[i], day[i], hour[i]);
+        // Calculate shortwave radiation absorption
+        double Rsw_flux = 0.0;
+        if (solp.zenr < pi / 2.0) {
+            silstruct sa = silhouette(solp.zenr, solp.azir, height, width, length, adir, atilt, position);
+            double sc = sa.silA / sa.A; // solar coefficient
+            if (atilt < 0.0) { // animal suspended below leaf
+                Rsw_flux = leaft * (sc * Rdirdown[i] + 0.5 * Rdifdown[i]) + 0.5 * Rswup[i];
+            }
+            else {
+                Rsw_flux = sc * Rdirdown[i] + 0.5 * Rdifdown[i] + 0.5 * Rswup[i];
+            }
+        }
+        // Calculate total radiation absorption
+        double Rabs = (1.0 - refl) * Rsw_flux + 0.5 * em * (Rlwdown[i] + Rlwup[i]);
+        // Calculate characteristic dimension
+        double danim = chardim(wdir[i], solp.zenr, solp.azir, height, width, length, adir, atilt, position);
+        double tdif = 1e99;
+        WAitkenStateScalar st;
+        int nrIterations = 0;
+        while (tdif > tolerance && nrIterations < maxIter) {
+            // Calculate average temperatures
+            double Te = (Tbody[i] + Ta[i]) / 2.0;
+            double Tf = (Tbody[i] + Ts[i]) / 2.0;
+            // Calculate rHa
+            double rHa = animalrHa(Ta[i], std::abs(dT), uz[i], danim, 300.0);
+            // Calculate Metabolic rate
+            double M = metabolic_rate(volume, rho, Q10, a0, b, Tref, Tbody[i]) / area; 
+            // Calculate body temperature
+            double Told = Tbody[i];
+            Tbody[i] = PenmanMonteith_animal(Rabs, Ta[i], Ts[i], Te, Tf, pk[i], rh[i], rHa, height,
+                skinwetfrac, confrac, M, em, k, surfrh[i]);
+            aitkin_weightdif_scalar(Told, Tbody[i], st);
+            double dTold = dT;
+            dT = Tbody[i] - Ta[i];
+            tdif = std::abs(dTold - dT);
+            ++nrIterations;
+        }
+    }
+    return Tbody;
+}
+// Run Ectotherm model using Matrix Inputs
+// [[Rcpp::export]]
+Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcpp::List animal,
+    double lat, // Latitude (decimal degrees)
+    double lon, // longitude decimal degrees
+    double leaft, // leaf transmittance
+    int maxIter = 100, // max number of iterations
+    double tolerance = 1e-2) // error tolerence for convergence
+{
+    // Extract from obstime data.frame
+    std::vector<int> year = obstime["year"];
+    std::vector<int> month = obstime["month"];
+    std::vector<int> day = obstime["day"];
+    std::vector<double> hour = obstime["hour"];
+    // Extract from climdata data.frame
+    Rcpp::NumericMatrix Rdirdown = climdata["Rdirdown"]; // Direct downward radiation flux perpendicular to solar beam (W/m^2)
+    Rcpp::NumericMatrix Rdifdown = climdata["Rdifdown"]; // Diffuse downward radiation flux (W/m^2)
+    Rcpp::NumericMatrix Rswup = climdata["Rswup"]; // Upward shortwave radiation flux  (W/m^2)
+    Rcpp::NumericMatrix Rlwdown = climdata["Rlwdown"]; // Downward lognwave flux (W/m^2)
+    Rcpp::NumericMatrix Rlwup = climdata["Rlwup"]; // Upward longwave flux (W/m^2)
+    Rcpp::NumericMatrix uz = climdata["uz"]; // Wind speed at height of animal (m/s
+    Rcpp::NumericMatrix Ta = climdata["Ta"]; // Air temperature (deg C)
+    Rcpp::NumericMatrix Ts = climdata["Ts"]; // Surface temperature (only needed if confrac > 0)
+    Rcpp::NumericMatrix rh = climdata["rh"]; // Air relative humidity (percentage)
+    Rcpp::NumericVector pk = climdata["pk"]; // Atmospheric pressure (kPa)
+    Rcpp::NumericVector wdir = climdata["wdir"]; // wind direction (only needed if position = fixed
+    // Extract animal parameters
+    double height = animal["height"]; // height of animal (cm)
+    double width = animal["width"]; // width of animal (cm)
+    double length = animal["len"]; // length of animal (cm)
+    double refl = animal["refl"]; // reflectance of animal (0-1)
+    double confrac = animal["confrac"]; // fraction of animal in direct contact with surface
+    double skinwetfrac = animal["skinwetfrac"]; // fraction of skin surface acting like a freely evaporating surface (0 for most animals, 1 for amphibians)
+    double em = animal["em"]; // emissvity of animal 
+    double rho = animal["rho"]; // animal density (kg / m^3)
+    double volume = animal["volume"]; // animal volume (m^3)
+    double area = animal["area"]; // animal surface area (m^2)
+    double Q10 = animal["Q10"]; // factor by which metabolic rate changes for a 10 degrees C temperature increase
+    double a0 = animal["a0"]; // normalization constant at reference temperature for calculating metabolic rate
+    double b = animal["b"]; // mass scaling exponent for calculating metabolic rate
+    double Tref = animal["Tref"]; // reference metabolic calibration temperature (deg C)
+    double adir = animal["adir"]; // direction animal is facing relative to north (ignored if position != fixed)
+    double atilt = animal["atilt"]; // direction of tilt of longest axis of animal relative to horizontal (ignored if position = random)
+    double k = animal["k"]; // animal heat conductance W/m
+    std::string position = animal["position"]; // see details above
+    // Get number of time steps and vertical segments
+    int tsteps = Ta.nrow();
+    int nlayers = Ta.ncol();
+    // Varibles needed
+    Rcpp::NumericMatrix Tbody(tsteps, nlayers);
+    double latr = lat * torad;
+    double lonr = lon * torad;
+    for (int i = 0; i < tsteps; ++i) { 
+        // Calculate solar position
+        solmodel solp = solpositionCpp2(latr, lonr, year[i], month[i], day[i], hour[i]);
+        // Calculate solar coefficient
+        double sc = 1.0;
+        if (solp.zenr < pi / 2.0) {
+            silstruct sa = silhouette(solp.zenr, solp.azir, height, width, length, adir, atilt, position);
+            sc = sa.silA / sa.A; // solar coefficient
+        }
+        // Calculate characteristic dimension
+        double danim = chardim(wdir[i], solp.zenr, solp.azir, height, width, length, adir, atilt, position);
+        for (int j = 0; j < nlayers; ++j) {
+            // Calculate shortwave radiation absorption
+            double Rsw_flux = 0.0;
+            if (solp.zenr < pi / 2.0) {
+                if (atilt < 0.0) { // animal suspended below leaf
+                    Rsw_flux = leaft * (sc * Rdirdown(i,j) + 0.5 * Rdifdown(i, j)) + 0.5 * Rswup(i, j);
+                }
+                else {
+                    Rsw_flux = sc * Rdirdown(i, j) + 0.5 * Rdifdown(i, j) + 0.5 * Rswup(i, j);
+                }
+            }
+            // Calculate total radiation absorption
+            double Rabs = (1.0 - refl) * Rsw_flux + 0.5 * em * (Rlwdown(i, j) + Rlwup(i, j));
+            // Assume initial values
+            Tbody(i, j) = Ta(i, j) + 3.0;
+            double dT = Tbody(i, j) - Ta(i, j); // initial animal air temperature difference
+            double tdif = 1e99;
+            WAitkenStateScalar st;
+            int nrIterations = 0;
+            // Iteratively calculate body temperature
+            while (tdif > tolerance && nrIterations < maxIter) {
+                // Calculate average temperatures
+                double Te = (Tbody(i, j) + Ta(i, j)) / 2.0;
+                double Tf = (Tbody(i, j) + Ts(i, j)) / 2.0;
+                // Calculate rHa
+                double rHa = animalrHa(Ta(i, j), std::abs(dT), uz(i, j), danim, 300.0);
+                // Calculate Metabolic rate
+                double M = metabolic_rate(volume, rho, Q10, a0, b, Tref, Tbody(i, j)) / area;
+                // Calculate body temperature
+                double Told = Tbody(i, j);
+                Tbody(i, j) = PenmanMonteith_animal(Rabs, Ta(i, j), Ts(i, j), Te, Tf, pk[i], rh(i, j), rHa, height,
+                    skinwetfrac, confrac, M, em, k, 1.0);
+                aitkin_weightdif_scalar(Told, Tbody(i, j), st);
+                double dTold = dT;
+                dT = Tbody(i, j) - Ta(i, j);
+                tdif = std::abs(dTold - dT);
+                ++nrIterations;
+            } // end iterative while loop
+        } // end j
+    } // end i
+    return Tbody;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** R wrappers *********************************************************** //

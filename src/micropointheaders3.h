@@ -214,6 +214,11 @@ struct WAitkenState {
     double omega = 0.3;
     bool have_prev = false;
 };
+struct WAitkenStateScalar {
+    double r_prev = 0.0;
+    double omega = 0.8;
+    bool have_prev = false;
+};
 struct Hstruct {
     double Tsurf;
     double Htot;
@@ -280,5 +285,10 @@ struct bigsmallleafstruct {
     double zh;
     double gS;
     double T0;
+};
+struct silstruct {
+    double A; // area (m^2)
+    double V; // volume (m^3)
+    double silA; // silhouette area (m^2)
 };
 }

@@ -523,6 +523,67 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// PenmanMonteith_animal
+double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh, double rHa, double height, double wetfrac, double confrac, double M, double em, double k, double surfrh);
+RcppExport SEXP _micropoint_PenmanMonteith_animal(SEXP RabsSEXP, SEXP TaSEXP, SEXP TsSEXP, SEXP TeSEXP, SEXP TfSEXP, SEXP pkSEXP, SEXP rhSEXP, SEXP rHaSEXP, SEXP heightSEXP, SEXP wetfracSEXP, SEXP confracSEXP, SEXP MSEXP, SEXP emSEXP, SEXP kSEXP, SEXP surfrhSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type Rabs(RabsSEXP);
+    Rcpp::traits::input_parameter< double >::type Ta(TaSEXP);
+    Rcpp::traits::input_parameter< double >::type Ts(TsSEXP);
+    Rcpp::traits::input_parameter< double >::type Te(TeSEXP);
+    Rcpp::traits::input_parameter< double >::type Tf(TfSEXP);
+    Rcpp::traits::input_parameter< double >::type pk(pkSEXP);
+    Rcpp::traits::input_parameter< double >::type rh(rhSEXP);
+    Rcpp::traits::input_parameter< double >::type rHa(rHaSEXP);
+    Rcpp::traits::input_parameter< double >::type height(heightSEXP);
+    Rcpp::traits::input_parameter< double >::type wetfrac(wetfracSEXP);
+    Rcpp::traits::input_parameter< double >::type confrac(confracSEXP);
+    Rcpp::traits::input_parameter< double >::type M(MSEXP);
+    Rcpp::traits::input_parameter< double >::type em(emSEXP);
+    Rcpp::traits::input_parameter< double >::type k(kSEXP);
+    Rcpp::traits::input_parameter< double >::type surfrh(surfrhSEXP);
+    rcpp_result_gen = Rcpp::wrap(PenmanMonteith_animal(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, wetfrac, confrac, M, em, k, surfrh));
+    return rcpp_result_gen;
+END_RCPP
+}
+// Ectotherm
+Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List animal, double lat, double lon, double leaft, int maxIter, double tolerance);
+RcppExport SEXP _micropoint_Ectotherm(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP animalSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP leaftSEXP, SEXP maxIterSEXP, SEXP toleranceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type animal(animalSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< double >::type leaft(leaftSEXP);
+    Rcpp::traits::input_parameter< int >::type maxIter(maxIterSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(Ectotherm(obstime, climdata, animal, lat, lon, leaft, maxIter, tolerance));
+    return rcpp_result_gen;
+END_RCPP
+}
+// EctothermM
+Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcpp::List animal, double lat, double lon, double leaft, int maxIter, double tolerance);
+RcppExport SEXP _micropoint_EctothermM(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP animalSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP leaftSEXP, SEXP maxIterSEXP, SEXP toleranceSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type animal(animalSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< double >::type leaft(leaftSEXP);
+    Rcpp::traits::input_parameter< int >::type maxIter(maxIterSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(EctothermM(obstime, climdata, animal, lat, lon, leaft, maxIter, tolerance));
+    return rcpp_result_gen;
+END_RCPP
+}
 // reverseCumsum
 std::vector<double> reverseCumsum(const std::vector<double>& paii);
 RcppExport SEXP _micropoint_reverseCumsum(SEXP paiiSEXP) {
@@ -797,6 +858,9 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 6},
     {"_micropoint_RHabove", (DL_FUNC) &_micropoint_RHabove, 9},
     {"_micropoint_Uabove", (DL_FUNC) &_micropoint_Uabove, 7},
+    {"_micropoint_PenmanMonteith_animal", (DL_FUNC) &_micropoint_PenmanMonteith_animal, 15},
+    {"_micropoint_Ectotherm", (DL_FUNC) &_micropoint_Ectotherm, 8},
+    {"_micropoint_EctothermM", (DL_FUNC) &_micropoint_EctothermM, 8},
     {"_micropoint_reverseCumsum", (DL_FUNC) &_micropoint_reverseCumsum, 1},
     {"_micropoint_profilebareR", (DL_FUNC) &_micropoint_profilebareR, 13},
     {"_micropoint_profileR", (DL_FUNC) &_micropoint_profileR, 20},
