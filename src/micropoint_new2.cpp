@@ -1231,8 +1231,8 @@ static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
 // Calculate hydraulic conductivity from theta
 static double hydraulicConductivityFromTheta(const soilpstruct& soilp,
     double theta, int i) {
-    double psiw = waterPotential(soilp, theta, i);
-    double k = soilp.Ksat[i] * std::pow(soilp.psie[i] / psiw, soilp.n[i]);
+    double n = 2.0 * soilp.b[i] + 3.0;
+    double k = soilp.Ksat[i] * std::pow(theta / soilp.thetaS[i], n);
     return k;
 }
 // Calculate vapour from water potential
