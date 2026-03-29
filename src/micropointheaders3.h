@@ -216,7 +216,7 @@ struct WAitkenState {
 };
 struct WAitkenStateScalar {
     double r_prev = 0.0;
-    double omega = 0.8;
+    double omega = 0.2;   // default: quite high backweight
     bool have_prev = false;
 };
 struct Hstruct {

@@ -110,16 +110,14 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, sl
                         surface_organicmu = 3, deepSaturated = TRUE) {
   # Adjust total depth to allow for boundary layer
   totalDepth <- 1.5 * totalDepth
-  s <- which(soilparams$Soil.type == soiltype)
-  v <- as.numeric(soilparams[s,2:13])
-  nms <- names(soilparams)[2:13]
+  s <- which(newsoilparamstable$Soil.type == soiltype)
+  v <- as.numeric(newsoilparamstable[s,2:13])
+  nms <- names(newsoilparamstable)[2:13]
   soilc <- as.list(v)
   for (i in 1:12) {
     soilc[[i]] <- rep(v[i], nlayers + 1)
   }
   names(soilc) <- nms
-  # Convert Ksat from cm/day to m/s
-  soilc$Ksat <- soilc$Ksat * 0.01 / (24 * 3600)
   # Adjust organic
   mu <- rev(geometricCpp(nlayers, surface_organicmu))[2:(nlayers + 2)]  # multiplication factor for organic
   soilc$Vo <- soilc$Vo * mu
