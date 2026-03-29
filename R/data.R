@@ -146,3 +146,26 @@
 #'   \item{multiplier}{value of PAR when stomatal conductances is at 50 percent of its maximum value (micro mol/m^2/s)}
 #' }
 "PFTparams"
+#' An updated table of soil parameters used in new model
+#'
+#' A table of soil parameters for different soil types.
+#'
+#' @format A data frame with the following columns:
+#' \describe{
+#'   \item{Soil.type}{Description of soil type.}
+#'   \item{Smax}{Volumetric water content at saturation (m^3 / m^3).}
+#'   \item{Smin}{Residual water content (m^3 / m^3).}
+#'   \item{alpha}{van Genuchten shape parameter.}
+#'   \item{n}{Campbell pore size distribution parameter.}
+#'   \item{Ksat}{Saturated hydraulic conductivity (kg s / m^3).}
+#'   \item{Vq}{Volumetric quartz content of soil.}
+#'   \item{Vm}{Volumetric mineral content of soil.}
+#'   \item{Vo}{Volumetric organic content of soil.}
+#'   \item{Mc}{Mass fraction of clay.}
+#'   \item{rho}{Soil bulk density (Mg / m^3).}
+#'   \item{b}{Campbell soil water retention parameter.}
+#'   \item{psi_e}{Matric potential (J / m^3).}
+#'   \item{VGn}{van Genuchten pore size distribution parameter.}
+#'   \item{VGpsie}{van Genuchten matric potential parameter (J / m^3).}
+#' }
+"newsoilparamstable"
