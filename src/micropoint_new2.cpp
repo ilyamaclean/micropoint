@@ -1455,88 +1455,103 @@ static std::vector<double> root_distribute(const std::vector<double>& dz, double
     return v;
 }
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp, const climforwaterstruct& climdata,
-    double dT = 3600.0, double pTAW = 0.5, int maxNrIterations = 100, double tolerance = 1e-9)
+    double dT = 3600.0, double pTAW = 0.5, int maxNrIterations = 100, double tolerance = 1e-4)
 {
-    // constants
     const double rho = 1000.0;
     const int n = soilp.nLayers;
-    // --- FIX: freeze previous-timestep state ---
+    // Freeze previous-timestep state
     const std::vector<double> oldtheta = soilmod.oldtheta;
     const std::vector<double> oldvapor = soilmod.oldvapor;
-    // working variables (iterates)
+    // Working variables
     std::vector<double> psiw = soilmod.psiw;
     std::vector<double> theta = soilmod.theta;
     std::vector<double> vapor = soilmod.vapor;
-    std::vector<double> k(n + 1);
-    std::vector<double> aa(n), bb(n), cc(n), dd(n);
-    std::vector<double> ff(n), u(n), du(n), Ca(n), dpsi(n);
-    // bottom boundary
+    std::vector<double> k(n + 1, 0.0);
+    std::vector<double> aa(n, 0.0), bb(n, 0.0), cc(n, 0.0), dd(n, 0.0);
+    std::vector<double> ff(n, 0.0), u(n, 0.0), du(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
+    // Bottom boundary initialisation if required
     if (soilp.deepSaturated) {
         psiw[n] = soilp.psie[n - 1];
-        k[n] = soilp.Ksat[n - 1];
         theta[n] = soilp.thetaS[n - 1];
+        k[n] = soilp.Ksat[n - 1];
     }
-    int iter = 0;
-    double maxStep = 1e99;
-    double Evapmmhr = 0.0;
-    double max_Evap = 0.0;
-    double Evap1;
-    double Evap2;
-    while (maxStep > tolerance && iter < maxNrIterations) {
-        // hydraulic properties
+    // Compute evaporation once, outside ewton-Rapshon loop
+    double theta_av = 0.5 * (theta[0] + oldtheta[0]);
+    double Tc_av = 0.5 * (soilmod.Tc[0] + soilmod.oldTc[0]);
+    double Evapmmhr = evaporation_flux(soilp, theta_av, Tc_av, climdata.Tair,
+        climdata.relhum, climdata.rHa, dT);
+    double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
+    // Distribute transpiration once outside Newton-Rapshon loop
+    std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac, climdata.Et,
+        dT, psiw, pTAW);
+
+    int iter = 1;
+    double massBalance = 1.0;
+    while (massBalance > tolerance && iter < maxNrIterations) {
+        if (soilp.deepSaturated) {
+            psiw[n] = soilp.psie[n - 1];
+            theta[n] = soilp.thetaS[n - 1];
+            k[n] = soilp.Ksat[n - 1];
+        }
+        else {
+            psiw[n] = psiw[n - 1];
+            theta[n] = theta[n - 1];
+            k[n] = k[n - 1];
+        }
+        // Hydraulic properties
         for (int i = 0; i < n; ++i) {
-            k[i] = hydraulicConductivityFromTheta(soilp, theta[i], i) + 
-                vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
+            double Tkelvin = soilmod.Tc[i] + 273.15;
+            double kh = hydraulicConductivityFromTheta(soilp, theta[i], i);
+            double kv = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
+            k[i] = kh + kv;
             u[i] = g * k[i];
             du[i] = -u[i] * soilp.n[i] / psiw[i];
             double Cw = dTheta_dPsi(soilp, psiw[i], i);
-            double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
+            double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
         }
-        // Calculate surface flux
-        if (iter < 10) {
-            double theta_av = (theta[0] + soilmod.oldtheta[0]) / 2.0;
-            Evapmmhr = evaporation_flux(soilp, theta_av, soilmod.Tc[0], climdata.Tair, climdata.relhum, climdata.rHa, dT);
-            // Limit qsurface to value obtained in first or second iteration
-            if (iter < 2 && std::abs(Evapmmhr) > std::abs(max_Evap)) max_Evap = std::abs(Evapmmhr);
-            if (iter > 1) {
-                if (std::abs(Evapmmhr) > std::abs(max_Evap)) Evapmmhr = std::copysign(std::abs(max_Evap), Evapmmhr);
-            }
-            if (iter == 8) Evap1 = Evapmmhr;
-            if (iter == 9) Evap2 = Evapmmhr;
+        // If not deep saturated, update trailing boundary conductivity after k[n-1] is known
+        if (!soilp.deepSaturated) {
+            k[n] = k[n - 1];
         }
-        else if (iter == 10) Evapmmhr = (Evap1 + Evap2) / 2.0;
-        double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
-        std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac, climdata.Et, dT, psiw, pTAW);
-        // assemble system
+        // Flux term
         for (int i = 0; i < n; ++i) {
-            ff[i] = ((psiw[i + 1] * k[i + 1] - psiw[i] * k[i]) / (soilmod.dz[i] * (1.0 - soilp.n[i]))) - u[i];
-            if (i == 0) {
-                aa[i] = 0.0;
-                cc[i] = -k[i + 1] / soilmod.dz[i];
-                bb[i] = k[i] / soilmod.dz[i] + Ca[i] + du[i];
-                dd[i] = surfaceFlux + STr[i] - ff[i] + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
-            }
-            else {
-                aa[i] = -k[i - 1] / soilmod.dz[i - 1] - du[i - 1];
-                cc[i] = -k[i + 1] / soilmod.dz[i];
-                bb[i] = k[i] / soilmod.dz[i - 1] + k[i] / soilmod.dz[i] + Ca[i] + du[i];
-                dd[i] =  ff[i - 1] + STr[i] - ff[i]  + rho * soilmod.vol[i] * (theta[i] - oldtheta[i]) / dT;
-            }
+            ff[i] = ((psiw[i + 1] * k[i + 1] - psiw[i] * k[i]) /
+                (soilmod.dz[i] * (1.0 - soilp.n[i]))) - u[i];
         }
-        // solve
+        // Assemble system
+        massBalance = 0.0;
+        // Top layer
+        aa[0] = 0.0;
+        cc[0] = -k[1] / soilmod.dz[0];
+        bb[0] = k[0] / soilmod.dz[0] + Ca[0] + du[0];
+        dd[0] = surfaceFlux + STr[0] - ff[0]
+            + soilmod.vol[0] * (rho * (theta[0] - oldtheta[0]) + (vapor[0] - oldvapor[0])) / dT;
+        massBalance += std::abs(dd[0]);
+        // Remaining layers
+        for (int i = 1; i < n; ++i) {
+            aa[i] = -k[i - 1] / soilmod.dz[i - 1] - du[i - 1];
+            cc[i] = -k[i + 1] / soilmod.dz[i];
+            bb[i] = k[i] / soilmod.dz[i - 1] + k[i] / soilmod.dz[i] + Ca[i] + du[i];
+            dd[i] = ff[i - 1] + STr[i] - ff[i]
+                + rho * soilmod.vol[i] * (theta[i] - oldtheta[i]) / dT;
+            massBalance += std::abs(dd[i]);
+        }
+        // Solve tridiagonal system
         Thomas TBC = ThomasBoundaryCondition(aa, bb, cc, dd, dpsi, 0, n - 1);
         dpsi = TBC.x;
-        // update iterate
-        maxStep = 0.0;
+        // Adaptive damping near saturation
         for (int i = 0; i < n; ++i) {
-            double psi_new = psiw[i] - dpsi[i];
-            psi_new = std::min(psi_new, soilp.psie[i]);
-            psi_new = std::max(psi_new, soilp.psi_min[i]);
-            maxStep = std::max(maxStep, std::abs(psi_new - psiw[i]));
-            psiw[i] = psi_new;
+            double dryness = (psiw[i] - soilp.psie[i]) / (soilp.psi_min[i] - soilp.psie[i]);
+            if (dryness < 0.0) dryness = 0.0;
+            if (dryness > 1.0) dryness = 1.0;
+            double lambda = 0.05 + 0.95 * dryness;
+            if (i == 0) lambda = std::min(lambda, 0.1);
+            psiw[i] = psiw[i] - lambda * dpsi[i];
+            psiw[i] = std::min(psiw[i], soilp.psie[i] - 1e-8);
+            psiw[i] = std::max(psiw[i], soilp.psi_min[i]);
             theta[i] = thetaFromPsi(soilp, psiw[i], i);
-            vapor[i] = vaporFromPsi(soilp, psiw[i], theta[i], soilmod.Tc[i], i);
+            vapor[i] = vaporFromPsi(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
         }
         ++iter;
     }
@@ -1546,7 +1561,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     soilmod.k = k;
     soilwaterout out;
     out.swo = soilmod;
-    out.success = (maxStep < tolerance);
+    out.success = (massBalance < tolerance);
     out.iterations = iter;
     out.Evapmmhr = Evapmmhr;
     return out;
@@ -1899,6 +1914,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
         cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
         // Slot in soil temperature
+        onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
         soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, tolerance);
         onestepin.witers = soilwater.iterations;
@@ -2058,6 +2074,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         // Slot in soil temperature
+        onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
         // Run water model
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, tolerance);
@@ -2669,6 +2686,7 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     out.dz = state.dz; // layer thickness
     out.zCenter = state.zCenter; // centre between nodes
     out.Tc = state.Te; // temperature of soil profile
+    out.oldTc = state.oldTe; // old temperature of soil profile
     out.theta = state.wc; // volumetric water content of soil profile
     // Initialize
     std::vector<double> vol(out.n + 1);

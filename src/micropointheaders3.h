@@ -200,6 +200,7 @@ struct soilwatermod {
     std::vector<double> theta; // volumetric water fraction (current time step)
     std::vector<double> oldtheta; // volumetric water fraction (previous time step)
     std::vector<double> Tc; // temperature (deg C) of soil
+    std::vector<double> oldTc; // temperature (deg C) of soil
     std::vector<double> rootfrac; // root fraction in each soil layer
 };
 struct soilwaterout {
