@@ -193,3 +193,11 @@ expand_outputCpp <- function(mat, nout) {
     .Call(`_micropoint_expand_outputCpp`, mat, nout)
 }
 
+BigLeafCpp2 <- function(obstime, climdata, soilc, vegp, Lfrac, zref, Ca, lat, lon, boundaryT, maxiter = 100L, C3 = TRUE) {
+    .Call(`_micropoint_BigLeafCpp2`, obstime, climdata, soilc, vegp, Lfrac, zref, Ca, lat, lon, boundaryT, maxiter, C3)
+}
+
+BigLeafBareCpp <- function(obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter = 100L, C3 = TRUE) {
+    .Call(`_micropoint_BigLeafBareCpp`, obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter, C3)
+}
+

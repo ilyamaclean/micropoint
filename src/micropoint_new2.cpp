@@ -1192,17 +1192,6 @@ static Thomas ThomasBoundaryCondition(std::vector<double> aa, std::vector<double
     out.x = x;
     return out;
 }
-// Calculate effective saturation from theta
-static double SeFromTheta(const soilpstruct& soilp, double theta, int i)
-{
-    if (theta > soilp.thetaS[i]) return 1.0;
-    return theta / soilp.thetaS[i];
-}
-// Calculate theta from effective saturation
-static double thetaFromSe(const soilpstruct& soilp, double Se, int i)
-{
-    return Se * soilp.thetaS[i];
-}
 // Calculate degree of saturation from water potential
 static double degreeOfSaturation(const soilpstruct& soilp, double psiw, int i) {
     if (psiw >= 0) return 1.0;
@@ -1218,14 +1207,16 @@ static double degreeOfSaturation(const soilpstruct& soilp, double psiw, int i) {
 // Calculate water potential from theta (in J/kg)
 static double waterPotential(const soilpstruct& soilp, double theta, int i)
 {
-    double Se = SeFromTheta(soilp, theta, i);
+    double Se = 1.0;
+    if (theta < soilp.thetaS[i]) Se = theta / soilp.thetaS[i];
     double psiw = soilp.psie[i] * std::pow(Se, -soilp.b[i]);
     return psiw;
 }
+// Calculate theta from water potential
 static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
 {
     double Se = degreeOfSaturation(soilp, psiw, i);
-    double theta = thetaFromSe(soilp, Se, i);
+    double theta = Se * soilp.thetaS[i];
     return theta;
 }
 // Calculate hydraulic conductivity from theta
@@ -1244,9 +1235,13 @@ static double vaporFromPsi(const soilpstruct& soilp, double psiw, double theta, 
 // calculate change in theta with psi
 static double dTheta_dPsi(const soilpstruct& soilp, double psiw, int i)
 {
-    double theta = soilp.thetaS[i] * degreeOfSaturation(soilp, psiw, i);
+    double psie = soilp.psie[i]; // assumed negative
+    if (psiw >= psie) return 0.0;
+    double Se = std::pow(psiw / psie, -1.0 / soilp.b[i]);
+    double theta = soilp.thetaS[i] * Se;
     return -theta / (soilp.b[i] * psiw);
 }
+// calculate vapour condctivity form psi and theta
 static double vaporConductivityFromPsiTheta(const soilpstruct& soilp,
     double psiw, double theta, double Tk, int i)
 {
@@ -1266,7 +1261,7 @@ static double dvapor_dPsi(const soilpstruct& soilp, double psiw,
 static double evaporation_flux(const soilpstruct& soilp, double theta, double Tsurface,
     double Tair, double relhum, double rHa, double dT)
 {
-    double psiw = waterPotential(soilp, theta, 0) * 1000.0; // water potential (J/kg -> Pa)
+    double psiw = waterPotential(soilp, theta, 0); // J/kg
     double Tk = Tair + 273.15; // Temperature deg C -> K
     double hs = std::exp(Mw * psiw / (RgasC * Tk));   // dimensionless soil effective relative humidity (0 to 1 range)
     double es = 1000.0 * satvapCpp2(Tsurface) * hs;            // kPa -> Pa
@@ -1454,8 +1449,9 @@ static std::vector<double> root_distribute(const std::vector<double>& dz, double
     for (int i = 0; i < n; ++i) v[i] = v[i] / sumv;
     return v;
 }
-static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp, const climforwaterstruct& climdata,
-    double dT = 3600.0, double pTAW = 0.5, int maxNrIterations = 100, double tolerance = 1e-4)
+static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
+    const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
+    int maxNrIterations = 100, double tolerance = 1e-4, bool useDamping = true)
 {
     const double rho = 1000.0;
     const int n = soilp.nLayers;
@@ -1475,19 +1471,18 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         theta[n] = soilp.thetaS[n - 1];
         k[n] = soilp.Ksat[n - 1];
     }
-    // Compute evaporation once, outside ewton-Rapshon loop
-    double theta_av = 0.5 * (theta[0] + oldtheta[0]);
-    double Tc_av = 0.5 * (soilmod.Tc[0] + soilmod.oldTc[0]);
-    double Evapmmhr = evaporation_flux(soilp, theta_av, Tc_av, climdata.Tair,
-        climdata.relhum, climdata.rHa, dT);
-    double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
-    // Distribute transpiration once outside Newton-Rapshon loop
-    std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac, climdata.Et,
-        dT, psiw, pTAW);
-
     int iter = 1;
     double massBalance = 1.0;
+    double Evapmmhr = 0.0;
     while (massBalance > tolerance && iter < maxNrIterations) {
+        // Surface flux from current state
+        Evapmmhr = evaporation_flux(soilp, theta[0], soilmod.Tc[0], climdata.Tair,
+            climdata.relhum, climdata.rHa, dT);
+        double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
+        // Transpiration outside Newton update, but based on current state
+        std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
+            climdata.Et, dT, psiw, pTAW);
+
         if (soilp.deepSaturated) {
             psiw[n] = soilp.psie[n - 1];
             theta[n] = soilp.thetaS[n - 1];
@@ -1510,7 +1505,6 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
         }
-        // If not deep saturated, update trailing boundary conductivity after k[n-1] is known
         if (!soilp.deepSaturated) {
             k[n] = k[n - 1];
         }
@@ -1521,38 +1515,43 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         }
         // Assemble system
         massBalance = 0.0;
-        // Top layer
         aa[0] = 0.0;
         cc[0] = -k[1] / soilmod.dz[0];
         bb[0] = k[0] / soilmod.dz[0] + Ca[0] + du[0];
         dd[0] = surfaceFlux + STr[0] - ff[0]
             + soilmod.vol[0] * (rho * (theta[0] - oldtheta[0]) + (vapor[0] - oldvapor[0])) / dT;
         massBalance += std::abs(dd[0]);
-        // Remaining layers
+
         for (int i = 1; i < n; ++i) {
             aa[i] = -k[i - 1] / soilmod.dz[i - 1] - du[i - 1];
             cc[i] = -k[i + 1] / soilmod.dz[i];
             bb[i] = k[i] / soilmod.dz[i - 1] + k[i] / soilmod.dz[i] + Ca[i] + du[i];
             dd[i] = ff[i - 1] + STr[i] - ff[i]
-                + rho * soilmod.vol[i] * (theta[i] - oldtheta[i]) / dT;
+                + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
             massBalance += std::abs(dd[i]);
         }
         // Solve tridiagonal system
         Thomas TBC = ThomasBoundaryCondition(aa, bb, cc, dd, dpsi, 0, n - 1);
         dpsi = TBC.x;
-        // Adaptive damping near saturation
+        // Update state
         for (int i = 0; i < n; ++i) {
-            double dryness = (psiw[i] - soilp.psie[i]) / (soilp.psi_min[i] - soilp.psie[i]);
-            if (dryness < 0.0) dryness = 0.0;
-            if (dryness > 1.0) dryness = 1.0;
-            double lambda = 0.05 + 0.95 * dryness;
-            if (i == 0) lambda = std::min(lambda, 0.1);
+            double lambda = 1.0;
+
+            if (useDamping) {
+                double dryness = (psiw[i] - soilp.psie[i]) / (soilp.psi_min[i] - soilp.psie[i]);
+                if (dryness < 0.0) dryness = 0.0;
+                if (dryness > 1.0) dryness = 1.0;
+                lambda = 0.2 + 0.8 * dryness;
+            }
+
             psiw[i] = psiw[i] - lambda * dpsi[i];
             psiw[i] = std::min(psiw[i], soilp.psie[i] - 1e-8);
             psiw[i] = std::max(psiw[i], soilp.psi_min[i]);
+
             theta[i] = thetaFromPsi(soilp, psiw[i], i);
             vapor[i] = vaporFromPsi(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
         }
+
         ++iter;
     }
     soilmod.psiw = psiw;
@@ -1821,7 +1820,7 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     out.Th = Th;
     out.eh = eh;
     return out;
-    }
+ }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ************************************************** Run model for one step ********************************************** //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -2137,7 +2136,334 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     onestepin.iters = nrIterations;
     onestepin.error = dif;
     return onestepin;
-
+}
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// ******************* Bigleaf model currently only used for soil initialization ****************************************** //
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+albf albedo(double kd, double pai, const tsdifstruct& tspdif, const tsdirstruct& tspdir) 
+{
+    albf out;
+    out.albd = tspdif.p1 + tspdif.p2; // white sky albedo
+    out.albb = tspdir.p5 / -tspdir.sig + tspdir.p6 + tspdir.p7; // black sky albedo
+    out.wgtg = std::exp(-kd * pai); // ground weighting(direct)
+    out.wgti = std::exp(-pai); // ground weighting(diffuse)
+    return out;
+}
+double bulkstomatalresist(double tair, double tcan, double relhum, double pk, double psiw, 
+    double Ca, double precip, double Rsw, double Rdif, double k, double LAIfrac,
+    vegpstruct vegp, const solmodel& solp, bool C3 = true)
+{
+    // Calculate omp
+    double omp = vegp.lrefp + vegp.ltrap;
+    // Sunlit leaf area
+    double Lsun = (1.0 - std::exp(-k * vegp.pai * LAIfrac)) / k;
+    double Lshade = (vegp.pai * LAIfrac) - Lsun;
+    // Absorbed sun and shaded parts
+    double Rshade_abs = Rdif * ((1.0 - std::exp(-vegp.pai)) / vegp.pai) * (1.0 - omp);
+    double Rsun_abs = (Rsw - Rdif) * k * (1.0 - omp) + Rshade_abs;
+    // Compute leaf stomatal conductance
+    envstruct envdata;
+    envdata.PARabs = Rsun_abs; // PAR absorbed
+    envdata.tair = tair; // air temperature(deg C)
+    envdata.tleaf = tcan; // canopy temperature(deg C)
+    envdata.rh = relhum; // relative humidity(percentage)
+    envdata.pk = pk; // atmospheric pressure(kPa)
+    envdata.psi_r = psiw * 0.001; // mean water potential in root zone(MPa)
+    envdata.Ca = Ca; // CO2 ppm
+    envdata.precip = precip; // precipitation (mm)
+    double z = vegp.hgt / 2.0;
+    double gs_sun = leafgs(envdata, vegp, z, C3);
+    envdata.PARabs = Rshade_abs;
+    double gs_shade = leafgs(envdata, vegp, z, C3);
+    double Gs = gs_sun * Lsun + gs_shade * Lshade;
+    // Convert to bulk surface resistance
+    double ph = phairCpp(tair, pk);
+    return ph / Gs;
+}
+// Calculate dewpoint temperature
+double dewpointCpp2(double tc, double rh) {
+    // actual vapour pressure (kPa)
+    double ea = satvapCpp2(tc) * rh / 100.0;
+    // Magnus constants
+    const double a_w = 17.27;
+    const double b_w = 237.7;   // water
+    const double a_i = 21.875;
+    const double b_i = 265.5;   // ice
+    // first guess assuming water
+    double gamma = std::log(ea / 0.6108);
+    double td = (b_w * gamma) / (a_w - gamma);
+    // correct for ice if dewpoint < 0
+    if (td < 0.0) {
+        double gamma_i = std::log(ea / 0.6108);
+        td = (b_i * gamma_i) / (a_i - gamma_i);
+    }
+    return td;
+}
+inline double aitken1d(double oldv, double newv, Aitken1DState& st)
+{
+    double r = newv - oldv;
+    if (!st.have_prev) {
+        st.r_prev = r;
+        st.have_prev = true;
+        return newv;  // no damping on first step
+    }
+    double dr = r - st.r_prev;
+    if (dr != 0.0) {
+        st.omega = -st.omega * st.r_prev / dr;
+    }
+    // clamp
+    if (st.omega < 0.05) st.omega = 0.05;
+    if (st.omega > 0.9)  st.omega = 0.9;
+    st.r_prev = r;
+    return oldv + st.omega * r;
+}
+bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, const vegpstruct& vegp,
+    const tsvegstruct& tsvegp, const tsdifstruct& tspdif, const soilpstruct soilp,
+    soilmod soilheat, soilwaterout soilwater,
+    double latr, double lonr, double Ca = 430, double zref = 2.0,
+    int maxiter = 100, bool C3 = true)
+{
+    if (zref < vegp.hgt) {
+        Rcpp::stop("Height of climdate measurement must be above canopy");
+    }
+    // Calculate average LAIfrac
+    double LAIfrac = 0.0;
+    for (size_t i = 0; i < vegp.Lfrac.size(); ++i) {
+        LAIfrac += vegp.Lfrac[i];
+    }
+    LAIfrac = LAIfrac / static_cast<double>(vegp.Lfrac.size());
+    // Calculate shortwave radiation absorbed by canopy and ground
+    solmodel solp = solpositionCpp2(latr, lonr, obsdata.year, obsdata.month, obsdata.day, obsdata.hour);
+    double sloper = soilp.slope * torad;
+    double aspectr = soilp.aspect * torad;
+    double si = solarindexCpp2(sloper, aspectr, solp.zenr, solp.azir);
+    kstruct kk = cankCpp(solp.zenr, vegp.x, si);
+    tsdirstruct tspdir = twostreamdirCpp(vegp.pai, kk.kd, soilp.gref, tsvegp);
+    albf albs = albedo(kk.kd, vegp.pai, tspdif, tspdir);
+    double Rabs_sw = 0.0;
+    double RabsG_sw = 0.0;
+    double amx = soilp.gref; if (amx < vegp.lref) amx = vegp.lref;
+    if (climdata.Rsw > 0.0) {
+        // Canopy
+        double Rb0 = (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr);
+        if (Rb0 > 900.0) Rb0 = 900.0;
+        double Rdirdowng = 0.0;
+        double Rdbdg = 0.0;
+        double kksi = 0.0;
+        if (Rb0 > 0.0) {
+            double albc = (albs.albb - albs.wgtg * soilp.gref) / (1.0 - albs.wgtg); // canopy albedo
+            kksi = kk.k * si;
+            if (kksi > 1.0) kksi = 1.0;
+            Rabs_sw = (1.0 - albs.albd) * climdata.Rdif +
+                (1.0 - soilp.gref) * albs.wgtg * Rb0 * si +
+                (1.0 - albc) * (1.0 - albs.wgtg) * Rb0 * kksi;
+            Rdirdowng = Rb0 * std::exp(-kk.kd * vegp.pai);
+            Rdbdg = (tspdir.p8 / tspdir.sig) * std::exp(-kk.kd * vegp.pai) +
+                tspdir.p9 * std::exp(-tsvegp.h * vegp.pai) +
+                tspdir.p10 * std::exp(tsvegp.h * vegp.pai);
+            if (Rdbdg > amx) Rdbdg = amx;
+            if (Rdbdg < 0.0) Rdbdg = 0.0;
+        }
+        else {
+            Rabs_sw = (1.0 - albs.albd) * climdata.Rdif;
+        }
+        // Calculate Rddg
+        double Rdddg = tspdif.p3 * std::exp(-tsvegp.h * vegp.pai) + tspdif.p4 * std::exp(tsvegp.h * vegp.pai);
+        if (Rdddg > 1.0) Rdddg = 1.0;
+        if (Rdddg < 0.0) Rdddg = 0.0;
+        double Rdifdowng = Rdddg * climdata.Rdif + Rdbdg * Rb0;
+        RabsG_sw = Rdifdowng + Rdirdowng;
+    }
+    // Calculate total radiation absorbed by canopy
+    double Rabs_lw = climdata.Rlw * (albs.wgti * soilp.groundem + (1.0 - albs.wgti) * vegp.vegem);
+    double Rabs = Rabs_sw + Rabs_lw;
+    // Calculate other constants
+    double d = zeroplanedisCpp2(vegp.hgt, vegp.pai);
+    double cp = cpairCpp(climdata.tref);
+    double ph = phairCpp(climdata.tref, climdata.pk);
+    double tr = std::exp(-vegp.pai);
+    double em = tr * soilp.groundem + (1.0 - tr) * vegp.vegem;
+    double Rema = vegp.vegem * sb * radem(climdata.tref);
+    double Da = satvapCpp2(climdata.tref) * (1.0 - climdata.relhum / 100.0);
+    double Tk = climdata.tref + 273.15;
+    double tdew = dewpointCpp2(climdata.tref, climdata.relhum);
+    double ea = satvapCpp2(climdata.tref);
+    // Initialize values
+    double psih = 0.0;
+    double psim = 0.0;
+    double H = 0.01;
+    double G = 0.0;
+    double tcanopy = climdata.tref + 0.01 * Rabs;
+    double error = 1e99;
+    double Tr = 0.0;
+    int itr = 0.0;
+    // Create values needed outside loop
+    double uf = 0.0;
+    double LL = 1e10;
+    Aitken1DState st;
+    while (error > 1e-2 && itr < maxiter) {
+        // Calculate bulk surface aerodynamic resistance
+        double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d, psih);
+        uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
+        double zh = 0.2 * zm;
+        double rHa = (std::log((zref - d) / zh) + psih) / (ka * uf);
+        // Calculate bulk surface stomatal resistance
+        double theta = soilwater.swo.theta[0];
+        double psiw = waterPotential(soilp, theta, 0);
+        double rS = bulkstomatalresist(climdata.tref, tcanopy, climdata.relhum, climdata.pk, psiw,
+            Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
+        rS = std::min(rS, 1e10);
+        double rV = rS + rHa;
+        // Calculate resistance from top of canopy to zref
+        double rhz = 0.0;
+        if (zref > vegp.hgt) {
+            // Calculate resistance from top of canopy to hes
+            double psihh = dpsimCpp2(zm / LL) - dpsimCpp2((vegp.hgt - d) / LL);
+            double rHh = (std::log((vegp.hgt - d) / zh) + psihh) / (ka * uf);
+            rhz = rHa - rHh;
+        }
+        // Calculate resistance from ground to top of canopy
+        double phih = dphihCpp2((zref - d) / LL);
+        double a2 = (phih * 0.41 * (1 - d / vegp.hgt)) / 1.5625;
+        double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt);
+        // Calculate resistance form ground to zref
+        double rGz = rhg + rhz;
+        // Calculate total radiation absorbed by ground
+        double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
+        double RabsG = RabsG_sw + RabsG_lw;
+        // Calculate transpiration
+        double Tkc = tcanopy + 273.15;
+        double es = satvapCpp2(tcanopy);
+        Tr = Mw / (RgasC * Tkc * rV) * (es - ea) * 1000.0 * 3600.0 * vegp.pai * LAIfrac;
+        if (Tr < 0.0) Tr = 0.0;
+        // Run soil heat model
+        soilheat.wc = soilwater.swo.theta;
+        soilheat = SoilHeatCpp(soilheat, soilp, RabsG, climdata.tref, climdata.relhum, climdata.pk, rGz, 3600, 0.5, maxiter);
+        // Run soil water model
+        climforwaterstruct cfw = {};
+        cfw.Rabs = RabsG; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rGz;
+        cfw.precip = climdata.precip; cfw.Et = Tr;
+        // Slot in soil temperature
+        soilwater.swo.oldTc = soilheat.oldTe;
+        soilwater.swo.Tc = soilheat.Te;
+        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
+        // Use Aitkins relaxation on soil Gflux
+        G = aitken1d(G, soilheat.Gflux, st);
+        // Calculate updated canopy temperature
+        double Te = (tcanopy + climdata.tref) / 2.0;
+        double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
+        double la = (tcanopy >= 0.0) ? (45068.7 - 42.8428 * tcanopy) : (51078.69 - 4.338 * tcanopy - 0.06367 * tcanopy * tcanopy);
+        double De = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5);
+        double oldtcanopy = tcanopy;
+        tcanopy = climdata.tref + ((Rabs - Rema - ((la * ph) / (climdata.pk * rV)) * Da - G) /
+            (Rer + ph * (cp / rHa + ((la * De) / (climdata.pk * rV)))));
+        if (tcanopy < tdew) tcanopy = tdew;
+        // update diabatic coefficients
+        H = (ph * cp / rHa) * (tcanopy - climdata.tref);
+        double Lsafe = clipMOlength(LL, zref, d, zm);
+        LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+        if (H > 0) {
+            if (LL < Lsafe) LL = Lsafe;
+        }
+        else {
+            if (LL > Lsafe) LL = Lsafe;
+        }
+        psim = dpsimCpp2(zm / LL) - dpsimCpp2((zref - d) / LL);
+        psih = dpsihCpp2(zh / LL) - dpsihCpp2((zref - d) / LL);
+        // Do while loop checks
+        error = std::abs(tcanopy - oldtcanopy);
+        ++itr;
+    }
+    bigleafone out;
+    out.soilheat = soilheat;
+    out.soilwater = soilwater;
+    out.tcanopy = tcanopy;
+    out.uf = uf;
+    out.LL = LL;
+    out.Et = Tr;
+    out.iters = itr;
+    return out;
+}
+bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata, const soilpstruct soilp,
+    soilmod soilheat, soilwaterout soilwater, double zmr, double latr, double lonr, double zref = 2.0, 
+    int maxiter = 20)
+{
+    // Calculate radiation absorbed by ground
+    solmodel solp = solpositionCpp2(latr, lonr, obsdata.year, obsdata.month, obsdata.day, obsdata.hour);
+    double sloper = soilp.slope * torad;
+    double aspectr = soilp.aspect * torad;
+    double si = solarindexCpp2(sloper, aspectr, solp.zenr, solp.azir);
+    double Rabs_sw = 0.0;
+    if (climdata.Rsw > 0.0) {
+        // Canopy
+        double Rb0 = (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr);
+        if (Rb0 > 900.0) Rb0 = 900.0;
+        Rabs_sw = (1.0 - soilp.gref) * (climdata.Rdif + si * Rb0);
+    }
+    double Rabs = Rabs_sw + soilp.groundem * climdata.Rlw;
+    // Calculate other constants
+    double cp = cpairCpp(climdata.tref);
+    double ph = phairCpp(climdata.tref, climdata.pk);
+    double Tk = climdata.tref + 273.15;
+    // Initialize values
+    double psih = 0.0;
+    double psim = 0.0;
+    double H = 0.01;
+    double error = 1e99;
+    int itr = 0.0;
+    // Create values needed outside loop
+    double uf = 0.0;
+    double LL = 1e10;
+    double oldtsoil = soilheat.Te[0];
+    double newtsoil = soilheat.Te[0];
+    Aitken1DState st;
+    while (error > 1e-2 && itr < maxiter) {
+        // Calculate bulk surface aerodynamic resistance
+        double zm = zmr * std::exp(-psih);
+        uf = (ka * climdata.uref) / (std::log(zref / zm) + psim);
+        double zh = 0.2 * zm;
+        double rHa = (std::log(zref / zh) + psih) / (ka * uf);
+        // Run soil heat model
+        soilheat.wc = soilwater.swo.theta;
+        soilheat = SoilHeatCpp(soilheat, soilp, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 0.5, maxiter);
+        // Run soil water model
+        climforwaterstruct cfw = {};
+        cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
+        cfw.precip = climdata.precip; cfw.Et = 0.0;
+        // Slot in soil temperature
+        soilwater.swo.oldTc = soilheat.oldTe;
+        soilwater.swo.Tc = soilheat.Te;
+        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
+        // Calculate updated soil surface temperature
+        newtsoil = aitken1d(newtsoil, soilheat.Te[0], st);
+        // Calculate updated canopy temperature
+        soilheat.Te[0] = newtsoil;
+        // update diabatic coefficients
+        H = (ph * cp / rHa) * (newtsoil - climdata.tref);
+        double Lsafe = clipMOlength(LL, zref, 0.0, zm);
+        LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+        if (H > 0) {
+            if (LL < Lsafe) LL = Lsafe;
+        }
+        else {
+            if (LL > Lsafe) LL = Lsafe;
+        }
+        psim = dpsimCpp2(zm / LL) - dpsimCpp2(zref / LL);
+        psih = dpsihCpp2(zh / LL) - dpsihCpp2(zref / LL);
+        // Do while loop checks
+        error = std::abs(newtsoil - oldtsoil);
+        oldtsoil = newtsoil;
+        ++itr;
+    }
+    bigleafone out;
+    out.soilheat = soilheat;
+    out.soilwater = soilwater;
+    out.tcanopy = newtsoil;
+    out.uf = uf;
+    out.LL = LL;
+    out.Et = 0.0;
+    out.iters = itr;
+    return out;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ****************************************** Ecotherm model *********************************************************** //
@@ -2310,7 +2636,7 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double mlc = (la * Dw * wetfrac * confrac * 1000.0) / (0.5 * height * (Ts + 273.15) * RgasC);
     double DeV = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5); // Slope of the saturated vapour pressure curve (Lv)
     double DeC = satvapCpp2(Tf + 0.5) - satvapCpp2(Tf - 0.5); // Slope of the saturated vapour pressure curve (Lc)
-        // Calculate various contributions
+    // Calculate various contributions
     double top = (Rabs + M - mr * radem(Ta) - mrc * radem(Ta) - mc * dT - ml * Da - mlc * Dac);
     double btm = 4.0 * mr * std::pow(Te + 273.15, 3.0) + 4.0 * mrc * std::pow(Tf + 273.15, 3.0) +
         mc + mv + ml * DeV + surfrh * mlc * DeC;
@@ -3727,4 +4053,193 @@ NumericMatrix expand_outputCpp(const NumericMatrix& mat, int nout) {
         }
     }
     return out;
+}
+// [[Rcpp::export]]
+List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
+    Rcpp::List vegp, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon,
+    double boundaryT, int maxiter = 100, bool C3 = true)
+{
+    // Extract date variables
+    std::vector<int> year = obstime["year"];
+    std::vector<int> month = obstime["month"];
+    std::vector<int> day = obstime["day"];
+    std::vector<double> hour = obstime["hour"];
+    // Extract climate variables
+    std::vector<double> temp = climdata["temp"];
+    std::vector<double> relhum = climdata["relhum"];
+    std::vector<double> pres = climdata["pres"];
+    std::vector<double> Rsw = climdata["swdown"];
+    std::vector<double> Rdif = climdata["difrad"];
+    std::vector<double> Rlw = climdata["lwdown"];
+    std::vector<double> wspeed = climdata["windspeed"];
+    std::vector<double> precip = climdata["precip"];
+    // Create soil and vegetation 
+    double pai = Rcpp::as<double>(vegp["pai"]);
+    std::vector<double> paii(Lfrac.size());
+    double val = pai / static_cast<double>(Lfrac.size());
+    for (size_t i = 0; i < Lfrac.size(); ++i) paii[i] = val;
+    vegpstruct vegpc = tovegpstruct(vegp, paii, Lfrac);
+    soilpstruct soilpc = tosoilpstruct(soilc);
+    tsvegstruct tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
+    tsdifstruct tspdif = twostreamdifCpp(tspveg);
+    // Initialize soil model
+    size_t n = soilpc.thetaS.size();
+    std::vector<double> SoilTempIni(n);
+    std::vector<double> SoilThetaIni(n);
+    double end1 = soilpc.thetaS[n - 1];
+    double end2 = boundaryT;
+    double start1 = temp[0];
+    double start2 = end2 / 1.5;
+    for (size_t i = 0; i < n; ++i) {
+        SoilTempIni[i] = start1 + (end1 - start1) * static_cast<double>(i) / static_cast<double>(n - 1);
+        SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
+    }
+    soilmod soilheat = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
+    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, vegpc.rootskew);
+    soilwaterout water;
+    water.swo = soilwater;
+    water.success = false;
+    water.iterations = 0; // how many iterations model run for
+    water.Evapmmhr = 0.0; // surface evaporation
+    size_t tsteps = hour.size();
+    // Create variables for storing
+    NumericVector tcanopy(tsteps);
+    NumericVector uf(tsteps);
+    NumericVector LL(tsteps);
+    NumericVector Et(tsteps);
+    NumericVector soilt(tsteps);
+    NumericVector theta(tsteps);
+    IntegerVector iters(tsteps);
+    // Run model in hourly timesteps
+    double latr = lat * torad;
+    double lonr = lon * torad;
+    for (size_t hr = 0; hr < tsteps; ++hr) {
+        // Create obsdata
+        obsstruct obsdata;
+        obsdata.year = year[hr]; obsdata.month = month[hr]; obsdata.day = day[hr]; obsdata.hour = hour[hr];
+        // Create climdata
+        climstruct climin;
+        climin.tref = temp[hr]; climin.relhum = relhum[hr]; climin.pk = pres[hr]; climin.Rsw = Rsw[hr];
+        climin.Rdif = Rdif[hr]; climin.Rlw = Rlw[hr]; climin.uref = wspeed[hr]; climin.winddir = 0.0;
+        climin.precip = precip[hr];
+        if (climin.uref < 0.5) climin.uref = 0.5;
+        // Run bigleaf model to converence
+        bigleafone blo = solveonestep(obsdata, climin, vegpc, tspveg, tspdif, soilpc,
+            soilheat, water, latr, lonr, Ca, zref, maxiter, C3);
+        // Update
+        soilheat = blo.soilheat;
+        water = blo.soilwater;
+        soilheat.oldTe = soilheat.Te;
+        water.swo.oldvapor = water.swo.vapor;
+        water.swo.oldtheta = water.swo.theta;
+        // Extract values
+        tcanopy[hr] = blo.tcanopy;
+        uf[hr] = blo.uf;
+        LL[hr] = blo.LL;
+        Et[hr] = blo.Et;
+        iters[hr] = blo.iters;
+        soilt[hr] = soilheat.Te[0];
+        theta[hr] = water.swo.theta[0];
+    }
+    return List::create(
+        // Radiation streams
+        Named("tcanopy") = tcanopy,
+        Named("uf") = uf,
+        Named("LL") = LL,
+        Named("Et") = Et,
+        Named("soilt") = soilt,
+        Named("theta") = theta,
+        // Other above ground climate variables
+        Named("SoilTempIni") = Rcpp::wrap(soilheat.Te),
+        Named("SoilThetaIni") = Rcpp::wrap(water.swo.theta)
+    );
+}
+// [[Rcpp::export]]
+List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
+    double zref, double zmr, double lat, double lon,
+    double boundaryT, int maxiter = 100, bool C3 = true)
+{
+    // Extract date variables
+    std::vector<int> year = obstime["year"];
+    std::vector<int> month = obstime["month"];
+    std::vector<int> day = obstime["day"];
+    std::vector<double> hour = obstime["hour"];
+    // Extract climate variables
+    std::vector<double> temp = climdata["temp"];
+    std::vector<double> relhum = climdata["relhum"];
+    std::vector<double> pres = climdata["pres"];
+    std::vector<double> Rsw = climdata["swdown"];
+    std::vector<double> Rdif = climdata["difrad"];
+    std::vector<double> Rlw = climdata["lwdown"];
+    std::vector<double> wspeed = climdata["windspeed"];
+    std::vector<double> precip = climdata["precip"];
+    // Create soil params 
+    soilpstruct soilpc = tosoilpstruct(soilc);
+    // Initialize soil model
+    size_t n = soilpc.thetaS.size();
+    std::vector<double> SoilTempIni(n);
+    std::vector<double> SoilThetaIni(n);
+    double end1 = soilpc.thetaS[n - 1];
+    double end2 = boundaryT;
+    double start1 = temp[0];
+    double start2 = end2 / 1.5;
+    for (size_t i = 0; i < n; ++i) {
+        SoilTempIni[i] = start1 + (end1 - start1) * static_cast<double>(i) / static_cast<double>(n - 1);
+        SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
+    }
+    soilmod soilheat = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
+    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, 10.0);
+    soilwaterout water;
+    water.swo = soilwater;
+    water.success = false;
+    water.iterations = 0; // how many iterations model run for
+    water.Evapmmhr = 0.0; // surface evaporation
+    size_t tsteps = hour.size();
+    // Create variables for storing
+    NumericVector uf(tsteps);
+    NumericVector LL(tsteps);
+    NumericVector Et(tsteps);
+    NumericVector soilt(tsteps);
+    NumericVector theta(tsteps);
+    IntegerVector iters(tsteps);
+    // Run model in hourly timesteps
+    double latr = lat * torad;
+    double lonr = lon * torad;
+    for (size_t hr = 0; hr < tsteps; ++hr) {
+        // Create obsdata
+        obsstruct obsdata;
+        obsdata.year = year[hr]; obsdata.month = month[hr]; obsdata.day = day[hr]; obsdata.hour = hour[hr];
+        // Create climdata
+        climstruct climin;
+        climin.tref = temp[hr]; climin.relhum = relhum[hr]; climin.pk = pres[hr]; climin.Rsw = Rsw[hr];
+        climin.Rdif = Rdif[hr]; climin.Rlw = Rlw[hr]; climin.uref = wspeed[hr]; climin.winddir = 0.0;
+        climin.precip = precip[hr];
+        if (climin.uref < 0.5) climin.uref = 0.5;
+        // Run bigleaf model to converence
+        bigleafone blo = solveonestepbare(obsdata, climin, soilpc, soilheat, water, zmr, latr, lonr, zref, maxiter);
+        // Update
+        soilheat = blo.soilheat;
+        water = blo.soilwater;
+        soilheat.oldTe = soilheat.Te;
+        water.swo.oldvapor = water.swo.vapor;
+        water.swo.oldtheta = water.swo.theta;
+        // Extract values
+        uf[hr] = blo.uf;
+        LL[hr] = blo.LL;
+        Et[hr] = blo.Et;
+        iters[hr] = blo.iters;
+        soilt[hr] = soilheat.Te[0];
+        theta[hr] = water.swo.theta[0];
+    }
+    return List::create(
+        Named("iters") = iters,
+        Named("uf") = uf,
+        Named("LL") = LL,
+        Named("Et") = Et,
+        Named("soilt") = soilt,
+        Named("theta") = theta,
+        // Other above ground climate variables
+        Named("SoilTempIni") = Rcpp::wrap(soilheat.Te),
+        Named("SoilThetaIni") = Rcpp::wrap(water.swo.theta)
+    );
 }

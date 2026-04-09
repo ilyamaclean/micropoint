@@ -219,7 +219,8 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
     surfaceT <- climdata$temp[1]
     SoilTempIni = (geometricCpp(15, boundaryT - surfaceT) + surfaceT)[1:16]
   }
-  if (class(ThetaIni) == "logical")  ThetaIni <- rep(0.419, 16)
+  mutheta <- seq(0.6, 1, length.out =  16)
+  if (class(ThetaIni) == "logical")  ThetaIni <- 0.46 * mutheta
   # Create vegp inputs
   vegp <-  createvegp(vegtype = "C3")
   vegp$h <- 0.12
@@ -246,6 +247,67 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
   clim2$pres <- hgtvars$new_pressure
   return(clim2)
 }
+#' Runs model quickly for a period of time to get an initial soil water profile
+#'
+#' @param climdata data.frame of weather conditions that uses the same naming conventions
+#'   as in the inbuilt dataset `climdata`.
+#' @param vegp Vegetation parameter list as returned by [createvegp()].
+#'   If `NA`, bare-ground conditions are assumed.
+#' @param soilc Soil parameter list as returned by [createsoilc()].
+#' @param paii Numeric vector of plant area index values for each canopy layer,
+#'   as returned by [PAIgeometry()] or [PAIgrass()] (see Details).
+#' @param Lfrac Single numeric value or numeric vector giving the fraction of plant area
+#'   that is living vegetation in each canopy layer.
+#' @param lat Numeric. Latitude in decimal degrees.
+#' @param long Numeric. Longitude in decimal degrees.
+#' @param zref Numeric. Height (m) of the meteorological forcing data.
+#'   Default is 2 (see Details).
+#' @param zmr Numeric. Roughness length for bare-ground calculations.
+#' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm).
+#'   If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
+#' @param boundaryT Optional numeric. Approximate mean annual air temperature
+#'   used to initialise the soil temperature profile. If `NA`, it is estimated
+#'   from `climdata$temp`, which usually requires roughly a full year of data.
+#' @param maxiter Integer. Maximum number of iterations used to achieve convergence
+#'   within each time step.
+#' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
+#'
+#' @details
+#' The soil water model is run over the supplied climate data, and the final
+#' soil water profile is used as the initial condition. Where antecedent climate
+#' data are not available, use data from the corresponding period in the current
+#' year ending immediately before the time of interest.
+#'
+#' @return Numeric vector of initial volumetric soil water contents in each layer
+#'
+#' @importFrom Rcpp sourceCpp
+#' @useDynLib micropoint, .registration = TRUE
+#' @export
+InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
+                            CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE) {
+  if (class(boundaryT) == "logical") {
+    n <- length(climdata$temp)
+    if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
+    boundaryT <- mean(climdata$temp)
+  }
+  tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
+  obstime <- data.frame(year = tme$year +1900,
+                        month = tme$mon + 1,
+                        day = tme$mday,
+                        hour = tme$hour)
+  if (class(vegp) == "logical") {
+    blm <- BigLeafBareCpp(obstime, climdata, soilc, zref, zmr, lat, long,
+                          boundaryT, maxiter)
+  } else {
+    if (length(Lfrac) == 1) Lfrac=rep(Lfrac, 10)
+    if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
+                       lat, long, boundaryT, maxiter, C3)
+  }
+  return(blm$SoilThetaIni)
+}
+
+
 #' Return a vertical microclimate profile for a specified hour
 #'
 #' Runs the microclimate model up to the specified hour and then returns the resulting
@@ -269,7 +331,7 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
 #' @param SoilTempIni Optional numeric vector of initial soil temperatures.
 #'   If `NA`, a default profile is generated.
 #' @param ThetaIni Optional numeric vector of initial volumetric soil water
-#'   contents. If `NA`, all layers are initialised to 0.419.
+#'   contents in each layer. If `NA`, all plausible profile is computed
 #' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm).
 #'   If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
@@ -348,12 +410,14 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     boundaryT <- mean(climdata$temp)
   }
   # Create SoilTemp and Theta vectors if not provided
+  nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
-    SoilTempIni = (geometricCpp(15, boundaryT - surfaceT) + surfaceT)[1:16]
+    SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(nlay + 1)]
   }
-  if (class(ThetaIni) == "logical")  ThetaIni <- rep(0.419, 16)
+  mutheta <- seq(0.6, 1, length.out =  nlay + 1)
+  if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
   # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
@@ -555,13 +619,15 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
+  nlay <- soilc$nLayers
   # Create SoilTemp and Theta vectors if not provided
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
-    SoilTempIni = (geometricCpp(15, boundaryT - surfaceT) + surfaceT)[1:16]
+    SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(nlay + 1)]
   }
-  if (class(ThetaIni) == "logical")  ThetaIni <- rep(0.419, 16)
+  mutheta <- seq(0.6, 1, length.out =  nlay + 1)
+  if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
   # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
@@ -672,13 +738,15 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
+  nlay <- soilc$nLayers
   # Create SoilTemp and Theta vectors if not provided
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
-    SoilTempIni = (geometricCpp(15, boundaryT - surfaceT) + surfaceT)[1:16]
+    SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(1+nlay)]
   }
-  if (class(ThetaIni) == "logical")  ThetaIni <- rep(0.419, 16)
+  mutheta <- seq(0.6, 1, length.out =  nlay + 1)
+  if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
   # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,

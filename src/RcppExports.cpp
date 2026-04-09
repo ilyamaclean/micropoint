@@ -823,6 +823,48 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// BigLeafCpp2
+List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc, Rcpp::List vegp, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon, double boundaryT, int maxiter, bool C3);
+RcppExport SEXP _micropoint_BigLeafCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP LfracSEXP, SEXP zrefSEXP, SEXP CaSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP boundaryTSEXP, SEXP maxiterSEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type Ca(CaSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< double >::type boundaryT(boundaryTSEXP);
+    Rcpp::traits::input_parameter< int >::type maxiter(maxiterSEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, Ca, lat, lon, boundaryT, maxiter, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
+// BigLeafBareCpp
+List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc, double zref, double zmr, double lat, double lon, double boundaryT, int maxiter, bool C3);
+RcppExport SEXP _micropoint_BigLeafBareCpp(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP zrefSEXP, SEXP zmrSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP boundaryTSEXP, SEXP maxiterSEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type zmr(zmrSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< double >::type boundaryT(boundaryTSEXP);
+    Rcpp::traits::input_parameter< int >::type maxiter(maxiterSEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(BigLeafBareCpp(obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_solpositionCpp", (DL_FUNC) &_micropoint_solpositionCpp, 6},
@@ -873,6 +915,8 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_difpropCpp", (DL_FUNC) &_micropoint_difpropCpp, 4},
     {"_micropoint_solaltCpp", (DL_FUNC) &_micropoint_solaltCpp, 3},
     {"_micropoint_expand_outputCpp", (DL_FUNC) &_micropoint_expand_outputCpp, 2},
+    {"_micropoint_BigLeafCpp2", (DL_FUNC) &_micropoint_BigLeafCpp2, 12},
+    {"_micropoint_BigLeafBareCpp", (DL_FUNC) &_micropoint_BigLeafBareCpp, 10},
     {NULL, NULL, 0}
 };
 

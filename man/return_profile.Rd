@@ -54,7 +54,7 @@ Default is 2 (see details).}
 If `NA`, a default profile is generated.}
 
 \item{ThetaIni}{Optional numeric vector of initial volumetric soil water
-contents. If `NA`, all layers are initialised to 0.419.}
+contents in each layer. If `NA`, all plausible profile is computed}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO2 concentration (ppm).
 If `NA`, it is estimated from the year of the first observation using [Cafromyear()].}

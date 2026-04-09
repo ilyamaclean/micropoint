@@ -3,6 +3,7 @@
 export(.solarindex)
 export(Cafromyear)
 export(GFlux)
+export(InitailizeWater)
 export(PAIgeometry)
 export(PAIgrass)
 export(RunBigLeaf)
