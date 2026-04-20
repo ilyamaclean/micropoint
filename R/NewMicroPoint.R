@@ -772,5 +772,18 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
   }
   return(mout)
 }
-
+#' R wrapper for c++ expand_outputCpp function
+#'
+#' Spline interpolates a Numeric Matrix for better visual representation
+#'
+#' @param mat matrix to expand.
+#' @param nout number of rows of expanded matrix
+#' @return an expanded matrix
+#' @importFrom Rcpp sourceCpp
+#' @useDynLib micropoint, .registration = TRUE
+#' @export
+expand_output <- function(mat, nout) {
+  mout <- expand_outputCpp(mat, nout)
+  return(mout)
+}
 
