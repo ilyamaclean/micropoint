@@ -59,7 +59,11 @@ createvegp <- function(vegtype = "BET.Te") {
 #' @param aspect Numeric. Surface aspect (degrees).
 #' @param surface_organicmu Numeric. Multiplication factor controlling the
 #'   vertical profile of soil organic matter near the surface.
-#' @param deepSaturated Logical. Whether the deep boundary condition is saturated.
+#' @param FreeDrain Logical. If `TRUE`, a free-drainage lower boundary is
+#' assumed, allowing water to drain out of the bottom of the soil profile under
+#' gravity. If `FALSE`, the lower boundary is treated as saturated, meaning the
+#' soil is assumed to be sitting above a water table, which limits drainage from
+#' the deepest layer.
 #'
 #' @details
 #' The selected soil parameter values are replicated across \code{nlayers + 1}
@@ -101,13 +105,13 @@ createvegp <- function(vegtype = "BET.Te") {
 #'   \item{aspect}{Surface aspect (degrees)}
 #'   \item{nLayers}{Number of soil layers}
 #'   \item{totalDepth}{Total soil depth used internally (m), after multiplying input depth by 1.5}
-#'   \item{deepSaturated}{Logical indicating whether the deep boundary condition is saturated}
+#'   \item{FreeDrain}{Logical indicating whether lower boundary layer is free draining}
 #' }
 #' @importFrom Rcpp sourceCpp
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
 createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, slope = 0, aspect = 180,
-                        surface_organicmu = 3, deepSaturated = TRUE) {
+                        surface_organicmu = 3, FreeDrain = TRUE) {
   # Adjust total depth to allow for boundary layer
   totalDepth <- 1.5 * totalDepth
   s <- which(newsoilparamstable$Soil.type == soiltype)
@@ -136,7 +140,7 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, sl
   soilc$aspect <- aspect
   soilc$nLayers <- nlayers
   soilc$totalDepth <-  totalDepth
-  soilc$deepSaturated <- deepSaturated
+  soilc$FreeDrain <- FreeDrain
   soilc$alpha <- NULL
   return(soilc)
 }

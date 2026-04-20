@@ -1466,7 +1466,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> aa(n, 0.0), bb(n, 0.0), cc(n, 0.0), dd(n, 0.0);
     std::vector<double> ff(n, 0.0), u(n, 0.0), du(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
     // Bottom boundary initialisation if required
-    if (soilp.deepSaturated) {
+    if (soilp.FreeDrain == false) {
         psiw[n] = soilp.psie[n - 1];
         theta[n] = soilp.thetaS[n - 1];
         k[n] = soilp.Ksat[n - 1];
@@ -1483,7 +1483,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
             climdata.Et, dT, psiw, pTAW);
 
-        if (soilp.deepSaturated) {
+        if (soilp.FreeDrain == false) {
             psiw[n] = soilp.psie[n - 1];
             theta[n] = soilp.thetaS[n - 1];
             k[n] = soilp.Ksat[n - 1];
@@ -1505,7 +1505,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
         }
-        if (!soilp.deepSaturated) {
+        if (!soilp.FreeDrain == false) {
             k[n] = k[n - 1];
         }
         // Flux term
@@ -2967,7 +2967,7 @@ static soilpstruct tosoilpstruct(List soilp) {
     out.thetaS = Rcpp::as<std::vector<double>>(soilp["Smax"]);
     out.Ksat = Rcpp::as<std::vector<double>>(soilp["Ksat"]);
     out.n = Rcpp::as<std::vector<double>>(soilp["n"]);
-    out.deepSaturated = Rcpp::as<bool>(soilp["deepSaturated"]);
+    out.FreeDrain = Rcpp::as<bool>(soilp["FreeDrain"]);
     // Ensure psi_e is negative (air entry potential)
     for (double& v : out.psie) v = -std::abs(v);
     // Calculate minimum psie
