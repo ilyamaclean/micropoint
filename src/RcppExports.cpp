@@ -524,8 +524,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // PenmanMonteith_animal
-double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh, double rHa, double height, double wetfrac, double confrac, double M, double em, double k, double surfrh);
-RcppExport SEXP _micropoint_PenmanMonteith_animal(SEXP RabsSEXP, SEXP TaSEXP, SEXP TsSEXP, SEXP TeSEXP, SEXP TfSEXP, SEXP pkSEXP, SEXP rhSEXP, SEXP rHaSEXP, SEXP heightSEXP, SEXP wetfracSEXP, SEXP confracSEXP, SEXP MSEXP, SEXP emSEXP, SEXP kSEXP, SEXP surfrhSEXP) {
+double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh, double rHa, double height, double rc, double confrac, double M, double em, double k, double surfrh);
+RcppExport SEXP _micropoint_PenmanMonteith_animal(SEXP RabsSEXP, SEXP TaSEXP, SEXP TsSEXP, SEXP TeSEXP, SEXP TfSEXP, SEXP pkSEXP, SEXP rhSEXP, SEXP rHaSEXP, SEXP heightSEXP, SEXP rcSEXP, SEXP confracSEXP, SEXP MSEXP, SEXP emSEXP, SEXP kSEXP, SEXP surfrhSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -538,13 +538,13 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type rh(rhSEXP);
     Rcpp::traits::input_parameter< double >::type rHa(rHaSEXP);
     Rcpp::traits::input_parameter< double >::type height(heightSEXP);
-    Rcpp::traits::input_parameter< double >::type wetfrac(wetfracSEXP);
+    Rcpp::traits::input_parameter< double >::type rc(rcSEXP);
     Rcpp::traits::input_parameter< double >::type confrac(confracSEXP);
     Rcpp::traits::input_parameter< double >::type M(MSEXP);
     Rcpp::traits::input_parameter< double >::type em(emSEXP);
     Rcpp::traits::input_parameter< double >::type k(kSEXP);
     Rcpp::traits::input_parameter< double >::type surfrh(surfrhSEXP);
-    rcpp_result_gen = Rcpp::wrap(PenmanMonteith_animal(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, wetfrac, confrac, M, em, k, surfrh));
+    rcpp_result_gen = Rcpp::wrap(PenmanMonteith_animal(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, rc, confrac, M, em, k, surfrh));
     return rcpp_result_gen;
 END_RCPP
 }

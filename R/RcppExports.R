@@ -133,8 +133,8 @@ Uabove <- function(za, zref, uh, uref, hgt, pai, LL) {
     .Call(`_micropoint_Uabove`, za, zref, uh, uref, hgt, pai, LL)
 }
 
-PenmanMonteith_animal <- function(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, wetfrac, confrac, M, em = 0.97, k = 0.5, surfrh = 1.0) {
-    .Call(`_micropoint_PenmanMonteith_animal`, Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, wetfrac, confrac, M, em, k, surfrh)
+PenmanMonteith_animal <- function(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, rc, confrac, M, em = 0.97, k = 0.5, surfrh = 1.0) {
+    .Call(`_micropoint_PenmanMonteith_animal`, Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, rc, confrac, M, em, k, surfrh)
 }
 
 Ectotherm <- function(obstime, climdata, animal, lat, lon, leaft, maxIter = 100L, tolerance = 1e-2) {

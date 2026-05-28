@@ -2612,7 +2612,7 @@ double Dw_waterVapour(double Tf, double pk)
 // Compute body temperature of animal
 // [[Rcpp::export]]
 double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh,
-    double rHa, double height, double wetfrac, double confrac, double M, double em = 0.97, double k = 0.5,
+    double rHa, double height, double rc, double confrac, double M, double em = 0.97, double k = 0.5,
     double surfrh = 1.0)
 {
     double Tbody = Ta;
@@ -2631,9 +2631,11 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double mc = keff * confrac; // conductance my
     double mv = ph * cp * cd / rHa;
     double la = (Tbody >= 0.0) ? 45068.7 - 42.8428 * Tbody : 51078.69 - 4.338 * Tbody - 0.06367 * Tbody * Tbody;
-    double ml = (ph * la * wetfrac * cd) / (rHa * pk);
+    double rv = rHa + rc; // total vapour resistance (s/m)
+    double ml = (ph * la * cd) / (rv * pk);
     double Dw = Dw_waterVapour(Tf, pk);
-    double mlc = (la * Dw * wetfrac * confrac * 1000.0) / (0.5 * height * (Ts + 273.15) * RgasC);
+    double rv_contact = ((0.5 * height * (Ts + 273.15) * RgasC) / (Dw * 1000.0)) + rc;
+    double mlc = (la * confrac) / rv_contact;
     double DeV = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5); // Slope of the saturated vapour pressure curve (Lv)
     double DeC = satvapCpp2(Tf + 0.5) - satvapCpp2(Tf - 0.5); // Slope of the saturated vapour pressure curve (Lc)
     // Calculate various contributions
@@ -2727,7 +2729,7 @@ Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata,
     double length = animal["len"]; // length of animal (cm)
     double refl = animal["refl"]; // reflectance of animal (0-1)
     double confrac = animal["confrac"]; // fraction of animal in direct contact with surface
-    double skinwetfrac = animal["skinwetfrac"]; // fraction of skin surface acting like a freely evaporating surface (0 for most animals, 1 for amphibians)
+    double rc = animal["rc"]; // cutaneous resistance (s / m)
     double em = animal["em"]; // emissvity of animal 
     double rho = animal["rho"]; // animal density (kg / m^3)
     double volume = animal["volume"]; // animal volume (m^3)
@@ -2780,7 +2782,7 @@ Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata,
             // Calculate body temperature
             double Told = Tbody[i];
             Tbody[i] = PenmanMonteith_animal(Rabs, Ta[i], Ts[i], Te, Tf, pk[i], rh[i], rHa, height,
-                skinwetfrac, confrac, M, em, k, surfrh[i]);
+                rc, confrac, M, em, k, surfrh[i]);
             aitkin_weightdif_scalar(Told, Tbody[i], st);
             double dTold = dT;
             dT = Tbody[i] - Ta[i];
@@ -2822,7 +2824,7 @@ Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcp
     double length = animal["len"]; // length of animal (cm)
     double refl = animal["refl"]; // reflectance of animal (0-1)
     double confrac = animal["confrac"]; // fraction of animal in direct contact with surface
-    double skinwetfrac = animal["skinwetfrac"]; // fraction of skin surface acting like a freely evaporating surface (0 for most animals, 1 for amphibians)
+    double rc = animal["rc"]; // cutaneous resistance (s / m)
     double em = animal["em"]; // emissvity of animal 
     double rho = animal["rho"]; // animal density (kg / m^3)
     double volume = animal["volume"]; // animal volume (m^3)
@@ -2884,7 +2886,7 @@ Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcp
                 // Calculate body temperature
                 double Told = Tbody(i, j);
                 Tbody(i, j) = PenmanMonteith_animal(Rabs, Ta(i, j), Ts(i, j), Te, Tf, pk[i], rh(i, j), rHa, height,
-                    skinwetfrac, confrac, M, em, k, 1.0);
+                    rc, confrac, M, em, k, 1.0);
                 aitkin_weightdif_scalar(Told, Tbody(i, j), st);
                 double dTold = dT;
                 dT = Tbody(i, j) - Ta(i, j);

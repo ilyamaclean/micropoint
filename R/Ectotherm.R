@@ -49,8 +49,8 @@
 create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "randomdir",
                          type = c("arthropod", "reptile", "amphibian", "other")) {
   type <- match.arg(type)
-  # Estimate typical wet skin fraction
-  wetfrac <- switch(type, arthropod = 0.01, reptile = 0.05, amphibian = 0.9, other = 0.03)
+  # Estimate typical cutaneous resistance (s / m)
+  rc <- switch(type, arthropod = 4500, reptile = 6700, amphibian = 31, other = 5000)
   # Volume and surface area
   AA <- len / 200
   BB <- width / 200
@@ -75,7 +75,7 @@ create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "r
   confrac <- switch(type, arthropod = 0.01, reptile = 0.2, amphibian = 0.1, other = 0.02)
   atilt <- switch(type, arthropod = 0, reptile = 5, amphibian = 20, other = 5)
   return(list(height = height, width = width, len = len, refl = refl, confrac = confrac,
-              skinwetfrac = wetfrac, em = 0.97, volume = V, area = A, rho = 1000,
+              rc = rc, em = 0.97, volume = V, area = A, rho = 1000,
               a0 = a0, b = b, Q10 = Q10, Tref = Tref, k = k,
               adir = adir, atilt = atilt, position = position))
 }
