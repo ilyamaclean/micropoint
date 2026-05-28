@@ -38,7 +38,7 @@ a list of ectotherm parameters:
   \item{len}{Body length (cm)}
   \item{refl}{Shortwave reflectance of the body surface (unitless)}
   \item{confrac}{Fraction of body surface in conductive contact with the substrate (unitless)}
-  \item{skinwetfrac}{Fraction of body surface capable of evaporative water loss (unitless)}
+  \item{rc}{cutaneous resistance (s /m)}
   \item{em}{Longwave emissivity of the body surface (unitless)}
   \item{volume}{Estimated body volume assuming an ellipsoid (m^3)}
   \item{area}{Estimated body surface area using the Knud Thomsen ellipsoid approximation (m^2)}
