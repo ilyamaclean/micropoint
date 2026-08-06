@@ -3021,7 +3021,14 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     std::vector<double> psiw(out.n + 1);
     std::vector<double> k(out.n + 1);
     std::vector<double> vapor(out.n + 1);
-    vol[0] = 0.0;
+    // Node-centred control volume: half the distance to each neighbour.
+    // At the surface node (i=0) there's no i-1 neighbour -- z[0]=0 is the
+    // true physical boundary -- so it gets the one-sided half-cell
+    // instead. Leaving this at zero (unfilled edge case in the general
+    // formula below, not a deliberate zero-capacity boundary) starves the
+    // surface layer's Newton row of any capacitance and causes severe
+    // non-convergence as k[0]->0 while drying.
+    vol[0] = (out.z[1] - out.z[0]) / 2.0;
     for (int i = 0; i <= out.n; ++i) {
         if (i > 0) vol[i] = (out.z[i + 1] - out.z[i - 1]) / 2.0;
         psiw[i] = waterPotential(soilpc, out.theta[i], i);
