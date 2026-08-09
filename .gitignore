@@ -6,3 +6,10 @@
 inst/doc
 vignettes/rsconnect/
 .claude/
+
+# Local-only working notes/docs -- not for public consumption, kept on
+# disk for continuity across future Claude Code sessions only.
+CLAUDE.md
+model_architecture.md
+performance_assessment.md
+restructuretask.txt
