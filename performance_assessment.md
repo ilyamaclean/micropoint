@@ -181,12 +181,27 @@ Stripped back out once done, same as the first round.
    repo (damping applied to a problem that needed acceleration, not
    damping, made it more than twice as slow).
 
-   **Not fixed this session** — it needs a genuinely different technique
-   (extrapolation/acceleration rather than damping, or a smarter
-   per-timestep warm start when consecutive hours' equilibria are very
-   different) and real before/after verification against a case like
-   this specific hour, not a guess. Flagged as the top remaining
-   opportunity below.
+   **Confirmed by direct test, not just inference**: swapped the adaptive
+   `aitken1d` for much heavier fixed damping (blend weight 0.2, vs.
+   adaptive's usual settling point) as a controlled experiment. The two
+   genuine oscillation hours improved further under heavier damping
+   (2961: 36 → 31 iterations; 4268: 26, unchanged) — consistent with
+   damping being the right tool there, at any reasonable strength. Hour
+   7713 was completely unmoved (100 → 100) regardless of damping
+   strength — direct evidence, not assumption, that this case is not an
+   oscillation at all: damping controls how smoothly a step is taken, not
+   how far there is to travel, and no damping coefficient changes the
+   actual distance `H` has to close. Reverted the experiment (adaptive
+   `aitken1d` performed at least as well and is more consistent with the
+   rest of the file); the committed fix is the adaptive version above.
+
+   **Not fixed this session** — closing this case needs a genuinely
+   different technique (real Aitken Δ²-extrapolation that's allowed to
+   overshoot the raw step, not the damping-only `aitken1d` used
+   elsewhere here, or a smarter per-timestep warm start when consecutive
+   hours' equilibria are very different) and real before/after
+   verification against this specific hour, not a guess. Flagged as the
+   top remaining opportunity below.
 
 ## Also implemented: release-mode compilation
 
