@@ -212,6 +212,63 @@ debug build always appends `-O0` last regardless, by design, so this
 doesn't show up in development — it matters for the package as actually
 installed/distributed).
 
+## Runtime optimisation (2026-08-09, second pass)
+
+With the convergence work done, went looking for genuine speed wins in
+`plantmodelCpp`/`leafgs` (43% of runtime) — real redundant computation,
+not convergence behaviour, so the bar for keeping a change here is
+"produces the identical value, just fewer times," not "converges to the
+same answer."
+
+**Two found and fixed:**
+
+1. **`plantmodelCpp`**: `satvapCpp2(onestepin.tair[i])` (an `exp()` call)
+   was being called three times per canopy layer — once each for the
+   woody/sunlit/shaded branches — with the *identical* argument. Hoisted
+   to one call, reused in all three. Bit-identical result (same pure
+   function, same input), zero behaviour risk.
+2. **`leafgs`** (stomatal conductance — called twice per layer, once for
+   sunlit and once for shaded leaf fractions): `rpmin_calc` (two `pow()`
+   + two `log()` calls) was being recomputed on *every single call* —
+   millions of times across a full-year run — even though its inputs
+   (`vegp.hgt`, `vegp.hv`, `vegp.Kxmx`) are fixed for the lifetime of a
+   run. Now lazily computed once and cached on `vegp.rpmin`, the same
+   pattern already used for `vegp.apsi` two lines below it in this exact
+   function. Ported from `microclimfv2`'s own equivalent fix — **with one
+   important correctness difference**: that package bakes `rpmin` into
+   its static per-PFT parameter table, because in its usage `vegp.hgt` is
+   a fixed per-PFT structural constant. In *this* package, `vegp$h` is
+   commonly overridden by the user after `createvegp()` (this package's
+   own tutorial does exactly that for the grass example) — baking a
+   height-dependent value into the static `PFTparams` table would go
+   stale the moment height is customised. Caching per `vegpstruct`
+   instance instead (once per run, using whatever height is actually set
+   at that point) gets the same runtime win without that staleness risk.
+   Benefits all four `leafgs` call sites in the file, not just the two in
+   `plantmodelCpp` — the Bigleaf soil-init path (`solveonestep`) shares
+   the same `vegp` instance and cache.
+
+**Measured, full year, real end-to-end timing** (not iteration counts —
+actual wallclock, using `pkgbuild::compile_dll(debug = FALSE)` +
+`pkgload::load_all(recompile = FALSE)` to guarantee a genuine `-O2`
+build stays loaded; plain `devtools::load_all()` silently rebuilds in
+`-O0` debug mode on every call, which is why every timing number
+*elsewhere* in this document used the `-O0` build and should not be
+compared directly against the numbers here):
+
+| | Before this pass | After |
+|---|---|---|
+| Full-year wallclock (release build) | ~30s | **~21.5s (median of 3 runs)** |
+
+A genuine ~29% reduction in real runtime, on top of whatever `-O2` alone
+already bought over `-O0`. Verified: full tutorial smoke test passes
+with zero errors/warnings, and outer-loop iteration counts are unchanged
+to within the floating-point reordering noise expected from `-O2`
+vs. `-O0` compilation (mean 12.45–12.48 either way; both changes reuse
+an already-computed deterministic value rather than reformulating
+anything, so there is no reason to expect — and no evidence of — a real
+behavioural difference).
+
 ## Remaining opportunities (not attempted — flagged for a future session)
 
 1. **Accelerate (not damp) the large hour-to-hour `H` transitions** (see
@@ -229,10 +286,23 @@ installed/distributed).
    `microclimfv2`'s (never checked here — this package's soil water
    convergence was clean in this profiling run, but that doesn't rule out
    the same mechanism triggering under different weather).
-3. `plantmodelCpp`/`LangrangianOne` themselves (66% of runtime) received
-   no micro-optimisation pass (redundant computation, allocation) —
-   out of scope for a *convergence* investigation, but worth a session of
-   its own given how dominant they are here.
+3. **The rest of `leafgs`/`LangrangianOne`.** `rpmin` was the single
+   biggest, safest win in `leafgs` (run-invariant, zero duplication
+   risk), but most of the function's body — `ea`/`es`/`DD`, `ca`/`ci`,
+   `Kc`/`Ko`, the whole hydraulics block (`psi_pd`, `K_psi_pd`, `zeta`
+   etc.) — is *also* identical between the sunlit and shaded calls for a
+   given layer; only the PAR-dependent terms (`IPAR`, `Wl`, and
+   everything downstream of them) actually differ. Splitting the function
+   into a "compute once per layer" part and a "finish per PAR variant"
+   part would roughly halve that remaining cost, but it's real surgery on
+   a photosynthesis formulation whose own comments describe a history of
+   subtle correctness bugs (Jacobs 1994 transcription slips, ca/cicol
+   singularities) — not attempted here without a much more rigorous
+   verification pass (numeric diff against the unsplit version across a
+   range of conditions, not just "smoke test still passes") than this
+   session had time for. `LangrangianOne` (23% of runtime) received no
+   optimisation pass at all — worth a session of its own given how
+   dominant it is here.
 4. Compiler tuning beyond `-O2` (`-O3`, `-march=native`, LTO) — untested.
 
 ## What was explicitly preserved

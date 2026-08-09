@@ -884,8 +884,18 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
         double psi_50f = (psi_pd + vegp.psi50) / 2.0;
         double dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
         //  # Compute rp
-        double rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
-        double rp = rpmin / K_psi_pd;
+        // PERFORMANCE (2026-08-09): rpmin depends only on vegp.hgt/hv/Kxmx,
+        // fixed for the lifetime of a run, but was being recomputed via
+        // rpmin_calc's several pow()/log() calls on every single leafgs
+        // call (millions of times per full-year run: 2x per canopy layer,
+        // every outer iteration, every hour). Lazily cache it on vegp the
+        // same way apsi is cached just above -- ported from microclimfv2's
+        // own equivalent fix (that package precomputes rpmin once per PFT
+        // for the same reason, though as a fixed input rather than a
+        // lazy cache, since it has no per-run height override to worry
+        // about the way this package's vegp$h does).
+        if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
+        double rp = vegp.rpmin / K_psi_pd;
         // Compute zeta
         double DDm = (es - ea) / envdata.pk; // divide by pk to convert to mol / mol
         double zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm);
@@ -1074,12 +1084,18 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         envdata.rh = onestepin.rh[i];
         const double ph = phairCpp(onestepin.tair[i], envdata.pk);
         const double Tk = onestepin.tair[i] + 273.15;
+        // PERFORMANCE (2026-08-09): satvapCpp2(onestepin.tair[i]) was being
+        // called three times per layer (once each for woody/sunlit/shaded)
+        // with the identical argument -- hoisted to one call, reused below.
+        // Pure micro-optimisation: same exp() result each time, no formula
+        // changed.
+        const double satvap_tair = satvapCpp2(onestepin.tair[i]);
         // Woody vegetation
         double rV = 9999.99;
         if (onestepin.swaterdepth[i] > 0.0) rV = rLB[i];
         double Rabs = swout.RswLav[i] + lwout.RlwLabs[i];
         const double twood = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        double DD = (satvapCpp2(twood) - satvapCpp2(onestepin.tair[i])) * (onestepin.rh[i] / 100.0) * 1000.0;
+        double DD = (satvapCpp2(twood) - satvap_tair) * (onestepin.rh[i] / 100.0) * 1000.0;
         const double Evwood = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
         // Sunlit leaves
         envdata.PARabs = swout.RPARsun[i];
@@ -1087,7 +1103,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         rV = leafrV(rLB[i], gssun, vegp.Lfrac[i], ph, onestepin.swaterdepth[i], envdata.precip);
         Rabs = swout.RswLsun[i] + lwout.RlwLabs[i];
         const double tsun = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        DD = (satvapCpp2(tsun) - satvapCpp2(onestepin.tair[i]) * (onestepin.rh[i] / 100.0)) * 1000.0;
+        DD = (satvapCpp2(tsun) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
         double rVt = rLB[i] + ph / gssun;
         const double Evsun = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
         const double Etsun = (Mw / (RgasC * Tk)) * (DD / rVt) * timestep; // transpiration
@@ -1097,7 +1113,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         rV = leafrV(rLB[i], gsshade, vegp.Lfrac[i], ph, onestepin.swaterdepth[i], envdata.precip);
         Rabs = swout.RswLshade[i] + lwout.RlwLabs[i];
         const double tshade = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        DD = (satvapCpp2(tshade) - satvapCpp2(onestepin.tair[i]) * (onestepin.rh[i] / 100.0)) * 1000.0;
+        DD = (satvapCpp2(tshade) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
         rVt = rLB[i] + ph / gsshade;
         const double Evshade = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
         const double Etshade = (Mw / (RgasC * Tk)) * (DD / rVt) * timestep; // transpiration

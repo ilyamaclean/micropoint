@@ -24,6 +24,13 @@ namespace newmodel {
         double fd; // reaction of Vcmax converted to leaf dark respiration (unitless)
         double psi50; // Water potential when plant loses 50% of krc_max (MPa) 
         double apsi; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)
+        double rpmin = -1.0; // minimum whole-plant hydraulic resistance, lazily computed and
+                              // cached by leafgs() on first use (see rpmin_calc) -- depends only
+                              // on hgt/hv/Kxmx, which are fixed for the lifetime of a single run
+                              // (even though hgt may be a user override, not the PFT default), so
+                              // it's safe to cache per vegpstruct instance but NOT safe to bake
+                              // into the static PFTparams table, which knows nothing about such
+                              // overrides. Negative means "not yet computed".
         double len;  // Leaf length (m)
         double wid; // Leaf width (m)
         double vegem; // Vegetation emissivity (unitless)
