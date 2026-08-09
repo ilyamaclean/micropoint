@@ -2,7 +2,7 @@
 title: "New model tutorial"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{new_mode_tutorial}
+  %\VignetteIndexEntry{new_model_tutorial}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---

@@ -390,7 +390,8 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
 // *************************************************** Wind model ****************************************************** //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ** Worker functions **
-static double zeroplanedisCpp2(double h, double pai)
+// [[Rcpp::export]]
+double zeroplanedisCpp2(double h, double pai)
 {
     if (pai < 0.001) pai = 0.001;
     double d = (1.0 - (1.0 - exp(-std::sqrt(7.5 * pai))) / std::sqrt(7.5 * pai)) * h;
@@ -402,7 +403,8 @@ static double zeroplanedisCpp2(double h, double pai)
 // roughness-sublayer influence constant PsiH = ln(cw)-1+1/cw ~ 0.193
 // (Raupach's Eq. 5, cw = 2) -- a canopy-geometry constant, not a function
 // of atmospheric stability, so no diabatic correction is passed in here.
-static double roughlengthCpp2(double h, double pai, double d)
+// [[Rcpp::export]]
+double roughlengthCpp2(double h, double pai, double d)
 {
     double Be = std::sqrt(0.003 + (0.2 * pai) / 2.0);
     const double PsiH = 0.193;
@@ -426,7 +428,8 @@ static double cpairCpp(double tc)
     return cp;
 }
 // **  Calculate integrated diabatic correction coefficient for momentum ** //
-static double dpsimCpp2(double ze)
+// [[Rcpp::export]]
+double dpsimCpp2(double ze)
 {
     double psim;
     // unstable

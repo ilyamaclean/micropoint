@@ -1,18 +1,3 @@
-#' Calculate resistance below canopy
-.rhcanopy<-function(uf,h,pai,z,phih=1) {
-  d<-.zeroplanedis(h,pai)
-  dF<-d/h
-  a2<-0.4*(1-dF)/(phih*1.25^2)
-  int<-(2*h*((48*atan((sqrt(5)*sin((pi*z)/h))/(cos((pi*z)/h)+1)))/5^(3/2)+
-               (32*sin((pi*z)/h))/((cos((pi*z)/h)+1)*((25*sin((pi*z)/h)^2)/
-                                                        (cos((pi*z)/h)+1)^2+5))))/pi
-  inth<-4.293251*h
-  s<-which(z==h)
-  int[s]<-inth
-  mu<-((uf/(a2*h))*(1/uf^2))
-  rHa<-int*mu
-  rHa
-}
 #' @title Generates plant area index profile
 #' @description Generates a vector of length `n` of plausible plant area index values
 #' @param PAI Total plant area index of canopy
@@ -117,7 +102,14 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #' }
 #' @rdname vegpforgrass
 #' @export
+#' @note The `vegp` list returned here uses the simplified legacy parameter
+#' set (`h`, `pai`, `x`, `clump`, `lref`, `ltra`, `leafd`, `em`, `gsmax`,
+#' `q50`) and is not directly usable by the current model's `RunMicro`/
+#' `RunModelFull`, which expect the richer parameter set produced by
+#' [createvegp()]. It remains here, duplicated from the legacy version,
+#' pending a decision on whether to extend it for the current model.
 #' @examples
+#' \dontrun{
 #' vp <- vegpforgrass(0.25, 20)
 #' vegp <- vp$vegp
 #' paii <- vp$paii
@@ -125,6 +117,7 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #' tme <- as.POSIXct(climdata$obs_time)
 #' plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
 #'      ylim = c(-5, 40), col = "red")
+#' }
 vegpforgrass <- function(hgt, n = 20, PAI = NA, taper = 1) {
   lpai<- -8.9388+1.3898 *log(hgt*1000)
   PAI<-exp(lpai)

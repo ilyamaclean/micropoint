@@ -186,11 +186,11 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     za <- moutprofile$za
     n2 <- length(za)
     n <- length(moutprofile$Rswup)
-    d <- zeroplanedisCpp(vegp$h, vegp$pai)
-    zm <- roughlengthCpp(vegp$h, vegp$pai, d, moutprofile$psih)
+    d <- zeroplanedisCpp2(vegp$h, vegp$pai)
+    zm <- roughlengthCpp2(vegp$h, vegp$pai, d)
     uf <- (0.41 * climdata$windspeed[hr]) / (log((zref - d)/zm) + moutprofile$psim)
     psim <- 0
-    for (i in 1:length(za)) psim[i] <- dpsimCpp(zm / moutprofile$LL) - dpsimCpp((za[i] - d) / moutprofile$LL)
+    for (i in 1:length(za)) psim[i] <- dpsimCpp2(zm / moutprofile$LL) - dpsimCpp2((za[i] - d) / moutprofile$LL)
     uza <- (uf / 0.41) * (log((moutprofile$za - d) / zm) + psim)
     obstime <- data.frame(year = rep(tme$year +1900, n2),
                           month = rep(tme$mon + 1, n2),
