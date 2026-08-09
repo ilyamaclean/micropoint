@@ -17,17 +17,32 @@ change verified to leave model outputs correct (recompile + the tutorial
 vignette's full-year smoke test, zero errors/zero warnings, after every
 change).
 
+## Test configuration
+
+All timings in this document: **20 canopy layers** (`n = 20`), forest
+(`BET.Te`), "Clay loam" soil, full year of inbuilt `climdata` (8760
+hours) unless noted as a subset, via `RunMicro(reqhgt = 0.25, ...)`.
+
+## Canopy layer count scaling
+
+Measured directly (not assumed), 3-month subset:
+
+| n | 10 | 20 | 40 | 80 | 160 |
+|---|---|---|---|---|---|
+| wallclock | 2.51s | 5.43s | 12.62s | 35.76s | 114.21s |
+| vs. n=10 | 1.0x | 2.2x | 5.0x | 14.3x | 45.6x |
+
+Superlinear, worsening at higher n (effective exponent rises from ~1.1
+to ~1.7) — `LangrangianOne`'s pairwise-layer loop is O(n²).
+
 ## Method
 
-Temporary instrumentation was added directly to `micropoint_new2.cpp`
-(std::chrono per-phase timers inside `OneStepBelow`'s loop, plus
-iteration-count tracking for each of the model's five distinct
-convergence loops), run against a full year of the inbuilt `climdata`
-(forest scenario: `createvegp("BET.Te")`, 20 canopy layers, "Clay loam"
-soil, height-adjusted to 27 m, `RunMicro(reqhgt = 0.25)`), analysed in R,
-then **stripped back out** once the investigation was done — this
-mirrors the exact same profiling methodology `microclimfv2` used, and
-for the same reason: it's not meant to ship.
+Temporary instrumentation (std::chrono per-phase timers inside
+`OneStepBelow`'s loop, plus iteration-count tracking for each of the
+model's five convergence loops) was added directly to
+`micropoint_new2.cpp`, run, analysed in R, then **stripped back out**
+once each investigation was done — mirrors `microclimfv2`'s own
+profiling methodology, for the same reason: not meant to ship.
 
 ## The model's five convergence loops
 
@@ -268,6 +283,29 @@ vs. `-O0` compilation (mean 12.45–12.48 either way; both changes reuse
 an already-computed deterministic value rather than reformulating
 anything, so there is no reason to expect — and no evidence of — a real
 behavioural difference).
+
+## Correctness bug found and fixed (incidental — not a performance issue)
+
+Found while reading `plantmodelCpp` closely for redundant computation,
+not while looking for correctness problems: the woody-vegetation
+evaporation term's vapour-pressure-deficit formula had a misplaced
+bracket. Sunlit/shaded leaves correctly compute
+`es(Tleaf) − es(Tair)×RH/100` (i.e. `es(Tleaf) − ea(Tair)`, the standard
+form). Woody vegetation instead computed
+`(es(Twood) − es(Tair)) × RH/100` — applying the RH factor to the whole
+difference rather than just to the air term. These are not
+algebraically equivalent (`(a−b)×c ≠ a − b×c` except when `c=1`), and
+the bug is easy to see at RH=0: the correct form gives `es(Twood)`
+(maximum evaporative demand in bone-dry air, physically right); the
+buggy form gave exactly `0` (no evaporation at all in bone-dry air,
+backwards). Fixed to match the sunlit/shaded form. This changes real
+model output for any vegetation type with a woody fraction
+(`1 - Lfrac`, e.g. 15–50% in the tutorial's forest example) — verified
+via the full tutorial smoke test (zero errors/warnings) and a sanity
+check of forest transpiration/air-temperature output ranges, but unlike
+everything else in this document, **this is a genuine behaviour change,
+not a reliability/speed-only fix** — worth knowing if comparing against
+any output generated before this fix.
 
 ## Remaining opportunities (not attempted — flagged for a future session)
 

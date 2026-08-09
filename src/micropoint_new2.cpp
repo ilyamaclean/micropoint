@@ -1095,7 +1095,16 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         if (onestepin.swaterdepth[i] > 0.0) rV = rLB[i];
         double Rabs = swout.RswLav[i] + lwout.RlwLabs[i];
         const double twood = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        double DD = (satvapCpp2(twood) - satvap_tair) * (onestepin.rh[i] / 100.0) * 1000.0;
+        // BUG FIX (found 2026-08-09, while looking for redundant computation
+        // to optimise, not while looking for this): the RH term was applied
+        // to the WHOLE (es(Twood) - es(Tair)) difference instead of just to
+        // es(Tair), unlike the sunlit/shaded DD formulas seven lines below,
+        // which correctly compute es(Tleaf) - es(Tair)*RH/100 (i.e.
+        // es(Tleaf) - ea(Tair), the standard vapour-pressure-deficit form).
+        // At RH=0 the old formula gave DD=0 (no evaporation in bone-dry
+        // air, backwards); the corrected form gives DD=es(Twood) there,
+        // matching the sunlit/shaded behaviour and correct physics.
+        double DD = (satvapCpp2(twood) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
         const double Evwood = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
         // Sunlit leaves
         envdata.PARabs = swout.RPARsun[i];
