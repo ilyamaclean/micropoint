@@ -49,15 +49,20 @@ Compiled build artifacts (`*.o`, `*.dll`) are checked into this repo
 (unusual for an R package, but that's the existing convention here —
 don't gitignore them without discussing it first).
 
+## Convergence & performance
+
+Diabatic correction functions, `a2`, and several convergence loops
+(`windmodelCpp`, `SoilHeatCpp`, `OneStepBelow`'s `H`) were investigated,
+fixed, and verified against `microclimfv2`/direct profiling on
+2026-08-09 — see `performance_assessment.md` for the full story,
+measurements, and what's still open (a large-jump `H` case that needs
+acceleration, not damping; the rest of `leafgs`/`LangrangianOne` still
+has real optimisation headroom). Runtime is superlinear in canopy layer
+count (`LangrangianOne` is O(n²)) — check that doc before assuming a
+change to layer count is "free."
+
 ## Known parked issues
 
-- A round of numerical fixes to the soil water / heat solver
-  (`micropointheaders3.h`, `micropoint_new2.cpp`) and to
-  `newsoilparamstable` was committed as a checkpoint
-  (`45a7758`) but **has not been independently verified for
-  correctness** — only that the package compiles and the tutorial
-  vignette runs without error. Validating the numerics against
-  known-good output is a separate, not-yet-started task.
 - `roughlengthCpp2()` (used by `Ectotherm.R`'s `profile_ecto()`) takes
   no diabatic-correction argument, unlike the legacy `roughlengthCpp()`
   it replaced — it always uses a fixed roughness-sublayer constant
@@ -70,6 +75,10 @@ don't gitignore them without discussing it first).
   `zref = 2`) produces `NaN` — seen during testing when the tutorial's
   own example parameters were combined incorrectly, not a repo bug,
   but worth being aware of if you see the same warning.
+- Fixed 2026-08-09: `plantmodelCpp`'s woody-vegetation evaporation
+  formula had a misplaced bracket (RH applied to the wrong term). Real
+  output change for any vegetation with a woody fraction — if comparing
+  against output generated before this fix, that's why it differs.
 
 ## Vignettes
 

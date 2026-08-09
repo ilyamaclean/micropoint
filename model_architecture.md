@@ -34,20 +34,25 @@ documented for the R function.
    by sunlit/shaded leaf fraction) and longwave radiation exchange
    through canopy layers; ground and canopy absorption.
 3. **Wind model** — Zero-plane displacement, roughness length,
-   Monin–Obukhov stability corrections (`dpsim`/`dpsih`/`dphih`), and
+   Monin–Obukhov stability corrections (`dpsim`/`dpsih`/`dphih`, smooth
+   tanh-tapered stable branch as of 2026-08-09, not a hard clamp), and
    the within/above-canopy wind profile. Exported as
    `zeroplanedisCpp2`, `roughlengthCpp2`, `dpsimCpp2`, `dpsihCpp2`,
    `dphihCpp2` (the last two are internal-only in the current build;
-   only the three `Ectotherm.R` needs are exported).
+   only the three `Ectotherm.R` needs are exported). `windmodelCpp`'s
+   own internal `uf`/`L` iteration is Aitken-damped.
 4. **Plant model** — Leaf energy balance: Penman-Monteith latent/
    sensible heat exchange, stomatal conductance from the Eller et al.
    (2020) hydraulic-optimisation scheme (uses `vegpstruct` fields like
-   `Vcmax25`, `Kxmx`, `psi50`, `Dcrit`), leaf temperature.
+   `Vcmax25`, `Kxmx`, `psi50`, `Dcrit`), leaf temperature. `leafgs`
+   lazily caches `vegp.rpmin` (whole-plant hydraulic resistance) on
+   first use, same pattern as `vegp.apsi`.
 5. **Soil model** — Layered soil heat and Campbell-model water
    transport (`soilwatermod`/`soilmod`); the Campbell hydraulic
    conductivity exponent is always derived as `2*b + 3`, never stored.
    Solves a Thomas (tridiagonal) system per step, with Aitken-
-   accelerated iteration (`WAitkenState`) to convergence.
+   accelerated iteration (`WAitkenState`, and `SoilHeatCpp`'s own
+   surface-temperature iterate) to convergence.
 6. **Below-canopy Lagrangian model** — Propagates temperature/humidity/
    wind through canopy layers using a Lagrangian (near-field/far-field)
    dispersion approach, given source/sink strengths from the plant and
@@ -55,7 +60,9 @@ documented for the R function.
 7. **Run model for one step** (`onestep`/`onestepbare` structs) —
    Couples radiation, wind, plant, soil, and canopy-dispersion pieces
    and iterates them to a converged single time step, for vegetated
-   and bare-ground cases respectively.
+   and bare-ground cases respectively. `OneStepBelow` Aitken-damps `H`
+   (sensible heat) between outer passes before feeding it to the wind
+   model — see "Convergence & performance" below.
 8. **Above canopy** (`Tabove`, `RHabove`, `Uabove`) — Extrapolates
    temperature/humidity/wind from canopy top up to the reference
    height `zref`, assuming `zref` is above canopy height (see
@@ -127,3 +134,24 @@ microclimate result (from `return_profile`/`RunMicro`/`RunModelFull`)
 plus `ectop` (animal parameters) and solves the animal's body energy
 balance independently — it does not feed back into the microclimate
 solve.
+
+## Convergence & performance
+
+Full detail, methodology, and measurements: `performance_assessment.md`.
+Short version:
+
+- Benchmarked at **20 canopy layers**; runtime is superlinear in layer
+  count (`LangrangianOne`'s pairwise-layer loop is O(n²)) — going from
+  20→160 layers costs ~46x, not ~8x.
+- Fixed: undamped oscillations in `windmodelCpp`'s `uf`/`L` and
+  `OneStepBelow`'s `H`, `SoilHeatCpp`'s surface-temperature iterate —
+  all now Aitken-damped, all verified non-regressive.
+- Found but not fixed: some hours need a large, genuinely monotonic
+  jump in `H` between consecutive hours (not an oscillation — damping
+  can't accelerate it; needs real extrapolation or a smarter warm
+  start).
+- `plantmodelCpp`/`leafgs` micro-optimised (redundant `satvapCpp2` call,
+  cached `rpmin`): ~29% faster end-to-end at n=20. Also fixed a real
+  bug found in passing: the woody-vegetation evaporation formula had a
+  misplaced bracket (changes model output for vegetation with a woody
+  fraction).
