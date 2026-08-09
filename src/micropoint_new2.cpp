@@ -1421,6 +1421,10 @@ std::vector<double> geometricCpp(int n, double totalDepth) {
     }
     return z;
 }
+// Forward declaration: defined below (Bigleaf section), needed here too --
+// see this function's Aitken-damped Tsurf_iter, ported from
+// microclimfv2's pointmodel.cpp SoilHeatCpp.
+inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs, double Tref, double relhum, double atmPressure,
     double rHa, double dT = 3600.0, double Fact = 0.5, int maxNrIterations = 100, double tolerance = 1e-2)
 {
@@ -1447,11 +1451,20 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     double qsurface = 0.0;
     double qsurf1;
     double qsurf2;
+    // Aitken-damped surface-temperature iterate feeding Tav/qsurface below.
+    // Ported from microclimfv2's pointmodel.cpp SoilHeatCpp (2026-08-09):
+    // this inner loop's own Newton-like coupling (Tav -> qsurface ->
+    // tridiagonal solve -> new Te_new[0] -> next Tav) had no damping at
+    // all, and was found there to genuinely diverge (not just converge
+    // slowly) when seeded from an already-too-hot oldTe_fixed[0], swinging
+    // to increasing amplitude each pass until qsurface overflows.
+    Aitken1DState st_Tsurf;
+    double Tsurf_iter = state.Te[0];
     while (maxdT > tolerance && nrIterations < maxNrIterations) {
         // Compute surface energy balance using midpoint temperature
         // Compute qsurface dynamically if <=10 iterations otherwise hold at average of iter 8 & 9
         if (nrIterations < 10) {
-            double Tav = 0.5 * (oldTe_fixed[0] + Te_new[0]);
+            double Tav = 0.5 * (oldTe_fixed[0] + Tsurf_iter);
             qsurface = soilsurfaceEB(soilp, Rabs, Tref, Tav, atmPressure, relhum, rHa, wc[0]);
             // Limit qsurface to value obtained in first or second iteration
             if (nrIterations < 2 && std::abs(qsurface) > std::abs(max_qsurface)) max_qsurface = std::abs(qsurface);
@@ -1502,6 +1515,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             if (Te_new[i] < lo) Te_new[i] = lo;
             else if (Te_new[i] > hi) Te_new[i] = hi;
         }
+        Tsurf_iter = aitken1d(Tsurf_iter, Te_new[0], st_Tsurf);
         // convergence: max change in the iterate
         maxdT = 0.0;
         for (int i = 0; i <= n; ++i) {
