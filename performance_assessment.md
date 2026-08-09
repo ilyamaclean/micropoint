@@ -123,33 +123,70 @@ means anyone inspecting `soilhiters` today has been looking at zeros.
    the full tutorial smoke test. It did **not**, however, meaningfully
    improve the outer loop's own convergence — see below.
 
-## What's still unresolved (deliberately not guessed at further)
+## Trace-diagnosing the outer loop's slow-convergence tail
 
-The outer loop's tail — 63% of hours need ≥10 outer iterations, and a
-handful need close to 100 — is not explained by wind's own convergence
-(fixing wind didn't move this number), and doesn't correlate strongly
-with any single weather variable (Spearman correlation of outer
-iteration count against temperature, humidity, wind speed, precipitation,
-and sensible heat flux: all |r| < 0.14). The outer loop already uses a
-fairly sophisticated custom weighted-Aitken relaxation
-(`aitkin_weightdif`, spatially weighted towards the canopy base) for
-`tair`/`rh`/`tleaf`, and its convergence tolerance is already loosened by
-the R-level wrapper defaults (`1e-2`, not the tighter `1e-3` the C++
-function's own default parameter would suggest).
+Fixing wind didn't move the outer loop's own tail (63% of hours still
+need ≥10 outer iterations), and it doesn't correlate strongly with any
+single weather variable (Spearman correlation of outer iteration count
+against temperature, humidity, wind speed, precipitation, sensible heat
+flux: all |r| < 0.14) — so a second round of instrumentation was added:
+temporary per-iteration tracing (gated to one target hour at a time, via
+two small exported functions, since `OneStepBelow` is called exactly
+once per hour in order) capturing `tdif`, `H`, `wind.uf`/`LL`, `Th`/`eh`,
+`tground`, and soil iteration counts at every outer pass, for the worst
+hours found in the aggregate stats (hour 7713, 2017-11-18 08:00, and
+hour 2961, 2017-05-04 08:00 — both hit the 100-iteration cap in
+different runs — plus hour 4268, 2017-06-27 19:00, a near-calm outlier).
+Stripped back out once done, same as the first round.
 
-This was investigated but deliberately **not** further modified, for the
-same reason `microclimfv2`'s own profiling session gives as precedent:
-that repo tried two plausible-looking changes to its own (structurally
-similar) soil solver and had to revert both after measuring real
-regressions — one of them doubled runtime. Blindly retuning an
-already-tuned damping scheme without a much deeper diagnostic (tracing
-what specifically is oscillating or crawling in one of the worst
-individual hours, the way `microclimfv2` traced a specific bad
-`SoilWaterCpp` timestep) risks exactly that outcome. Since plant +
-Lagrangian dispersion (66% of per-pass cost) get re-run on every one of
-those outer passes, cutting the outer loop's iteration count is the
-single biggest remaining lever on total runtime — but it needs that
-deeper trace-based diagnosis, not a guess, before touching it.
+**Finding: two distinct failure modes, not one.**
+
+1. **A genuine oscillation.** In all three traced hours, `H` (sensible
+   heat) settles into a persistent period-2 pattern — alternating
+   between two interleaved sequences each outer pass (e.g. hour 7713,
+   iterations 20–30: `H` = `-454, -517, -419, -490, -395, -470, -365...`)
+   — with the amplitude decaying only very slowly. `windmodelCpp` reads
+   the *previous* pass's raw, undamped `H` as an input every time and
+   feeds a new raw `H` back out: a self-referential loop structurally
+   identical to the two already fixed this session (`SoilHeatCpp`'s
+   `Tsurf_iter`, `windmodelCpp`'s own internal `uf_iter`), but with no
+   equivalent damping. `tair`/`rh`/`tleaf` get smoothed by
+   `aitkin_weightdif` *after* this feeds through wind/resistances, which
+   is too late to stop the oscillation at its source.
+
+   **Fixed**: `OneStepBelow` now Aitken-damps `H` the same way (`H_iter`
+   feeds `windmodelCpp`; the raw `H` is still what's stored and used
+   everywhere else — same pattern as `Tsurf_iter`/`uf_iter`). Measured,
+   full year, before → after: aggregate outer-loop stats barely moved
+   (mean 12.41 → 12.48, essentially noise — the extreme tail is a tiny
+   fraction of 8760 hours), but the specific oscillation-dominated hours
+   improved substantially and nothing got worse: hour 2961 100 → 36
+   iterations, hour 4268 28 → 26. Kept — real, non-regressive, verified
+   by the full smoke test, with no downside observed anywhere.
+
+2. **A large hour-to-hour transition — found, NOT fixed.** Hour 7713
+   still hits the 100-iteration cap even with `H` damping. Its trace
+   shows why: `H` starts the hour at −2063 W/m² (inherited as the
+   previous hour's converged state, carried forward as this hour's
+   initial guess) and needs to relax to roughly −270 W/m² — a large,
+   genuinely *monotonic* move, not an oscillation, and barely
+   distinguishable before/after the damping fix. This is exactly the
+   regime `microclimfv2`'s own profiling session warns about:
+   `aitken1d` as implemented here is damping-only (its blend weight is
+   capped at `[0.05, 0.9]`, so it can only ever take a *smaller* step
+   than the raw one) — the right tool for an oscillation, the wrong tool
+   for a large monotonic relaxation that needs to close a big gap
+   quickly. Applying more damping here would not help and could plausibly
+   hurt, mirroring the reverted `SoilWaterCpp` attempt in the reference
+   repo (damping applied to a problem that needed acceleration, not
+   damping, made it more than twice as slow).
+
+   **Not fixed this session** — it needs a genuinely different technique
+   (extrapolation/acceleration rather than damping, or a smarter
+   per-timestep warm start when consecutive hours' equilibria are very
+   different) and real before/after verification against a case like
+   this specific hour, not a guess. Flagged as the top remaining
+   opportunity below.
 
 ## Also implemented: release-mode compilation
 
@@ -162,11 +199,17 @@ installed/distributed).
 
 ## Remaining opportunities (not attempted — flagged for a future session)
 
-1. **Trace-diagnose the outer loop's slow-convergence tail** (see above)
-   — the highest-value remaining lever, needs per-iteration inspection of
-   specific bad hours (e.g. hour 7713, 2017-11-18 08:00, and hour 2961,
-   2017-05-04 08:00, both hit the 100-iteration cap in testing) rather
-   than aggregate statistics.
+1. **Accelerate (not damp) the large hour-to-hour `H` transitions** (see
+   above — hour 7713 is a ready-made reproducible test case). Needs a
+   fundamentally different mechanism than `aitken1d` here: e.g. genuine
+   Aitken Δ²-extrapolation (allowed to overshoot the raw step, not just
+   shrink it), or detecting a big jump in incoming forcing between
+   consecutive hours and re-seeding `H`'s initial guess from a
+   neutral-stability estimate instead of blindly carrying the previous
+   hour's converged value forward. Whatever is tried, verify against hour
+   7713 specifically (100 iterations before any fix) plus the full
+   aggregate stats, the same way the `H`-damping fix above was verified —
+   don't assume a "should help" change actually does.
 2. Whether `SoilWaterCpp` has a saturation-clamp slow tail like
    `microclimfv2`'s (never checked here — this package's soil water
    convergence was clean in this profiling run, but that doesn't rule out

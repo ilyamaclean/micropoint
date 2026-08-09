@@ -20,7 +20,7 @@ constexpr double g = 9.80665;
 constexpr double torad = 3.14159265358979323846 / 180.0;
 // Forward declaration: defined below (Bigleaf section), needed by several
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
-// SoilHeatCpp's Tsurf_iter).
+// SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
 inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
@@ -1985,6 +1985,22 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     std::vector<double> dTs(na);
     // Resistance from z to zref
     std::vector<double> rz_zref(na);
+    // Aitken-damped H feeding windmodelCpp below (added 2026-08-09, found by
+    // per-iteration tracing of the worst-converging hours in the model: H
+    // was being fed straight back into windmodelCpp raw/undamped every
+    // outer pass -- a self-referential loop (H -> wind/stability -> new
+    // resistances -> new H) structurally identical to the two other
+    // self-referential loops already fixed this session (SoilHeatCpp's
+    // Tsurf_iter, windmodelCpp's own internal uf_iter), and it was doing
+    // the same thing: settling into a persistent, slowly-decaying
+    // period-2 oscillation that tair's own damping (aitkin_weightdif,
+    // applied AFTER this feeds through wind/resistances) couldn't reach.
+    // H_iter feeds windmodelCpp each pass; the raw, undamped H computed
+    // each pass is still what's stored in onestepin.H and used for
+    // everything else -- H_iter is purely an internal stabiliser, same
+    // role as Tsurf_iter/uf_iter.
+    Aitken1DState st_H;
+    double H_iter = onestepin.H;
     while ((nrIterations < 3 || tdif > tolerance) && nrIterations < maxIter) {
         // Ensure values in previous timestep stay fixed
         std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe;
@@ -1993,7 +2009,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.Rlwdown = lwrad.Rlwdown;
         onestepin.Rlwup = lwrad.Rlwup;
         // run wind model
-        windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, onestepin.H, climdata.tref, climdata.pk, maxIter, a1,
+        windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, H_iter, climdata.tref, climdata.pk, maxIter, a1,
             onestepin.psih, onestepin.psim, onestepin.phih);
         onestepin.uz = wind.uz;
         onestepin.psih = wind.psi_h;
@@ -2055,6 +2071,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // ** compute Sensible and Latent heat flux
         Hstruct HT = sumHCpp(climdata.tref, tground, climdata.pk, zref, z, onestepin.tleaf, rz_zref, onestepin.rLB, rHa, vegpc, wind);
         onestepin.H = HT.Htot;
+        H_iter = aitken1d(H_iter, onestepin.H, st_H);
         onestepin.L = swrad.RswCabs - vegpc.vegem * sb * radem(HT.Tsurf) - onestepin.H - soilheat.Gflux;
         // Compute temperature and vapour pressure at top of canopy
         if (zref > vegpc.hgt) {
@@ -2084,7 +2101,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // compute psir
         psir = 0.0;
         for (size_t i = 0; i < nb; ++i) psir += soilwater.swo.rootfrac[i] * soilwater.swo.psiw[i];
-        psir = psir / 1000.0; // conversion from J/kg to MPa (1 J/kg = 1 kPa) 
+        psir = psir / 1000.0; // conversion from J/kg to MPa (1 J/kg = 1 kPa)
         // Ensure oldTe not updated
         onestepin.soilheatvars.oldTe = oldTe_fixed;
         ++nrIterations;
