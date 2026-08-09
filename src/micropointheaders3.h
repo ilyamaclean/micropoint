@@ -51,7 +51,13 @@ namespace newmodel {
         std::vector<double> thetaR; // Residual soil water fraction at wilting point 
         std::vector<double> thetaS; // Volumetric soil water fraction at saturation
         std::vector<double> Ksat; // Saturated hydrualic conductivity (kg s / m^3 - same as cm/s)
-        std::vector<double> n; // Campbell n
+        // (a stored `n` field used to live here, read directly from
+        // newsoilparamstable's own "n" column. That column is a leftover
+        // van Genuchten pore-size parameter, not a Campbell one -- the
+        // Campbell hydraulic conductivity exponent is 2*b+3, derived
+        // locally wherever it's needed (hydraulicConductivityFromTheta, and
+        // the Newton-Raphson flux linearization in the soil water solver)
+        // rather than stored, so nothing reads this field any more.)
         std::vector<double> psi_min; // Minimum psiw determined from thetaR
     };
     struct climstruct {
@@ -147,7 +153,7 @@ namespace newmodel {
     };
     struct windmodel {
         std::vector<double> uz; // wind speed below canopy 
-        double LL; // Monin–Obukhov length (m)
+        double LL; // Moninï¿½Obukhov length (m)
         double uf; // friction velocity
         double uh; // wind speed at top of canopy
         double a2; // Langrangian time-scale parameter
@@ -254,7 +260,7 @@ namespace newmodel {
         double psim; // psi_m
         double psih; // psi_h
         double phih; // phi_h
-        double LL; // // Monin–Obukhov length (m)
+        double LL; // // Moninï¿½Obukhov length (m)
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run
         double error;
@@ -274,7 +280,7 @@ namespace newmodel {
         double theta; // Volumetric soil moisture of surface layer
         double psim; // psi_m
         double psih; // psi_h
-        double LL; // // Monin–Obukhov length (m)
+        double LL; // // Moninï¿½Obukhov length (m)
         int iters; // number of iterations for which model run
         double error;
     };

@@ -89,14 +89,15 @@ createvegp <- function(vegtype = "BET.Te") {
 #' \describe{
 #'   \item{Smax}{Volumetric soil water content at saturation (m^3 m^-3), repeated for each soil layer}
 #'   \item{Smin}{Residual volumetric soil water content (m^3 m^-3), repeated for each soil layer}
-#'   \item{n}{Pore size distribution parameter (unitless), repeated for each soil layer}
 #'   \item{Ksat}{Saturated hydraulic conductivity (kg s / m^3), repeated for each soil layer}
 #'   \item{Vq}{Quartz fraction by volume (m^3 m^-3), repeated for each soil layer}
 #'   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
 #'   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
 #'   \item{Mc}{Coarse fragment or gravel fraction (m^3 m^-3), repeated for each soil layer}
 #'   \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
-#'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
+#'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer.
+#'     The Campbell hydraulic conductivity exponent used internally by the soil water solver
+#'     is derived from this as \code{2 * b + 3}; it is not a separate element of this list.}
 #'   \item{psi_e}{Air-entry water potential (m), repeated for each soil layer}
 #'   \item{gref}{Ground shortwave reflectance (unitless)}
 #'   \item{groundem}{Ground longwave emissivity (unitless)}
@@ -115,18 +116,22 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, sl
   # Adjust total depth to allow for boundary layer
   totalDepth <- 1.5 * totalDepth
   s <- which(newsoilparamstable$Soil.type == soiltype)
-  v <- as.numeric(newsoilparamstable[s,2:13])
-  nms <- names(newsoilparamstable)[2:13]
+  # Named extraction (not positional) of just the Campbell parameters this
+  # model uses -- robust to newsoilparamstable's column order/composition,
+  # and doesn't pick up the van Genuchten-only columns (alpha, VGn, VGpsie)
+  # that belong to a different model, not this one.
+  campbellcols <- c("Smax", "Smin", "Ksat", "Vq", "Vm", "Vo", "Mc", "rho", "b", "psi_e")
+  v <- as.numeric(newsoilparamstable[s, campbellcols])
+  names(v) <- campbellcols
   soilc <- as.list(v)
-  for (i in 1:12) {
-    soilc[[i]] <- rep(v[i], nlayers + 1)
+  for (nm in campbellcols) {
+    soilc[[nm]] <- rep(v[[nm]], nlayers + 1)
   }
-  names(soilc) <- nms
   # Adjust organic
   mu <- rev(geometricCpp(nlayers, surface_organicmu))[2:(nlayers + 2)]  # multiplication factor for organic
   soilc$Vo <- soilc$Vo * mu
-  dif <- soilc$Vo - v[8]
-  sm <- v[6] + v[7]
+  dif <- soilc$Vo - v[["Vo"]]
+  sm <- v[["Vq"]] + v[["Vm"]]
   mu <- (sm - dif) / sm # multiplication factor for other soil constituents
   soilc$Vm <- soilc$Vm * mu
   soilc$Vq <- soilc$Vq * mu
@@ -141,7 +146,6 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, sl
   soilc$nLayers <- nlayers
   soilc$totalDepth <-  totalDepth
   soilc$FreeDrain <- FreeDrain
-  soilc$alpha <- NULL
   return(soilc)
 }
 #' Estimate atmospheric CO2 concentration from year

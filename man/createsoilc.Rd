@@ -40,14 +40,15 @@ A list of soil parameters:
 \describe{
   \item{Smax}{Volumetric soil water content at saturation (m^3 m^-3), repeated for each soil layer}
   \item{Smin}{Residual volumetric soil water content (m^3 m^-3), repeated for each soil layer}
-  \item{n}{Pore size distribution parameter (unitless), repeated for each soil layer}
   \item{Ksat}{Saturated hydraulic conductivity (kg s / m^3), repeated for each soil layer}
   \item{Vq}{Quartz fraction by volume (m^3 m^-3), repeated for each soil layer}
   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
   \item{Mc}{Coarse fragment or gravel fraction (m^3 m^-3), repeated for each soil layer}
   \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
-  \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
+  \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer.
+    The Campbell hydraulic conductivity exponent used internally by the soil water solver
+    is derived from this as \code{2 * b + 3}; it is not a separate element of this list.}
   \item{psi_e}{Air-entry water potential (m), repeated for each soil layer}
   \item{gref}{Ground shortwave reflectance (unitless)}
   \item{groundem}{Ground longwave emissivity (unitless)}

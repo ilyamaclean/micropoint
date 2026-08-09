@@ -120,13 +120,13 @@ std::vector<double> cankCpp(double zen, double x, double si) {
     double Z = zen * M_PI / 180.0;
     // Calculate normal canopy extinction coefficient
     if (x == 1.0) {
-        k = 1 / (2 * cos(Z));
+        k = 1 / (2.0 * cos(Z));
     }
     else if (std::isinf(x)) {
         k = 1.0;
     }
     else if (x == 0.0) {
-        k = tan(Z);
+        k = (2.0 / M_PI) * tan(Z);
     }
     else {
         k = sqrt(x * x + (tan(Z) * tan(Z))) / (x + 1.774 * pow((x + 1.182), -0.733));

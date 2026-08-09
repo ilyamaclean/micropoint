@@ -17,7 +17,6 @@ constexpr double ka = 0.41;
 constexpr double Mw = 0.018015; // kg/mol
 constexpr double RgasC = 8.314; // J/mol/K
 constexpr double g = 9.80665;
-constexpr double vp = 0.017;
 constexpr double torad = 3.14159265358979323846 / 180.0;
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
@@ -100,7 +99,7 @@ static kstruct cankCpp(double zenr, double x, double si) {
         k = 1.0;
     }
     else if (x == 0.0) {
-        k = std::tan(zenr);
+        k = (2.0 / pi) * std::tan(zenr);
     }
     else {
         k = std::sqrt(x * x + (std::tan(zenr) * std::tan(zenr))) / (x + 1.774 * std::pow((x + 1.182), -0.733));
@@ -398,12 +397,18 @@ static double zeroplanedisCpp2(double h, double pai)
     return d;
 }
 // ** Calculate roughness length ** //
-static double roughlengthCpp2(double h, double pai, double d, double psi_h)
+// Follows Raupach (1994) Eq. 4: z0/h = (1-d/h)*exp(-ka*Uh/u* - PsiH), using
+// Be (sqrt(0.003+0.1*pai)) as a stand-in for u*/Uh and a fixed
+// roughness-sublayer influence constant PsiH = ln(cw)-1+1/cw ~ 0.193
+// (Raupach's Eq. 5, cw = 2) -- a canopy-geometry constant, not a function
+// of atmospheric stability, so no diabatic correction is passed in here.
+static double roughlengthCpp2(double h, double pai, double d)
 {
     double Be = std::sqrt(0.003 + (0.2 * pai) / 2.0);
-    double zm = (h - d) * std::exp(-ka / Be) * std::exp(ka * psi_h);
+    const double PsiH = 0.193;
+    double zm = (h - d) * std::exp(-ka / Be - PsiH);
     if (zm < 0.0005) zm = 0.0005;
-    // safety check to stop diabatic coefficient reversing profile
+    // safety check to stop the roughness-sublayer correction reversing profile
     if (zm > (0.9 * (h - d))) zm = 0.9 * (h - d);
     return zm;
 }
@@ -470,6 +475,58 @@ static double dphihCpp2(double ze)
     if (phih > 1.5) phih = 1.5;
     if (phih < 0.5) phih = 0.5;
     return phih;
+}
+// ** Smooth, shape-only diabatic corrections (added 2026-08-04) ** //
+// For one-shot, non-iterative profile evaluation ONLY (reporting T/e/wind
+// at an arbitrary height above an already-converged canopy state) -- e.g.
+// Tabove/RHabove/Uabove below, and the post-convergence height-sweep loop
+// in OneStepBare. DO NOT use inside any per-timestep convergence loop
+// (windmodelCpp's own iteration, OneStepBelow's/OneStepBare's outer while
+// loops, canopytop, rh_hzref) -- dpsimCpp2/dpsihCpp2's [-4,3] clamp is
+// incidentally load-bearing for keeping those iterations numerically
+// stable, not just for bounding profile shape; swapping this smooth form
+// in for THEIR psi computation has been shown (in the companion
+// microclimfv2 package's point model) to make an otherwise-identical
+// iteration diverge to NaN under ordinary stable conditions. See
+// microclimfv2's src/utils.h (dpsihShapeCpp doc comment) and
+// claude/gridmodel-stability-shortcut-2026-08-03.md (Claude project docs)
+// for the full derivation, validation, and sourcing caveat on the
+// coefficients below (reconstructed from a secondary source citing
+// Holtslag & De Bruin 1988 -- the primary Beljaars & Holtslag 1991 source
+// was unreachable when this was derived).
+//
+// Why this exists: dpsihCpp2's own clamp, reused to evaluate a continuous
+// profile across many heights for one fixed L (exactly what the z[i] loops
+// below do), produces a hard slope discontinuity ("kink") wherever the
+// clamp happens to engage, because its argument ze = height/L varies
+// continuously with height even though L itself doesn't. Simply removing
+// the clamp does not fix this safely -- the plain linear stable form is
+// unbounded (d(psi)/dL ~ 1/L^2), so any imprecision in L gets amplified
+// without limit. This smooth form matches the old linear form closely for
+// weak-to-moderate stability but flattens its growth at large zeta instead
+// of clamping dead or growing unboundedly. The unstable branch is
+// unchanged (never observed to need clipping).
+static double psiStableSmoothCpp2(double ze)
+{
+    const double a = 0.7, b = 0.75, c = 5.0, d = 0.35;
+    if (ze < 0.0) ze = 0.0;
+    return -(a * ze + b * (ze - c / d) * std::exp(-d * ze) + b * c / d);
+}
+static double dpsimShapeCpp2(double ze)
+{
+    if (ze < 0.0) {
+        double x = std::pow((1.0 - 15.0 * ze), 0.25);
+        return std::log(std::pow((1.0 + x) / 2.0, 2.0) * (1.0 + x * x) / 2.0) - 2.0 * std::atan(x) + pi / 2.0;
+    }
+    return psiStableSmoothCpp2(ze);
+}
+static double dpsihShapeCpp2(double ze)
+{
+    if (ze < 0.0) {
+        double y = std::sqrt(1.0 - 9.0 * ze);
+        return std::log(std::pow((1.0 + y) / 2.0, 2.0));
+    }
+    return psiStableSmoothCpp2(ze);
 }
 // Clip Monin Obukhov length to keep it within limits
 static double clipMOlength(double L, double zref, double d, double zm, double beta = 0.9)
@@ -550,7 +607,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double cp = cpairCpp(tc);
     double ph = phairCpp(tc, pk);
     double d = zeroplanedisCpp2(hgt, pai);
-    double zm = roughlengthCpp2(hgt, pai, d, psi_h);
+    double zm = roughlengthCpp2(hgt, pai, d);
     double zh = 0.2 * zm;
     double uf = (ka * uref) / (std::log((zref - d) / zm) + psi_m);
     // Calculate safe limits for Monin Obukhov length 
@@ -564,7 +621,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int iter = 1;
     if (H != 0.0) {
         while (dif > 0.00000001) {
-            zm = roughlengthCpp2(hgt, pai, d, psi_h);
+            zm = roughlengthCpp2(hgt, pai, d);
             zh = 0.2 * zm;
             LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
             if (H > 0) {
@@ -621,6 +678,20 @@ double satvapCpp2(double tc)
         es = 0.61078 * exp(21.875 * tc / (tc + 265.5));
     }
     return es;
+}
+// ** Calculate saturated water vapour density (kg/m^3) at a given
+// temperature (Tk, Kelvin), via the ideal gas law applied to the
+// saturation vapour pressure from satvapCpp2: rho_vs = Mw * es / (RgasC *
+// Tk). Replaces a former fixed constant (vp = 0.017 kg/m^3, calibrated to
+// ~20 deg C) that was used in the soil vapour-flux calculations below
+// regardless of actual soil temperature -- rho_vs varies roughly 10-fold
+// across a 0-40 deg C range, so the fixed value could be off by a factor
+// of ~3 at the extremes (2026-07-31). * //
+static double satVapDensityCpp2(double Tk)
+{
+    double tc = Tk - 273.15;
+    double es_Pa = 1000.0 * satvapCpp2(tc); // kPa -> Pa
+    return Mw * es_Pa / (RgasC * Tk);
 }
 // Compute leaf boundary layer resistance
 static double leafrHa(double tair, double dT, double uz, double len, double wid,
@@ -723,7 +794,7 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
         double ca = envdata.Ca * envdata.pk / 1000.0;  // convert carbon concentration to Pa
         double ci = vegp.f0 * (1.0 - DD / vegp.Dcrit) * (ca - photocomp); // in Pa
         // Initialize variables
-        double A;
+        double Aca;
         double Acol;
         double cicol;
         if (C3) { // C3 photosynthetic pathway
@@ -732,27 +803,50 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
             double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tair - 25.0));
             double Q10Ko = 1.2;
             double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tair - 25.0));
-            // Calculate gross assimilation
+            // Calculate gross assimilation, evaluated at ci (the Jacobs
+            // (1994) formula). This retains the physically-meaningful
+            // ci-response of Wl (real leaves draw ci down below ca as
+            // light/assimilation rises, which is what gives the
+            // light-response curve its shape) and feeds the co-limitation
+            // smoothing (Wcol/cicol) below.
             double Wc = Vcmax * ((ci - photocomp) /(ci + Kc * (1 + Oa / Ko))); // Limitating rate due to carbon
             double Wl = vegp.alpha * IPAR * ((ci - photocomp) / (ci + 2.0 * photocomp)); // Limitating rate due to light
             double We = 0.5 * Vcmax; // Limiting rate due to transport
             if (Wc < 0.0) Wc = 0.0;
             if (Wl < 0.0) Wl = 0.0;
             if (We < 0.0) We = 0.0;
-            // Rate limited gross assimilation
-            double W = Wc;
-            if (Wl < W) W = Wl;
-            if (We < W) W = We;
-            A = W - Rd; // net assimilation (can be negative)
-            // Co - limiting assimilation
+            // Co - limiting assimilation -- still derived from the
+            // ci-evaluated We/Wl (see below for why).
             double Wcol = ((We + Wl) - std::sqrt(std::pow(We + Wl, 2.0) - 4.0 * 0.93 * (We * Wl)))
                 / (2.0 * 0.93);  // Point at which no longer limited by ci
             Acol = Wcol - Rd;
             // Co-limiting CO2 concentration
             cicol = (-Vcmax * photocomp - Kc * (1.0 + Oa / Ko) * Wcol)
                 / (Wcol - Vcmax);
+            // A(ca): the other evaluation point Eqn S2.1 of Eller et al.
+            // (2020, New Phytologist 226:1622-1637, Notes S2) calls for --
+            // Wc/Wl evaluated at ca instead of ci, representing the
+            // assimilation rate if the stomata were fully open (no
+            // diffusive drawdown at all). Used only for dadc's numerator
+            // below; deliberately NOT substituted into Wcol/cicol above,
+            // since that would remove Wl's PAR-driven light-response shape
+            // (Wl(ca) saturates almost immediately, independent of PAR,
+            // since ca itself doesn't respond to PAR) and expose dadc's
+            // denominator to a ca==cicol singularity at ordinary ambient
+            // CO2 (~443 ppm, tested directly) -- both confirmed by direct
+            // comparison against the real model pipeline.
+            double Wc_ca = Vcmax * ((ca - photocomp) / (ca + Kc * (1 + Oa / Ko)));
+            double Wl_ca = vegp.alpha * IPAR * ((ca - photocomp) / (ca + 2.0 * photocomp));
+            double We_ca = We;
+            if (Wc_ca < 0.0) Wc_ca = 0.0;
+            if (Wl_ca < 0.0) Wl_ca = 0.0;
+            double Wca = Wc_ca;
+            if (Wl_ca < Wca) Wca = Wl_ca;
+            if (We_ca < Wca) Wca = We_ca;
+            Aca = Wca - Rd;
         }
-        else { // C4 pathway
+        else { // C4 pathway (unchanged for now -- see the fix's commit
+               // message / changelog for the C4 discussion)
             double k = 2.0e-4;
             double Wc = Vcmax;
             double Wl = vegp.alpha * IPAR;
@@ -760,7 +854,7 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
             double W = Wc;
             if (Wl < W) W = Wl;
             if (We < W) W = We;
-            A = W - Rd; // net assimilation (can be negative)
+            Aca = W - Rd; // net assimilation (can be negative)
             // Co - limiting assimilation
             double Wcol = ((Wc + Wl) - std::sqrt(std::pow(Wc + Wl, 2.0) - 4.0 * 0.83 * (We * Wl)))
                 / (2.0 * 0.83);
@@ -768,8 +862,16 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
             // Co-limiting CO2 concentration
             cicol = (Wcol * envdata.pk * 1000.0) / (k * Vcmax);
         }
-        // Compute change in assimulation per ci gradient
-        double dadc = (A - Acol) / (ci - cicol);
+        // Compute change in assimilation per ci gradient: Eqn S2.1's finite
+        // difference between A(ca) and A(ci,col), i.e.
+        // dadc = [A(ca) - A(ci,col)] / (ca - ci,col). Acol is already "A
+        // evaluated at ci,col" by construction (Wc(ci,col) = Wcol there,
+        // and Wcol <= Wl, We by definition of the co-limitation point), so
+        // only the A(ca) side needed correcting -- it was previously
+        // evaluated at ci (a transcription slip from the Jacobs (1994)
+        // formula this model uses elsewhere, not part of the JULES-SOX
+        // scheme this function otherwise implements).
+        double dadc = (Aca - Acol) / (ca - cicol);
         // Compute change in conductivity per psi gradient
         if (vegp.apsi < 0.0) {
             double stem_slope = 65.15 * pow(-vegp.psi50, -1.25);
@@ -787,13 +889,15 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
         double rp = rpmin / K_psi_pd;
         // Compute zeta
         double DDm = (es - ea) / envdata.pk; // divide by pk to convert to mol / mol
-        if (DDm < 0.05) DDm = 0.05;
         double zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm);
         // compute limits
         if (dadc < 1e-99) dadc = 1e-99;
         double mu = 1.0 + (4.0 * zeta) / dadc;
         if (mu < 1.0) mu = 1.0;
         gs = 0.5 * dadc * (std::sqrt(mu) - 1.0);
+        // Apply gsmax cap
+        double gsmax = vegp.Vcmax25 * 1e4;
+        gs = std::fmin(gs, gsmax);
     }
     return gs;
 }
@@ -1104,7 +1208,10 @@ static double thermalConductivityCpp(
 {
     // Calculate thermal conductivity of solids
     double Vsolid = Vq + Vm + Vo;
-    double kSolid = std::pow(2.5, Vq / Vsolid) * std::pow(8.8, Vm / Vsolid) * std::pow(0.25, Vo / Vsolid);
+    // Quartz conducts heat much better than other minerals (~8.8 vs ~2.5
+    // W/m/K); Vq and Vm must each be weighted by their own conductivity,
+    // not swapped with each other.
+    double kSolid = std::pow(8.8, Vq / Vsolid) * std::pow(2.5, Vm / Vsolid) * std::pow(0.25, Vo / Vsolid);
     // Calculate shape factor
     double Ga = 0.088 * ((Vq + Vm) / Vsolid) + 0.5 * (Vo / Vsolid);
     double Q = 7.25 * Mc + 2.52;
@@ -1229,7 +1336,7 @@ static double hydraulicConductivityFromTheta(const soilpstruct& soilp,
 // Calculate vapour from water potential
 static double vaporFromPsi(const soilpstruct& soilp, double psiw, double theta, double Tk, int i) {
     double humidity = std::exp(Mw * psiw / (RgasC * Tk));
-    double vapor = (soilp.thetaS[i] - theta) * vp * humidity;
+    double vapor = (soilp.thetaS[i] - theta) * satVapDensityCpp2(Tk) * humidity;
     return vapor;
 }
 // calculate change in theta with psi
@@ -1247,6 +1354,7 @@ static double vaporConductivityFromPsiTheta(const soilpstruct& soilp,
 {
     double dv = 0.000024;
     double humidity = std::exp(Mw * psiw / (RgasC * Tk));
+    double vp = satVapDensityCpp2(Tk);
     double k = 0.66 * (soilp.thetaS[i] - theta) * dv * vp * humidity * Mw / (RgasC * Tk);
     return k;
 }
@@ -1254,6 +1362,7 @@ static double dvapor_dPsi(const soilpstruct& soilp, double psiw,
     double theta, double Tk, int i)
 {
     double humidity = std::exp(Mw * psiw / (RgasC * Tk));
+    double vp = satVapDensityCpp2(Tk);
     double capacity_vapor = (soilp.thetaS[i] - theta) * vp * humidity *
         (Mw / (RgasC * Tk)) - dTheta_dPsi(soilp, psiw, i) * vp * humidity;
     return capacity_vapor;
@@ -1500,7 +1609,11 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             double kv = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
             k[i] = kh + kv;
             u[i] = g * k[i];
-            du[i] = -u[i] * soilp.n[i] / psiw[i];
+            // Campbell conductivity exponent, matching
+            // hydraulicConductivityFromTheta exactly (this must stay in
+            // sync with that function's own local n).
+            double nCampbell = 2.0 * soilp.b[i] + 3.0;
+            du[i] = -u[i] * nCampbell / psiw[i];
             double Cw = dTheta_dPsi(soilp, psiw[i], i);
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
@@ -1510,8 +1623,9 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         }
         // Flux term
         for (int i = 0; i < n; ++i) {
+            double nCampbell = 2.0 * soilp.b[i] + 3.0;
             ff[i] = ((psiw[i + 1] * k[i + 1] - psiw[i] * k[i]) /
-                (soilmod.dz[i] * (1.0 - soilp.n[i]))) - u[i];
+                (soilmod.dz[i] * (1.0 - nCampbell))) - u[i];
         }
         // Assemble system
         massBalance = 0.0;
@@ -1764,7 +1878,7 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     size_t nb = vegpc.paii.size();
     // ** Compute resistances
     const double d = zeroplanedisCpp2(vegpc.hgt, vegpc.pai);
-    const double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d, wind.psi_h);
+    const double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d);
     const double zh = 0.2 * zm;
     // ** resistance from canopy top to zref
     // from canopy hes to h
@@ -1970,33 +2084,61 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 // ***************************************** Above canopy ************************************************************** //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Derive temperature above canopy by extrapolating Langrangian profile. za can be > zref, but must be less than h
+//
+// UPDATED 2026-08-04: previously a pure log profile with NO diabatic
+// (stability) correction at all -- see Uabove below, which already had one
+// for wind, and microclimfv2's TVabove/aboveCanopyProfileCpp, which had the
+// same gap for temperature until this same investigation. LL is a new
+// parameter, defaulted to 1e99 (neutral) so existing callers that don't
+// pass it keep today's exact behaviour; callers that do have a converged
+// LL available (see the two internal call sites below) should now pass it.
+// The correction is written relative to the SAME two anchor points this
+// function already used (th at hgt, tref at zref) rather than switching to
+// a roughness-height anchor -- algebraically verified this reduces to the
+// EXACT original formula when LL=1e99 (psih(x/1e99)=0), so this is a strict
+// generalisation, not a behaviour change for existing neutral-limit callers.
+// Uses dpsihShapeCpp2 (the smooth, unclamped shape form), NOT dpsihCpp2 --
+// see that function's doc comment above for why: this is a one-shot,
+// post-convergence evaluation, exactly the safe use case for the shape
+// form, and reusing the clamped dpsihCpp2 here would risk the same kink
+// bug found and fixed in microclimfv2's point model.
 // [[Rcpp::export]]
-double Tabove(double za, double zref, double th, double tref, double hgt, double pai)
+double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL = 1e99)
 {
     double d = 0.0;
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
-    double Tz = tref + (th - tref) * std::log((za - d) / (zref - d)) / std::log((hgt - d) / (zref - d));
+    double num = std::log((za - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((za - d) / LL);
+    double den = std::log((zref - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((zref - d) / LL);
+    double Tz = th + (tref - th) * (num / den);
     return Tz;
 }
 // Derive humidity above canopy by extrapolating Langrangian profile. za can be > zref, but must be less than h
+// See Tabove's doc comment immediately above -- same update, same rationale.
 // [[Rcpp::export]]
-double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai)
+double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai, double LL = 1e99)
 {
     double d = 0.0;
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
     const double eh = satvapCpp2(th) * (rh / 100.0);
     const double eref = satvapCpp2(tref) * (relhum / 100.0);
-    const double ez = eref + (eh - eref) * std::log((za - d) / (zref - d)) / std::log((hgt - d) / (zref - d));
+    double num = std::log((za - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((za - d) / LL);
+    double den = std::log((zref - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((zref - d) / LL);
+    const double ez = eh + (eref - eh) * (num / den);
     double rz = (ez / satvapCpp2(tz)) * 100.0;
     if (rz > 100.0) rz = 100.0;
     return rz;
 }
+// UPDATED 2026-08-04: already had a diabatic correction (unlike Tabove/
+// RHabove above), but via the clamped dpsimCpp2 -- swapped for the smooth,
+// unclamped dpsimShapeCpp2 for the same reason (one-shot, post-convergence
+// evaluation of an already-known LL; avoids the kink bug). No signature
+// change needed here since LL was already a required parameter.
 // [[Rcpp::export]]
 double Uabove(double za, double zref, double uh, double uref, double hgt, double pai, double LL) {
     double d = 0.0;
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
-    double psitop = dpsimCpp2((hgt - d) / LL) - dpsimCpp2((za - d) / LL);
-    double psibtm = dpsimCpp2((hgt - d) / LL) - dpsimCpp2((zref - d) / LL);
+    double psitop = dpsimShapeCpp2((hgt - d) / LL) - dpsimShapeCpp2((za - d) / LL);
+    double psibtm = dpsimShapeCpp2((hgt - d) / LL) - dpsimShapeCpp2((zref - d) / LL);
     double uz = uh + (uref - uh) * ((std::log((za - d) / (hgt - d)) + psitop)
         / (std::log((zref - d) / (hgt - d)) + psibtm));
     return uz;
@@ -2090,12 +2232,21 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     double ea = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     double la = (Ts < 0.0) ? (51078.69 - 4.338 * Ts - 0.06367 * Ts * Ts) : (45068.7 - 42.8428 * Ts);
     onestepin.L = ((la * ph) / (climdata.pk * rHa)) * (eg - ea);
-    // Compute tair, relhum and wind profiles
+    // Compute tair, relhum and wind profiles -- this is a one-shot,
+    // post-convergence height sweep over an already-converged LL/uf (the
+    // while loop above has already finished), so it uses the shape-only
+    // dpsimShapeCpp2/dpsihShapeCpp2 forms rather than dpsimCpp2/dpsihCpp2,
+    // to avoid a slope-discontinuity ("kink") at whichever z[i] happens to
+    // cross dpsihCpp2's own clamp threshold. LL/uf themselves are
+    // unchanged -- still whatever the while loop above converged to using
+    // the original clamped forms; only this final step (turning L into a
+    // profile value at each height) uses the smooth form. See the
+    // dpsihShapeCpp2 doc comment above for the full rationale.
     size_t n = z.size();
     std::vector<double> uz(n); // wind speed
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zmd) {
-            double psimz = dpsimCpp2(zmd / LL) - dpsimCpp2(z[i] / LL);
+            double psimz = dpsimShapeCpp2(zmd / LL) - dpsimShapeCpp2(z[i] / LL);
             uz[i] = (uf / ka) * (std::log(z[i] / zmd) + psimz);
         }
         else {
@@ -2106,7 +2257,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     std::vector<double> rh(n); // relative humidity
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zh) {
-            double psihz = dpsihCpp2(zh / LL) - dpsihCpp2(z[i] / LL);
+            double psihz = dpsihShapeCpp2(zh / LL) - dpsihShapeCpp2(z[i] / LL);
             double rHz = (std::log(z[i] / zh) + psihz) / (ka * uf);
             tair[i] = Ts - (rHz / cpph) * H;
             double ez = eg - onestepin.L * (climdata.pk * rHz) / (la * ph);
@@ -2303,13 +2454,19 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     Aitken1DState st;
     while (error > 1e-2 && itr < maxiter) {
         // Calculate bulk surface aerodynamic resistance
-        double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d, psih);
+        double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
         double zh = 0.2 * zm;
         double rHa = (std::log((zref - d) / zh) + psih) / (ka * uf);
-        // Calculate bulk surface stomatal resistance
-        double theta = soilwater.swo.theta[0];
-        double psiw = waterPotential(soilp, theta, 0);
+        // Calculate bulk surface stomatal resistance. psiw here needs to be
+        // the root-zone mean water potential (rootfrac-weighted across all
+        // soil layers), matching OneStepBelow's treatment -- not just the
+        // top layer's value, which would make transpiration blind to
+        // moisture held deeper in the profile than the very surface.
+        double psiw = 0.0;
+        for (size_t i = 0; i < soilwater.swo.rootfrac.size(); ++i) {
+            psiw += soilwater.swo.rootfrac[i] * soilwater.swo.psiw[i];
+        }
         double rS = bulkstomatalresist(climdata.tref, tcanopy, climdata.relhum, climdata.pk, psiw,
             Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
         rS = std::min(rS, 1e10);
@@ -2317,8 +2474,14 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         // Calculate resistance from top of canopy to zref
         double rhz = 0.0;
         if (zref > vegp.hgt) {
-            // Calculate resistance from top of canopy to hes
-            double psihh = dpsimCpp2(zm / LL) - dpsimCpp2((vegp.hgt - d) / LL);
+            // Calculate resistance from top of canopy to hes. This is a
+            // heat-exchange resistance (paired with rHa above, which
+            // correctly uses the heat diabatic correction dpsihCpp2 at zh),
+            // so it must use the heat form here too, not the momentum form
+            // -- matching both rHa immediately above and rh_hzref's
+            // equivalent calculation for the multi-layer canopy model
+            // (OneStepBelow), which already does this correctly.
+            double psihh = dpsihCpp2(zh / LL) - dpsihCpp2((vegp.hgt - d) / LL);
             double rHh = (std::log((vegp.hgt - d) / zh) + psihh) / (ka * uf);
             rhz = rHa - rHh;
         }
@@ -2968,7 +3131,6 @@ static soilpstruct tosoilpstruct(List soilp) {
     out.thetaR = Rcpp::as<std::vector<double>>(soilp["Smin"]);
     out.thetaS = Rcpp::as<std::vector<double>>(soilp["Smax"]);
     out.Ksat = Rcpp::as<std::vector<double>>(soilp["Ksat"]);
-    out.n = Rcpp::as<std::vector<double>>(soilp["n"]);
     out.FreeDrain = Rcpp::as<bool>(soilp["FreeDrain"]);
     // Ensure psi_e is negative (air entry potential)
     for (double& v : out.psie) v = -std::abs(v);
@@ -3600,9 +3762,9 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                 double Th = onestepin.tair[na - 1];
                 double rh = onestepin.rh[na - 1];
                 double uh = onestepin.uz[na - 1];
-                tair[hr] = Tabove(reqhgt, zref, Th, temp[hr], vegpc.hgt, vegpc.pai);
+                tair[hr] = Tabove(reqhgt, zref, Th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
                 tleaf[hr] = -999.99;
-                rz[hr] = RHabove(reqhgt, zref, rh, Th, temp[hr], tair[hr], relhum[hr], vegpc.hgt, vegpc.pai);
+                rz[hr] = RHabove(reqhgt, zref, rh, Th, temp[hr], tair[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
                 uz[hr] = Uabove(reqhgt, zref, uh, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
             }
             else {
@@ -3715,12 +3877,15 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         // height adjust temperature and relative humidity
         double th = onestepin.tair[na - 1];
         double rh = onestepin.rh[na - 1];
-        temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai);
-        relhum_new[hr] = RHabove(zout, zin, rh, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai);
-        // height adjust windspeed;
-        double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d, onestepin.psih);
+        temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+        relhum_new[hr] = RHabove(zout, zin, rh, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+        // height adjust windspeed; shape-only form (dpsimShapeCpp2), same
+        // rationale as Tabove/RHabove/Uabove above -- this is a one-shot
+        // post-convergence evaluation of onestepin.LL, not part of
+        // OneStepBelow's own iteration (already finished on the line above).
+        double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d);
         double uf = (ka * wspeed[hr]) / (std::log((zin - d) / zm) + onestepin.psim);
-        double psi_m = dpsimCpp2(zm / onestepin.LL) - dpsimCpp2((zout - d) / onestepin.LL);
+        double psi_m = dpsimShapeCpp2(zm / onestepin.LL) - dpsimShapeCpp2((zout - d) / onestepin.LL);
         windspeed_new[hr] = (uf / ka) * (std::log((zout - d) / zm) + psi_m);
         // height adjust pressure
         double Tv = ((temp_new[hr] + climin.tref) / 2.0) + 273.15;
@@ -3950,13 +4115,14 @@ std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, doubl
     for (size_t hr = 0; hr < n; ++hr) {
         solmodel solp = solpositionCpp2(latr, lonr, year[hr], month[hr], day[hr], hour[hr]);
         if (solp.zenr <= pi / 2.0) {
-            double m = 35 * std::cos(solp.zenr) * std::pow(1224 * std::cos(solp.zenr) * std::cos(solp.zenr) + 1, -0.5);
+            double cosz = std::cos(solp.zenr);
+            double m = 35.0 / std::sqrt(1224.0 * cosz * cosz + 1.0);
             double TrTpg = 1.021 - 0.084 * std::sqrt(m * 0.00949 * pres[hr] + 0.051);
             double xx = std::log(relhum[hr] / 100.0) + ((17.27 * temp[hr]) / (237.3 + temp[hr]));
             double Td = (237.3 * xx) / (17.27 - xx);
             double u = std::exp(0.1133 - std::log(3.78) + 0.0393 * Td);
             double Tw = 1.0 - 0.077 * std::pow(u * m, 0.3);
-            double Ta = 0.935 * m;
+            double Ta = pow(0.935, m);
             double od = TrTpg * Tw * Ta;
             csr[hr] = 1352.778 * std::cos(solp.zenr) * od;
         }

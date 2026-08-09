@@ -121,12 +121,12 @@ geometricCpp <- function(n, totalDepth) {
     .Call(`_micropoint_geometricCpp`, n, totalDepth)
 }
 
-Tabove <- function(za, zref, th, tref, hgt, pai) {
-    .Call(`_micropoint_Tabove`, za, zref, th, tref, hgt, pai)
+Tabove <- function(za, zref, th, tref, hgt, pai, LL = 1e99) {
+    .Call(`_micropoint_Tabove`, za, zref, th, tref, hgt, pai, LL)
 }
 
-RHabove <- function(za, zref, rh, th, tref, tz, relhum, hgt, pai) {
-    .Call(`_micropoint_RHabove`, za, zref, rh, th, tref, tz, relhum, hgt, pai)
+RHabove <- function(za, zref, rh, th, tref, tz, relhum, hgt, pai, LL = 1e99) {
+    .Call(`_micropoint_RHabove`, za, zref, rh, th, tref, tz, relhum, hgt, pai, LL)
 }
 
 Uabove <- function(za, zref, uh, uref, hgt, pai, LL) {
