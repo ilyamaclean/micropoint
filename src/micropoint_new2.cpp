@@ -428,6 +428,18 @@ static double cpairCpp(double tc)
     return cp;
 }
 // **  Calculate integrated diabatic correction coefficient for momentum ** //
+// Stable branch (ze >= 0) TAPERED (not hard-clamped) towards a -4.0
+// asymptote as ze grows: -4.7*(zetaMaxM*tanh(ze/zetaMaxM)), zetaMaxM =
+// 4.0/4.7 -- chosen so the taper's asymptote exactly matches the old hard
+// clamp's value. Ported from microclimfv2's utils.cpp dpsimCpp (2026-08-05
+// fix there): the old hard clamp produced a real slope discontinuity
+// ("kink") in any continuous profile evaluation at ze = zetaMaxM; the taper
+// is smooth (C-infinity) and gives numerically indistinguishable
+// convergence behaviour from the old clamp in this file's own iterative
+// loops (windmodelCpp etc.), since both approach the same asymptote. This
+// also makes the separate dpsimShapeCpp2/dpsihShapeCpp2 "one-shot only"
+// family (formerly below) redundant -- removed, callers now use these
+// functions directly, mirroring microclimfv2's own resolution.
 // [[Rcpp::export]]
 double dpsimCpp2(double ze)
 {
@@ -436,16 +448,19 @@ double dpsimCpp2(double ze)
     if (ze < 0.0) {
         double x = std::pow((1.0 - 15.0 * ze), 0.25);
         psim = std::log(std::pow((1.0 + x) / 2.0, 2.0) * (1.0 + x * x) / 2.0) - 2.0 * std::atan(x) + pi / 2.0;
+        if (psim > 3.0) psim = 3.0;
     }
     // stable
     else {
-        psim = -4.7 * ze;
+        const double zetaMaxM = 4.0 / 4.7;
+        psim = -4.7 * (zetaMaxM * std::tanh(ze / zetaMaxM));
     }
-    if (psim < -4.0) psim = -4.0;
-    if (psim > 3.0) psim = 3.0;
     return psim;
 }
 // **  Calculate integrated diabatic correction coefficient for heat ** //
+// Stable branch tapered towards the same -4.0 asymptote, mirroring
+// dpsimCpp2 above (see its comment) -- zetaMaxH differs from zetaMaxM
+// because this branch's slope (4.7/0.74) differs from momentum's (4.7).
 static double dpsihCpp2(double ze)
 {
     double psih;
@@ -453,13 +468,13 @@ static double dpsihCpp2(double ze)
     if (ze < 0.0) {
         double y = std::sqrt(1.0 - 9.0 * ze);
         psih = std::log(std::pow((1.0 + y) / 2.0, 2.0));
+        if (psih > 3.0) psih = 3.0;
     }
     // stable
     else {
-        psih = -(4.7 * ze) / 0.74;
+        const double zetaMaxH = 4.0 / (4.7 / 0.74);
+        psih = -(4.7 / 0.74) * (zetaMaxH * std::tanh(ze / zetaMaxH));
     }
-    if (psih < -4.0) psih = -4.0;
-    if (psih > 3.0) psih = 3.0;
     return psih;
 }
 // **  Calculate diabatic influencing factor for heat ** //  
@@ -479,58 +494,16 @@ static double dphihCpp2(double ze)
     if (phih < 0.5) phih = 0.5;
     return phih;
 }
-// ** Smooth, shape-only diabatic corrections (added 2026-08-04) ** //
-// For one-shot, non-iterative profile evaluation ONLY (reporting T/e/wind
-// at an arbitrary height above an already-converged canopy state) -- e.g.
-// Tabove/RHabove/Uabove below, and the post-convergence height-sweep loop
-// in OneStepBare. DO NOT use inside any per-timestep convergence loop
-// (windmodelCpp's own iteration, OneStepBelow's/OneStepBare's outer while
-// loops, canopytop, rh_hzref) -- dpsimCpp2/dpsihCpp2's [-4,3] clamp is
-// incidentally load-bearing for keeping those iterations numerically
-// stable, not just for bounding profile shape; swapping this smooth form
-// in for THEIR psi computation has been shown (in the companion
-// microclimfv2 package's point model) to make an otherwise-identical
-// iteration diverge to NaN under ordinary stable conditions. See
-// microclimfv2's src/utils.h (dpsihShapeCpp doc comment) and
-// claude/gridmodel-stability-shortcut-2026-08-03.md (Claude project docs)
-// for the full derivation, validation, and sourcing caveat on the
-// coefficients below (reconstructed from a secondary source citing
-// Holtslag & De Bruin 1988 -- the primary Beljaars & Holtslag 1991 source
-// was unreachable when this was derived).
-//
-// Why this exists: dpsihCpp2's own clamp, reused to evaluate a continuous
-// profile across many heights for one fixed L (exactly what the z[i] loops
-// below do), produces a hard slope discontinuity ("kink") wherever the
-// clamp happens to engage, because its argument ze = height/L varies
-// continuously with height even though L itself doesn't. Simply removing
-// the clamp does not fix this safely -- the plain linear stable form is
-// unbounded (d(psi)/dL ~ 1/L^2), so any imprecision in L gets amplified
-// without limit. This smooth form matches the old linear form closely for
-// weak-to-moderate stability but flattens its growth at large zeta instead
-// of clamping dead or growing unboundedly. The unstable branch is
-// unchanged (never observed to need clipping).
-static double psiStableSmoothCpp2(double ze)
-{
-    const double a = 0.7, b = 0.75, c = 5.0, d = 0.35;
-    if (ze < 0.0) ze = 0.0;
-    return -(a * ze + b * (ze - c / d) * std::exp(-d * ze) + b * c / d);
-}
-static double dpsimShapeCpp2(double ze)
-{
-    if (ze < 0.0) {
-        double x = std::pow((1.0 - 15.0 * ze), 0.25);
-        return std::log(std::pow((1.0 + x) / 2.0, 2.0) * (1.0 + x * x) / 2.0) - 2.0 * std::atan(x) + pi / 2.0;
-    }
-    return psiStableSmoothCpp2(ze);
-}
-static double dpsihShapeCpp2(double ze)
-{
-    if (ze < 0.0) {
-        double y = std::sqrt(1.0 - 9.0 * ze);
-        return std::log(std::pow((1.0 + y) / 2.0, 2.0));
-    }
-    return psiStableSmoothCpp2(ze);
-}
+// NOTE (ported from microclimfv2's utils.h, 2026-08-09): the "shape"
+// diabatic-correction family that used to live here (psiStableSmoothCpp2,
+// dpsimShapeCpp2, dpsihShapeCpp2) has been removed. It existed to give
+// one-shot, non-iterative profile evaluation (Tabove/RHabove/Uabove,
+// OneStepBare's post-convergence height sweep) a kink-free alternative to
+// dpsimCpp2/dpsihCpp2's old hard clamp. Now that those two functions taper
+// smoothly instead of clamping (see their comments above), they remove the
+// same kink directly, so callers below now use dpsimCpp2/dpsihCpp2 in
+// place of the old Shape variants -- matching microclimfv2's own
+// resolution of the same duplication.
 // Clip Monin Obukhov length to keep it within limits
 static double clipMOlength(double L, double zref, double d, double zm, double beta = 0.9)
 {
@@ -652,7 +625,13 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    phi_h = dphihCpp2((zref - d) / LL);
+    // BUG FIX (ported from microclimfv2's pointmodel.cpp, 2026-08-09): this
+    // used to read (zref - d) / LL, i.e. phi_h was evaluated at the
+    // REFERENCE height's stability. a2 describes WITHIN-canopy exchange
+    // (it feeds rhcanopy for the ground-to-canopy-top leg) -- it should
+    // reflect stability at canopy top, not whatever stability happens to
+    // hold at zref, which can be a very different height.
+    phi_h = dphihCpp2((hgt - d) / LL);
     double a2 = (phi_h * ka * (1.0 - d / hgt)) / (a1 * a1);
     windmodel out;
     out.uz = uz;
@@ -2100,18 +2079,16 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 // a roughness-height anchor -- algebraically verified this reduces to the
 // EXACT original formula when LL=1e99 (psih(x/1e99)=0), so this is a strict
 // generalisation, not a behaviour change for existing neutral-limit callers.
-// Uses dpsihShapeCpp2 (the smooth, unclamped shape form), NOT dpsihCpp2 --
-// see that function's doc comment above for why: this is a one-shot,
-// post-convergence evaluation, exactly the safe use case for the shape
-// form, and reusing the clamped dpsihCpp2 here would risk the same kink
-// bug found and fixed in microclimfv2's point model.
+// Uses dpsihCpp2 -- now smoothly tapered (see its doc comment above), so
+// this one-shot, post-convergence evaluation no longer needs a separate
+// unclamped shape form to avoid a kink.
 // [[Rcpp::export]]
 double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL = 1e99)
 {
     double d = 0.0;
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
-    double num = std::log((za - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((za - d) / LL);
-    double den = std::log((zref - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((zref - d) / LL);
+    double num = std::log((za - d) / (hgt - d)) + dpsihCpp2((hgt - d) / LL) - dpsihCpp2((za - d) / LL);
+    double den = std::log((zref - d) / (hgt - d)) + dpsihCpp2((hgt - d) / LL) - dpsihCpp2((zref - d) / LL);
     double Tz = th + (tref - th) * (num / den);
     return Tz;
 }
@@ -2124,24 +2101,21 @@ double RHabove(double za, double zref, double rh, double th, double tref, double
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
     const double eh = satvapCpp2(th) * (rh / 100.0);
     const double eref = satvapCpp2(tref) * (relhum / 100.0);
-    double num = std::log((za - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((za - d) / LL);
-    double den = std::log((zref - d) / (hgt - d)) + dpsihShapeCpp2((hgt - d) / LL) - dpsihShapeCpp2((zref - d) / LL);
+    double num = std::log((za - d) / (hgt - d)) + dpsihCpp2((hgt - d) / LL) - dpsihCpp2((za - d) / LL);
+    double den = std::log((zref - d) / (hgt - d)) + dpsihCpp2((hgt - d) / LL) - dpsihCpp2((zref - d) / LL);
     const double ez = eh + (eref - eh) * (num / den);
     double rz = (ez / satvapCpp2(tz)) * 100.0;
     if (rz > 100.0) rz = 100.0;
     return rz;
 }
-// UPDATED 2026-08-04: already had a diabatic correction (unlike Tabove/
-// RHabove above), but via the clamped dpsimCpp2 -- swapped for the smooth,
-// unclamped dpsimShapeCpp2 for the same reason (one-shot, post-convergence
-// evaluation of an already-known LL; avoids the kink bug). No signature
-// change needed here since LL was already a required parameter.
+// Uses dpsimCpp2 -- see Tabove's doc comment above; now smoothly tapered,
+// so no separate shape form is needed here either.
 // [[Rcpp::export]]
 double Uabove(double za, double zref, double uh, double uref, double hgt, double pai, double LL) {
     double d = 0.0;
     if (hgt > 0.0) d = zeroplanedisCpp2(hgt, pai);
-    double psitop = dpsimShapeCpp2((hgt - d) / LL) - dpsimShapeCpp2((za - d) / LL);
-    double psibtm = dpsimShapeCpp2((hgt - d) / LL) - dpsimShapeCpp2((zref - d) / LL);
+    double psitop = dpsimCpp2((hgt - d) / LL) - dpsimCpp2((za - d) / LL);
+    double psibtm = dpsimCpp2((hgt - d) / LL) - dpsimCpp2((zref - d) / LL);
     double uz = uh + (uref - uh) * ((std::log((za - d) / (hgt - d)) + psitop)
         / (std::log((zref - d) / (hgt - d)) + psibtm));
     return uz;
@@ -2237,19 +2211,16 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     onestepin.L = ((la * ph) / (climdata.pk * rHa)) * (eg - ea);
     // Compute tair, relhum and wind profiles -- this is a one-shot,
     // post-convergence height sweep over an already-converged LL/uf (the
-    // while loop above has already finished), so it uses the shape-only
-    // dpsimShapeCpp2/dpsihShapeCpp2 forms rather than dpsimCpp2/dpsihCpp2,
-    // to avoid a slope-discontinuity ("kink") at whichever z[i] happens to
-    // cross dpsihCpp2's own clamp threshold. LL/uf themselves are
-    // unchanged -- still whatever the while loop above converged to using
-    // the original clamped forms; only this final step (turning L into a
-    // profile value at each height) uses the smooth form. See the
-    // dpsihShapeCpp2 doc comment above for the full rationale.
+    // while loop above has already finished). LL/uf themselves are
+    // unchanged -- still whatever the while loop above converged to; only
+    // this final step (turning L into a profile value at each height) is
+    // computed here, using dpsimCpp2/dpsihCpp2 (now smoothly tapered, so
+    // no kink risk sweeping across z[i] -- see their doc comments above).
     size_t n = z.size();
     std::vector<double> uz(n); // wind speed
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zmd) {
-            double psimz = dpsimShapeCpp2(zmd / LL) - dpsimShapeCpp2(z[i] / LL);
+            double psimz = dpsimCpp2(zmd / LL) - dpsimCpp2(z[i] / LL);
             uz[i] = (uf / ka) * (std::log(z[i] / zmd) + psimz);
         }
         else {
@@ -2260,7 +2231,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     std::vector<double> rh(n); // relative humidity
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zh) {
-            double psihz = dpsihShapeCpp2(zh / LL) - dpsihShapeCpp2(z[i] / LL);
+            double psihz = dpsihCpp2(zh / LL) - dpsihCpp2(z[i] / LL);
             double rHz = (std::log(z[i] / zh) + psihz) / (ka * uf);
             tair[i] = Ts - (rHz / cpph) * H;
             double ez = eg - onestepin.L * (climdata.pk * rHz) / (la * ph);
@@ -2489,7 +2460,11 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
             rhz = rHa - rHh;
         }
         // Calculate resistance from ground to top of canopy
-        double phih = dphihCpp2((zref - d) / LL);
+        // BUG FIX (ported from microclimfv2's pointmodel.cpp, 2026-08-09):
+        // phih must reflect stability at canopy top (a2 describes
+        // within-canopy exchange), not at zref -- same fix as
+        // windmodelCpp's a2 above.
+        double phih = dphihCpp2((vegp.hgt - d) / LL);
         double a2 = (phih * 0.41 * (1 - d / vegp.hgt)) / 1.5625;
         double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt);
         // Calculate resistance form ground to zref
@@ -3882,13 +3857,13 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         double rh = onestepin.rh[na - 1];
         temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
         relhum_new[hr] = RHabove(zout, zin, rh, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
-        // height adjust windspeed; shape-only form (dpsimShapeCpp2), same
-        // rationale as Tabove/RHabove/Uabove above -- this is a one-shot
-        // post-convergence evaluation of onestepin.LL, not part of
-        // OneStepBelow's own iteration (already finished on the line above).
+        // height adjust windspeed -- one-shot post-convergence evaluation
+        // of onestepin.LL, not part of OneStepBelow's own iteration
+        // (already finished on the line above); uses dpsimCpp2 (now
+        // smoothly tapered, see its doc comment above).
         double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d);
         double uf = (ka * wspeed[hr]) / (std::log((zin - d) / zm) + onestepin.psim);
-        double psi_m = dpsimShapeCpp2(zm / onestepin.LL) - dpsimShapeCpp2((zout - d) / onestepin.LL);
+        double psi_m = dpsimCpp2(zm / onestepin.LL) - dpsimCpp2((zout - d) / onestepin.LL);
         windspeed_new[hr] = (uf / ka) * (std::log((zout - d) / zm) + psi_m);
         // height adjust pressure
         double Tv = ((temp_new[hr] + climin.tref) / 2.0) + 273.15;
