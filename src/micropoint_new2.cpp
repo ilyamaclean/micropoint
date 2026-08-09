@@ -18,6 +18,10 @@ constexpr double Mw = 0.018015; // kg/mol
 constexpr double RgasC = 8.314; // J/mol/K
 constexpr double g = 9.80665;
 constexpr double torad = 3.14159265358979323846 / 180.0;
+// Forward declaration: defined below (Bigleaf section), needed by several
+// earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
+// SoilHeatCpp's Tsurf_iter).
+inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -595,11 +599,23 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double dif = 10.0;
     double olduf = -100.00;
     int iter = 1;
+    // Aitken-damped uf feeding LL below (added 2026-08-09, found via
+    // profiling real convergence data: this self-referential uf<->LL
+    // coupling -- structurally the same kind of loop as SoilHeatCpp's
+    // Tsurf_iter, already fixed the same way -- was hitting its
+    // 100-iteration cap on ~1% of calls, concentrated in low-wind/
+    // near-neutral-stability hours, more than any other convergence
+    // stream in the model). uf_iter feeds LL each pass; the raw,
+    // undamped uf computed each pass is still what's returned in
+    // windmodel.uf below and used for convergence checking here --
+    // uf_iter is purely an internal stabiliser, same role as Tsurf_iter.
+    Aitken1DState st_uf;
+    double uf_iter = uf;
     if (H != 0.0) {
         while (dif > 0.00000001) {
             zm = roughlengthCpp2(hgt, pai, d);
             zh = 0.2 * zm;
-            LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+            LL = (ph * cp * std::pow(uf_iter, 3.0) * Tk) / (-ka * g * H);
             if (H > 0) {
                 if (LL < Lsafe) LL = Lsafe;
             }
@@ -612,6 +628,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
             dif = std::abs(olduf - uf);
             if (iter > maxiter) dif = 0.0;
             olduf = uf;
+            uf_iter = aitken1d(uf_iter, uf, st_uf);
             iter += 1;
         }
     }
@@ -1421,10 +1438,6 @@ std::vector<double> geometricCpp(int n, double totalDepth) {
     }
     return z;
 }
-// Forward declaration: defined below (Bigleaf section), needed here too --
-// see this function's Aitken-damped Tsurf_iter, ported from
-// microclimfv2's pointmodel.cpp SoilHeatCpp.
-inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs, double Tref, double relhum, double atmPressure,
     double rHa, double dT = 3600.0, double Fact = 0.5, int maxNrIterations = 100, double tolerance = 1e-2)
 {
@@ -2018,7 +2031,12 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // ** Run soil heat and water model
         std::vector<double> stemp = onestepin.soilheatvars.Te;
         soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 0.5, maxIter);
-        soilheat.iters = 0;
+        // BUG FIX (found while profiling convergence, 2026-08-09): this used
+        // to discard SoilHeatCpp's real iteration count immediately after
+        // computing it, silently zeroing the "soilhiters" diagnostic output
+        // (OneStepCpptoList) for every vegetated call -- a pure reporting
+        // field, never read for any control flow, so restoring it changes
+        // no model output.
         climforwaterstruct cfw = {};
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
         cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
@@ -2040,7 +2058,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.L = swrad.RswCabs - vegpc.vegem * sb * radem(HT.Tsurf) - onestepin.H - soilheat.Gflux;
         // Compute temperature and vapour pressure at top of canopy
         if (zref > vegpc.hgt) {
-            cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, Th, eh, tground, soilrh, 
+            cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, Th, eh, tground, soilrh,
                 rhg, rhz, maxIter, tolerance);
             Th = Theh.Th;
             eh = Theh.eh;
