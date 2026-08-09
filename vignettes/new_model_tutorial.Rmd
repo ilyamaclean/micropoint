@@ -486,7 +486,9 @@ plot(Tbody ~ tme, data = ecto_out, type = "l", col = "red",
      xlab = "Month", ylab = "Temperature")
 ```
 ![](images/new/plot9.png)
+
 ### Ectotherm profile and series
+
 To return values for all hours above and below ground we just use the outputs from [RunModelFull()] along with some of the other variables used when running this function:
 
 ```{r eval=FALSE} 
