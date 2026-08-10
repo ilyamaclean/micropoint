@@ -1562,14 +1562,16 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         }
         ++nrIterations;
     }
-    // compute G using fixed old state
-    double G = 0.0;
-    for (int i = 1; i < n; ++i) {
-        double heatflux = CT[i] * (Te_new[i] - oldTe_fixed[i]) / dT;
-        G += heatflux;
-    }
+    // NOTE (2026-08-10): this used to compute Gflux here as the sum of
+    // soil-layer heat-storage change (Sum CT[i]*(Te_new[i]-oldTe_fixed[i])/dT
+    // for i=1..n-1) -- not a valid approach (confirmed) and not what
+    // microclimfv2's pointmodel.cpp does: its SoilHeatCpp doesn't touch
+    // Gflux at all. G is now computed by each caller instead, as the
+    // Aitken-damped surface energy balance residual (soilsurfaceEB,
+    // evaluated post-convergence), matching the reference exactly -- see
+    // the call sites (OneStepBelow, OneStepBare, solveonestep,
+    // solveonestepbare).
     state.Te = Te_new;
-    state.Gflux = G;
     state.iters = nrIterations;
     return state;
 }
@@ -2026,6 +2028,12 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // role as Tsurf_iter/uf_iter.
     Aitken1DState st_H;
     double H_iter = onestepin.H;
+    // G (ground heat flux): Aitken-damped surface energy balance residual
+    // (soilsurfaceEB), matching microclimfv2's pointmodel.cpp -- see the
+    // note above SoilHeatCpp's return, where the old (invalid) soil-column
+    // heat-storage-summation method was removed.
+    Aitken1DState st_G;
+    double G_iter = onestepin.soilheatvars.Gflux;
     while ((nrIterations < 3 || tdif > tolerance) && nrIterations < maxIter) {
         // Ensure values in previous timestep stay fixed
         std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe;
@@ -2089,6 +2097,14 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         tground = soilheat.Te[0];
         double soilrh = soilrelhumCpp(soilpc, tground, soilwater.swo.theta[0]);
         soilheat.wc = soilwater.swo.theta;
+        // G: surface energy balance residual, evaluated post-convergence
+        // (soilheat.Te[0] from SoilHeatCpp, soilwater.swo.theta[0] from
+        // SoilWaterCpp -- same evaluation point microclimfv2 uses),
+        // Aitken-damped across outer passes.
+        double G_raw = soilsurfaceEB(soilpc, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
+            climdata.relhum, rHa, soilwater.swo.theta[0]);
+        G_iter = aitken1d(G_iter, G_raw, st_G);
+        soilheat.Gflux = G_iter;
         onestepin.soilheatvars = soilheat;
         onestepin.soilwatervars = soilwater.swo;
         onestepin.Ev = soilwater.Evapmmhr;
@@ -2236,6 +2252,11 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     soilmod soilheat;
     soilwaterout soilwater;
     double rHa;
+    // G: surface energy balance residual (matches microclimfv2's
+    // pointmodel.cpp; see the note above SoilHeatCpp's return),
+    // Aitken-damped across outer passes.
+    Aitken1DState st_G;
+    double G_iter = onestepin.soilheatvars.Gflux;
     while (dif > tolerance && nrIterations < maxIter) {
         // ** Calculate rHa
         if (H != 0.0) {
@@ -2271,6 +2292,10 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         // Run water model
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, tolerance);
         onestepin.soilheatvars.wc = soilwater.swo.theta;
+        double G_raw = soilsurfaceEB(soilpc, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
+            climdata.relhum, rHa, soilwater.swo.theta[0]);
+        G_iter = aitken1d(G_iter, G_raw, st_G);
+        soilheat.Gflux = G_iter;
         // Recalculate H
         dif = std::abs(Ts - soilheat.Te[0]);
         Ts = soilheat.Te[0];
@@ -2562,8 +2587,15 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
         soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
-        // Use Aitkins relaxation on soil Gflux
-        G = aitken1d(G, soilheat.Gflux, st);
+        // G: surface energy balance residual (matches microclimfv2's
+        // pointmodel.cpp; see the note above SoilHeatCpp's return), Aitken-
+        // damped across outer passes -- was previously fed from
+        // soilheat.Gflux, which no longer exists (SoilHeatCpp doesn't
+        // compute it any more).
+        double G_raw = soilsurfaceEB(soilp, RabsG, climdata.tref, soilheat.Te[0], climdata.pk,
+            climdata.relhum, rGz, soilwater.swo.theta[0]);
+        G = aitken1d(G, G_raw, st);
+        soilheat.Gflux = G;
         // Calculate updated canopy temperature
         double Te = (tcanopy + climdata.tref) / 2.0;
         double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
@@ -2632,6 +2664,13 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
     double oldtsoil = soilheat.Te[0];
     double newtsoil = soilheat.Te[0];
     Aitken1DState st;
+    // G: surface energy balance residual (matches microclimfv2's
+    // pointmodel.cpp; see the note above SoilHeatCpp's return),
+    // Aitken-damped across outer passes -- this function previously had
+    // no G computation of its own at all (relied on SoilHeatCpp's now-
+    // removed internal soil-column-summation Gflux).
+    Aitken1DState st_G;
+    double G = soilheat.Gflux;
     while (error > 1e-2 && itr < maxiter) {
         // Calculate bulk surface aerodynamic resistance
         double zm = zmr * std::exp(-psih);
@@ -2649,6 +2688,10 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
         soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
+        double G_raw = soilsurfaceEB(soilp, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
+            climdata.relhum, rHa, soilwater.swo.theta[0]);
+        G = aitken1d(G, G_raw, st_G);
+        soilheat.Gflux = G;
         // Calculate updated soil surface temperature
         newtsoil = aitken1d(newtsoil, soilheat.Te[0], st);
         // Calculate updated canopy temperature
