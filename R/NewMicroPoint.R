@@ -98,7 +98,10 @@ createvegp <- function(vegtype = "BET.Te") {
 #'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer.
 #'     The Campbell hydraulic conductivity exponent used internally by the soil water solver
 #'     is derived from this as \code{2 * b + 3}; it is not a separate element of this list.}
-#'   \item{psi_e}{Air-entry water potential (m), repeated for each soil layer}
+#'   \item{psi_e}{Air-entry water potential (J/kg, specific potential energy per
+#'     unit mass -- numerically equal to kPa for water; consistent with the
+#'     Kelvin-equation vapour pressure calculations elsewhere in the soil
+#'     water model, which require this unit), repeated for each soil layer}
 #'   \item{gref}{Ground shortwave reflectance (unitless)}
 #'   \item{groundem}{Ground longwave emissivity (unitless)}
 #'   \item{grefPAR}{Ground reflectance for photosynthetically active radiation (unitless)}

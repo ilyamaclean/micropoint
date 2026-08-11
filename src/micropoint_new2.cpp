@@ -577,7 +577,8 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
 }
 static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double hgt, double pai,
     double zref, double H = 0.0, double tc = 15, double pk = 101.3, int maxiter = 100,
-    double a1 = 1.25, double psi_h = 0.0, double psi_m = 0.0, double phi_h = 1.0)
+    double a1 = 1.25, double psi_h = 0.0, double psi_m = 0.0, double phi_h = 1.0,
+    double zi = 1000.0, double beta = 1.0)
 {
     if (zref < hgt) {
         Rcpp::stop("Height of wind speed measurement must be above canopy");
@@ -589,7 +590,23 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double d = zeroplanedisCpp2(hgt, pai);
     double zm = roughlengthCpp2(hgt, pai, d);
     double zh = 0.2 * zm;
-    double uf = (ka * uref) / (std::log((zref - d) / zm) + psi_m);
+    // Under free convection (H > 0, light wind), shear-generated turbulence
+    // alone can no longer sustain the friction velocity implied by
+    // similarity theory. Combine the reference wind speed in quadrature
+    // with a free-convective velocity scale (Beljaars, 1994) so uf stays
+    // physically bounded as uref -> 0, rather than collapsing towards it.
+    // Ported from microclimfv2's pointmodel.cpp windmodelCpp (2026-08-11,
+    // see multilayer_TL_blowup_handover.md) -- zi/beta defaults (1000.0,
+    // 1.0) match that port exactly. Complementary to, and does NOT replace,
+    // LangrangianOne's TL floor below: this only helps the H>0 (unstable/
+    // daytime) branch, not the stable/near-calm-night case the TL floor
+    // covers.
+    double Ueff = uref;
+    if (H > 0.0) {
+        double wstar = std::cbrt((g / Tk) * zi * (H / (ph * cp)));
+        Ueff = std::sqrt(uref * uref + std::pow(beta * wstar, 2.0));
+    }
+    double uf = (ka * Ueff) / (std::log((zref - d) / zm) + psi_m);
     // Calculate safe limits for Monin Obukhov length 
     double LL = 1e99;
     if (H > 0.0) LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
@@ -624,7 +641,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
             }
             psi_m = dpsimCpp2(zm / LL) - dpsimCpp2((zref - d) / LL);
             psi_h = dpsihCpp2(zh / LL) - dpsihCpp2((zref - d) / LL);
-            uf = (ka * uref) / (std::log((zref - d) / zm) + psi_m);
+            uf = (ka * Ueff) / (std::log((zref - d) / zm) + psi_m);
             dif = std::abs(olduf - uf);
             if (iter > maxiter) dif = 0.0;
             olduf = uf;
@@ -1225,7 +1242,8 @@ static double thermalConductivityCpp(
     double Vq, // Volumetric quartz fraction (m^3/m^3
     double Vm, // Volumetric mineral fraction (m^3/m^3)
     double Vo, // Volumetric organic fraction (m^3/m^3)
-    double Vw, // Volmetric water fraction (m^3/m^3)
+    double Vw, // Volmetric water+ice fraction (m^3/m^3)
+    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
     double Mc, // Mass fraction of clay (kg/kg
     double Tc, // temperayure of air in air space
     double pk) // pressure (kPa in air space
@@ -1252,6 +1270,11 @@ static double thermalConductivityCpp(
     double stcor = 1.0 - svp / pk;
     if (stcor < 0.3) stcor = 0.3;
     double kWater = 0.56 + 0.0018 * Tc;
+    // Ice conducts heat ~4x better than liquid water (De Vries); blend the
+    // "fluid" phase conductivity by how much of Vw is actually frozen. Pure
+    // liquid (Vw_ice=0) reduces exactly to the original kWater.
+    double kIce = 2.18 - 0.0068 * Tc;
+    double kWaterPhase = (Vw > 1e-9) ? (kWater * (Vw - Vw_ice) + kIce * Vw_ice) / Vw : kWater;
     double wf;
     if (Vw < 0.01 * xwo) {
         wf = 0.0;
@@ -1261,14 +1284,14 @@ static double thermalConductivityCpp(
     }
     double kGas = 0.0242 + 0.00007 * Tc + wf * Lv * rhoAir * Dv * slope / (pk * stcor);
     double Gc = 1.0 - 2.0 * Ga;
-    double kFluid = kGas + (kWater - kGas) * pow(Vw / porosity, 2);
+    double kFluid = kGas + (kWaterPhase - kGas) * pow(Vw / porosity, 2);
     double ka = (2.0 / (1.0 + (kGas / kFluid - 1.0) * Ga) +
         1.0 / (1.0 + (kGas / kFluid - 1.0) * Gc)) / 3.0;
-    double kw = (2.0 / (1.0 + (kWater / kFluid - 1.0) * Ga) +
-        1.0 / (1.0 + (kWater / kFluid - 1.0) * Gc)) / 3.0;
+    double kw = (2.0 / (1.0 + (kWaterPhase / kFluid - 1.0) * Ga) +
+        1.0 / (1.0 + (kWaterPhase / kFluid - 1.0) * Gc)) / 3.0;
     double ks = (2.0 / (1.0 + (kSolid / kFluid - 1.0) * Ga) +
         1.0 / (1.0 + (kSolid / kFluid - 1.0) * Gc)) / 3.0;
-    double out = (kw * kWater * Vw + ka * kGas * gasPorosity + ks * kSolid * Vsolid)
+    double out = (kw * kWaterPhase * Vw + ka * kGas * gasPorosity + ks * kSolid * Vsolid)
         / (kw * Vw + ka * gasPorosity + ks * Vsolid);
     return out;
 }
@@ -1276,29 +1299,51 @@ static double heatCapacityCpp(
     double Vq, // Volumetric quartz fraction (m^3/m^3
     double Vm, // Volumetric mineral fraction (m^3/m^3)
     double Vo, // Volumetric organic fraction (m^3/m^3)
-    double Vw, // Volmetric water fraction (m^3/m^3)
+    double Vw, // Volmetric water+ice fraction (m^3/m^3)
+    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
+    double dtheta_ice_dTc, // |d(ice fraction)/dTc| (m^3 m^-3 K^-1), from the
+                            // unfrozen-water curve -- apparent-heat-capacity
+                            // latent term; 0 if unfrozen or unused
     double Tc, // temperature of air in air space
     double pk) // pressure (kPa in air space
 {
     double Vsum = Vq + Vm + Vo + Vw;
     double Va = 0.0;
+    double VwIceNorm = Vw_ice;
+    double dThetaIceNorm = dtheta_ice_dTc;
     if (Vsum > 1) {
         Vq = Vq / Vsum;
         Vm = Vm / Vsum;
         Vo = Vo / Vsum;
         Vw = Vw / Vsum;
+        VwIceNorm = VwIceNorm / Vsum;
+        dThetaIceNorm = dThetaIceNorm / Vsum;
     }
     else {
         Va = 1.0 - Vsum;
     }
     double CH;
     double CHa = cpairCpp(Tc) * phairCpp(Tc, pk) / 1e6; // Specific heat of air in Mj/m^3/K
-    if (Tc >= 0) {
+    if (Tc >= 0 || VwIceNorm <= 0.0) {
         CH = Vq * 2.13 + Vm * 2.31 + Vo * 2.50 + Vw * 4.18 + Va * CHa;
     }
     else {
         double CHi = 1.93 + 0.0067 * Tc; // Specific heat of ice
-        CH = Vq * 2.13 + Vm * 2.31 + Vo * 2.50 + Vw * CHi + Va * CHa;
+        // Partial liquid/ice split from the unfrozen-water curve, not an
+        // all-or-nothing switch at Tc=0.
+        double VwLiq = Vw - VwIceNorm;
+        if (VwLiq < 0.0) VwLiq = 0.0;
+        CH = Vq * 2.13 + Vm * 2.31 + Vo * 2.50 + VwLiq * 4.18 + VwIceNorm * CHi + Va * CHa;
+    }
+    // Apparent heat capacity: latent heat released/absorbed as the
+    // unfrozen fraction changes with temperature near the freezing point
+    // (rho_w * Lf * |d(theta_ice)/dTc|). CH is accumulated in MJ/m^3/K up
+    // to this point (the final *1e6 below converts to J/m^3/K), so divide
+    // this J/m^3/K term by 1e6 to match before adding.
+    if (dThetaIceNorm > 0.0) {
+        constexpr double rho_w = 1000.0; // kg/m^3
+        constexpr double Lf = 334000.0;  // J/kg, latent heat of fusion
+        CH += (rho_w * Lf * dThetaIceNorm) / 1e6;
     }
     return CH * 1e6; // Convert to J/m^3/K
 }
@@ -1349,6 +1394,26 @@ static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
     double Se = degreeOfSaturation(soilp, psiw, i);
     double theta = Se * soilp.thetaS[i];
     return theta;
+}
+// Unfrozen (liquid) water content below 0C, via freezing-point depression
+// treated as an extra suction fed through the same Campbell retention
+// curve as thetaFromPsi() -- see soil_freezing_design_notes.md for the
+// units verification (psiw/psie are J/kg throughout this file, matching
+// the Kelvin-equation vapour pressure calculations below, so the
+// Clapeyron term needs no unit conversion). Capped at the layer's actual
+// total water content theta (can't unfreeze more than is present).
+// Instantaneous/equilibrium curve -- no hysteresis, no persistent ice
+// state; recomputed fresh from theta and Tc wherever needed.
+static double unfrozenTheta(const soilpstruct& soilp, double theta, double Tc, int i)
+{
+    if (Tc >= 0.0) return theta;
+    constexpr double Lf = 334000.0; // J/kg, latent heat of fusion
+    constexpr double T0 = 273.15;   // K
+    double psi_ice = Lf * Tc / T0;  // J/kg, negative for Tc < 0
+    double theta_u = thetaFromPsi(soilp, psi_ice, i);
+    if (theta_u > theta) theta_u = theta;
+    if (theta_u < 0.0) theta_u = 0.0;
+    return theta_u;
 }
 // Calculate hydraulic conductivity from theta
 static double hydraulicConductivityFromTheta(const soilpstruct& soilp,
@@ -1514,8 +1579,23 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         }
         else if (nrIterations == 10) qsurface = (qsurf1 + qsurf2) / 2.0;
         for (int i = 0; i <= n; ++i) {
-            lambda[i] = thermalConductivityCpp(Vq[i], Vm[i], Vo[i], wc[i], Mc[i], Te_new[i], atmPressure);
-            CT[i] = heatCapacityCpp(Vq[i], Vm[i], Vo[i], wc[i], Te_new[i], atmPressure) * state.vol[i];
+            double Vw_ice = 0.0;
+            double dtheta_ice_dTc = 0.0;
+            if (Te_new[i] < 0.0) {
+                double theta_u = unfrozenTheta(soilp, wc[i], Te_new[i], i);
+                Vw_ice = wc[i] - theta_u;
+                if (Vw_ice < 0.0) Vw_ice = 0.0;
+                // Centred finite difference of the unfrozen-water curve,
+                // rather than an analytic derivative, so this stays
+                // verifiably consistent with unfrozenTheta() itself (see
+                // soil_freezing_design_notes.md).
+                const double dTprobe = 0.01;
+                double theta_u_lo = unfrozenTheta(soilp, wc[i], Te_new[i] - dTprobe, i);
+                double theta_u_hi = unfrozenTheta(soilp, wc[i], Te_new[i] + dTprobe, i);
+                dtheta_ice_dTc = std::abs((theta_u_hi - theta_u_lo) / (2.0 * dTprobe));
+            }
+            lambda[i] = thermalConductivityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, Mc[i], Te_new[i], atmPressure);
+            CT[i] = heatCapacityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, dtheta_ice_dTc, Te_new[i], atmPressure) * state.vol[i];
         }
         // flux coefficients
         ff[0] = kMeanCpp("LOGARITHMIC", lambda[0], lambda[1]) / dz[0];
@@ -1641,7 +1721,22 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         // Hydraulic properties
         for (int i = 0; i < n; ++i) {
             double Tkelvin = soilmod.Tc[i] + 273.15;
-            double kh = hydraulicConductivityFromTheta(soilp, theta[i], i);
+            // Ice is immobile: liquid (Darcy) conductivity is evaluated at
+            // the unfrozen water content only, then further reduced by an
+            // impedance factor for the ice remaining in the pore space
+            // (Lundin 1990 / Zhao et al. form, Omega ~ 6-8; see
+            // soil_freezing_design_notes.md). Vapour conductivity is left
+            // on total theta -- ice occupies pore space and blocks vapour
+            // diffusion pathways much like liquid water does, so no
+            // separate adjustment there.
+            double theta_u = unfrozenTheta(soilp, theta[i], soilmod.Tc[i], i);
+            double theta_ice = theta[i] - theta_u;
+            if (theta_ice < 0.0) theta_ice = 0.0;
+            double kh = hydraulicConductivityFromTheta(soilp, theta_u, i);
+            if (theta_ice > 0.0) {
+                constexpr double Omega = 7.0;
+                kh *= std::pow(10.0, -Omega * theta_ice);
+            }
             double kv = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
             k[i] = kh + kv;
             u[i] = g * k[i];
@@ -1730,7 +1825,20 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     auto& rh = onestepin.rh;
     const size_t nn = rh.size();
     const double nnd = static_cast<double>(nn);
-    const double TL = windvars.a2 * vegp.hgt / windvars.uf;
+    // Floor uf here, not in windmodelCpp: as uf->0 (near-calm wind), TL->
+    // infinity, which drives the near-field kernel's zeta (inowTL below)
+    // to 0 for every layer pair simultaneously -- a genuine log
+    // singularity in kn(zeta) (see multilayer_TL_blowup_handover.md,
+    // ported 2026-08-11). uf is used throughout the rest of the model
+    // (wind profile shape, aerodynamic resistances) where its unfloored
+    // near-calm behaviour may be intentional; TL is used only here, so
+    // scoping the floor to this one point of use has no effect elsewhere.
+    // 0.3 m/s: within the 0.2-0.5 m/s starting range flagged in that doc,
+    // matching the 0.5 m/s floor already precedented for the same class
+    // of problem in microclimfv2's grid-model Ueff.
+    constexpr double UF_MIN_FOR_TL = 0.3;
+    const double uf_for_TL = std::max(windvars.uf, UF_MIN_FOR_TL);
+    const double TL = windvars.a2 * vegp.hgt / uf_for_TL;
     const double dz = vegp.hgt / nnd;
     // ** Calculate limits to avoid model going out of range
     // Calculate limits: temperature
@@ -4356,10 +4464,21 @@ List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List s
     size_t n = soilpc.thetaS.size();
     std::vector<double> SoilTempIni(n);
     std::vector<double> SoilThetaIni(n);
-    double end1 = soilpc.thetaS[n - 1];
-    double end2 = boundaryT;
+    // FIX (2026-08-11): end1/end2 (and start2, derived from end2) were
+    // swapped -- SoilTempIni (a temperature array) was interpolating
+    // towards thetaS[n-1] (a water-content value, ~0.4-0.5) instead of
+    // boundaryT, and SoilThetaIni (a water-content array, should stay in
+    // 0..thetaS) was interpolating using boundaryT itself, going negative
+    // (or exactly 0, triggering psiw=-Inf * k=0 = NaN in SoilWaterCpp's
+    // flux term) whenever boundaryT <= 0. Fixed: temperature profile now
+    // actually interpolates towards boundaryT; water-content profile
+    // interpolates from 60% to 100% of thetaS[n-1], matching the same
+    // depth-profile shape already used by weatherhgt_adjust()'s R-level
+    // initial-theta guess (0.6 -> 1.0 fraction of saturation).
+    double end1 = boundaryT;
+    double end2 = soilpc.thetaS[n - 1];
     double start1 = temp[0];
-    double start2 = end2 / 1.5;
+    double start2 = 0.6 * end2;
     for (size_t i = 0; i < n; ++i) {
         SoilTempIni[i] = start1 + (end1 - start1) * static_cast<double>(i) / static_cast<double>(n - 1);
         SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
@@ -4449,10 +4568,21 @@ List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::Lis
     size_t n = soilpc.thetaS.size();
     std::vector<double> SoilTempIni(n);
     std::vector<double> SoilThetaIni(n);
-    double end1 = soilpc.thetaS[n - 1];
-    double end2 = boundaryT;
+    // FIX (2026-08-11): end1/end2 (and start2, derived from end2) were
+    // swapped -- SoilTempIni (a temperature array) was interpolating
+    // towards thetaS[n-1] (a water-content value, ~0.4-0.5) instead of
+    // boundaryT, and SoilThetaIni (a water-content array, should stay in
+    // 0..thetaS) was interpolating using boundaryT itself, going negative
+    // (or exactly 0, triggering psiw=-Inf * k=0 = NaN in SoilWaterCpp's
+    // flux term) whenever boundaryT <= 0. Fixed: temperature profile now
+    // actually interpolates towards boundaryT; water-content profile
+    // interpolates from 60% to 100% of thetaS[n-1], matching the same
+    // depth-profile shape already used by weatherhgt_adjust()'s R-level
+    // initial-theta guess (0.6 -> 1.0 fraction of saturation).
+    double end1 = boundaryT;
+    double end2 = soilpc.thetaS[n - 1];
     double start1 = temp[0];
-    double start2 = end2 / 1.5;
+    double start2 = 0.6 * end2;
     for (size_t i = 0; i < n; ++i) {
         SoilTempIni[i] = start1 + (end1 - start1) * static_cast<double>(i) / static_cast<double>(n - 1);
         SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
