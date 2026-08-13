@@ -508,6 +508,67 @@ static double dphihCpp2(double ze)
 // same kink directly, so callers below now use dpsimCpp2/dpsihCpp2 in
 // place of the old Shape variants -- matching microclimfv2's own
 // resolution of the same duplication.
+// Invert psim(L) on the stable branch (L >= 0) to find the L that produces
+// a given target psi_m. Ported verbatim from microclimfv2's src/utils.cpp
+// (dpsimCpp -> dpsimCpp2 only), which itself documents the reasoning this
+// needs: psi_m(L) = dpsimCpp2(zm/L) - dpsimCpp2((zref-d)/L) is NOT
+// monotonic in L -- it is 0 at both L -> 0+ AND L -> infinity (both terms
+// saturate to the same asymptote as L -> 0), so it has a genuine interior
+// maximum. This finds that peak (coarse log-spaced scan, then
+// golden-section refine), then bisects for the root on the monotonic
+// branch L > Lpeak -- the milder, more conservative of the (possibly two)
+// roots that share the same psi_m. A target at or beyond the peak's own
+// psi_m saturates to Lpeak rather than failing.
+static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
+{
+    if (psi_m <= 1e-12) return std::numeric_limits<double>::infinity();
+
+    auto psiOfL = [&](double L) {
+        return dpsimCpp2(zm / L) - dpsimCpp2((zref - d) / L);
+    };
+
+    // 1. Coarse log-spaced scan (1e-4 to 1e6 m, covering any physically
+    // plausible L) to bracket the peak.
+    const int NSCAN = 60;
+    double bestL = 1.0, bestVal = psiOfL(1.0);
+    double logLo = std::log(1e-4), logHi = std::log(1e6);
+    for (int i = 0; i <= NSCAN; ++i) {
+        double L = std::exp(logLo + (logHi - logLo) * i / NSCAN);
+        double v = psiOfL(L);
+        if (v > bestVal) { bestVal = v; bestL = L; }
+    }
+    int bestIdx = static_cast<int>(std::round(NSCAN * (std::log(bestL) - logLo) / (logHi - logLo)));
+    double loL = std::exp(logLo + (logHi - logLo) * std::max(0, bestIdx - 1) / NSCAN);
+    double hiL = std::exp(logLo + (logHi - logLo) * std::min(NSCAN, bestIdx + 1) / NSCAN);
+
+    // 2. Golden-section search refines the peak within that bracket.
+    const double gr = (std::sqrt(5.0) - 1.0) / 2.0;
+    double a = loL, b = hiL;
+    double c = b - gr * (b - a), e = a + gr * (b - a);
+    for (int i = 0; i < 60; ++i) {
+        if (psiOfL(c) > psiOfL(e)) { b = e; } else { a = c; }
+        c = b - gr * (b - a); e = a + gr * (b - a);
+        if (std::abs(b - a) < 1e-9 * b) break;
+    }
+    double Lpeak = 0.5 * (a + b);
+    double psiPeak = psiOfL(Lpeak);
+
+    // 3. A target psi_m at or beyond what this equation can produce at all
+    // (at or above the peak) saturates to Lpeak, the tightest stability
+    // this taper can represent, rather than failing.
+    if (psi_m >= psiPeak) return Lpeak;
+
+    // 4. Bisection for the unique root on the branch L > Lpeak, where
+    // psiOfL is guaranteed monotonically decreasing (from psiPeak down to
+    // 0 as L -> infinity) -- the milder, more conservative root.
+    double lo = Lpeak, hi = std::max(Lpeak * 100.0, 1e6);
+    while (psiOfL(hi) > psi_m && hi < 1e12) hi *= 10.0;
+    for (int i = 0; i < 80; ++i) {
+        double mid = 0.5 * (lo + hi);
+        if (psiOfL(mid) > psi_m) lo = mid; else hi = mid;
+    }
+    return 0.5 * (lo + hi);
+}
 // Clip Monin Obukhov length to keep it within limits
 static double clipMOlength(double L, double zref, double d, double zm, double beta = 0.9)
 {
@@ -533,6 +594,30 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
                 break;
         }
         return L_high;  // corrected L that satisfies psim > min
+    }
+    if (L >= 0.0) {
+        // Stable-side safeguard (added 2026-08-13, mirroring the unstable
+        // branch above and microclimfv2's own fix -- see
+        // stable_side_clip_handover.md). Compare L directly against the
+        // bound's own L, NOT psim(L) against psim_max: psim(L) on the
+        // stable branch has a real interior fold-back (see
+        // lStableFinalCpp's doc comment above) -- it rises from 0 at
+        // L -> infinity to a peak at some Lpeak, then falls back toward 0
+        // again as L -> 0+. A naive `psim > psim_max` check would silently
+        // pass an L that has wrapped past the peak back down near 0 --
+        // exactly the pathological, most-over-stable case this safeguard
+        // most needs to catch. Comparing L itself against L_bound (the
+        // milder, larger-L root lStableFinalCpp always returns) sidesteps
+        // this: on the safe monotonic branch (L > Lpeak) psim(L) decreases
+        // as L increases, so L < L_bound and psim(L) > psim_max are
+        // equivalent there; for any L <= Lpeak (including the
+        // wrapped-past-the-peak case) L is always < L_bound too, so the
+        // comparison still correctly triggers.
+        const double psim_max = beta * ln_z;
+        const double L_bound = lStableFinalCpp(psim_max, zref, d, zm);
+        if (L < L_bound) {
+            return L_bound;
+        }
     }
     return L;  // already safe
 }
@@ -607,11 +692,14 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
         Ueff = std::sqrt(uref * uref + std::pow(beta * wstar, 2.0));
     }
     double uf = (ka * Ueff) / (std::log((zref - d) / zm) + psi_m);
-    // Calculate safe limits for Monin Obukhov length 
+    // Monin-Obukhov length -- kept at the neutral sentinel unless/until the
+    // loop below computes a real value from a live H. Lsafe used to be
+    // seeded here too, once, from this same sentinel-or-H>0-only LL (fixed
+    // 2026-08-13, see stable_side_clip_handover.md): that made it either
+    // permanently inert (H<=0, LL stuck at 1e99) or one full outer call
+    // stale (H>0). Now recomputed fresh from the loop's own live LL each
+    // pass, immediately below.
     double LL = 1e99;
-    if (H > 0.0) LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
-    // L negative when H positive etc
-    double Lsafe = clipMOlength(LL, zref, d, zm);
     // Derive diabatic coefficients iteratively
     double dif = 10.0;
     double olduf = -100.00;
@@ -633,6 +721,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
             zm = roughlengthCpp2(hgt, pai, d);
             zh = 0.2 * zm;
             LL = (ph * cp * std::pow(uf_iter, 3.0) * Tk) / (-ka * g * H);
+            double Lsafe = clipMOlength(LL, zref, d, zm);
             if (H > 0) {
                 if (LL < Lsafe) LL = Lsafe;
             }
@@ -2350,10 +2439,13 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     double zmd = zm * std::exp(ka * psi_h);
     double zh = 0.2 * zmd;
     double uf = (ka * climdata.uref) / (std::log(zref / zmd) + psi_m);
-    // Calculate safe limits for Monin Obukhov length 
+    // Monin-Obukhov length -- Lsafe used to be seeded here too, once,
+    // before the while loop below, from this same pre-loop LL (fixed
+    // 2026-08-13, see stable_side_clip_handover.md): that left it one
+    // outer call (last timestep's H) stale for the entire loop. Now
+    // recomputed fresh from the loop's own live LL each pass, immediately
+    // below.
     double LL = (cpph * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
-    // L negative when H positive etc
-    double Lsafe = clipMOlength(LL, zref, 0.0, zmd);
     double dif = 1e99;
     int nrIterations = 0;
     // Initialize soil heat and water model
@@ -2369,6 +2461,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         // ** Calculate rHa
         if (H != 0.0) {
             LL = (cpph * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+            double Lsafe = clipMOlength(LL, zref, 0.0, zmd);
             if (H > 0) {
                 if (LL < Lsafe) LL = Lsafe;
             }
@@ -2715,8 +2808,13 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         if (tcanopy < tdew) tcanopy = tdew;
         // update diabatic coefficients
         H = (ph * cp / rHa) * (tcanopy - climdata.tref);
-        double Lsafe = clipMOlength(LL, zref, d, zm);
+        // Lsafe used to be computed here from the PREVIOUS iteration's LL,
+        // then LL recomputed fresh immediately after -- always one
+        // iteration behind (fixed 2026-08-13, see
+        // stable_side_clip_handover.md). Now computed from this
+        // iteration's own fresh LL.
         LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+        double Lsafe = clipMOlength(LL, zref, d, zm);
         if (H > 0) {
             if (LL < Lsafe) LL = Lsafe;
         }
@@ -2806,8 +2904,13 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         soilheat.Te[0] = newtsoil;
         // update diabatic coefficients
         H = (ph * cp / rHa) * (newtsoil - climdata.tref);
-        double Lsafe = clipMOlength(LL, zref, 0.0, zm);
+        // Lsafe used to be computed here from the PREVIOUS iteration's LL,
+        // then LL recomputed fresh immediately after -- always one
+        // iteration behind (fixed 2026-08-13, see
+        // stable_side_clip_handover.md). Now computed from this
+        // iteration's own fresh LL.
         LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
+        double Lsafe = clipMOlength(LL, zref, 0.0, zm);
         if (H > 0) {
             if (LL < Lsafe) LL = Lsafe;
         }
