@@ -24,13 +24,8 @@ namespace newmodel {
         double fd; // reaction of Vcmax converted to leaf dark respiration (unitless)
         double psi50; // Water potential when plant loses 50% of krc_max (MPa) 
         double apsi; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)
-        double rpmin = -1.0; // minimum whole-plant hydraulic resistance, lazily computed and
-                              // cached by leafgs() on first use (see rpmin_calc) -- depends only
-                              // on hgt/hv/Kxmx, which are fixed for the lifetime of a single run
-                              // (even though hgt may be a user override, not the PFT default), so
-                              // it's safe to cache per vegpstruct instance but NOT safe to bake
-                              // into the static PFTparams table, which knows nothing about such
-                              // overrides. Negative means "not yet computed".
+        double rpmin = -1.0; // minimum whole-plant hydraulic resistance; lazily cached by
+                              // leafgs() from hgt/hv/Kxmx. Negative = not yet computed.
         double len;  // Leaf length (m)
         double wid; // Leaf width (m)
         double vegem; // Vegetation emissivity (unitless)
@@ -58,13 +53,6 @@ namespace newmodel {
         std::vector<double> thetaR; // Residual soil water fraction at wilting point 
         std::vector<double> thetaS; // Volumetric soil water fraction at saturation
         std::vector<double> Ksat; // Saturated hydrualic conductivity (kg s / m^3 - same as cm/s)
-        // (a stored `n` field used to live here, read directly from
-        // newsoilparamstable's own "n" column. That column is a leftover
-        // van Genuchten pore-size parameter, not a Campbell one -- the
-        // Campbell hydraulic conductivity exponent is 2*b+3, derived
-        // locally wherever it's needed (hydraulicConductivityFromTheta, and
-        // the Newton-Raphson flux linearization in the soil water solver)
-        // rather than stored, so nothing reads this field any more.)
         std::vector<double> psi_min; // Minimum psiw determined from thetaR
     };
     struct climstruct {

@@ -23,7 +23,6 @@
 #' @export
 PAIgeometry <- function(PAI, skew, spread, n = 1000) {
   skew<-10-skew
-  # Plant area index of canopy layer
   shape1<-100/spread
   x<-c(1:n)/(n+1)
   if (skew>5) {

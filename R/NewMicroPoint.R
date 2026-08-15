@@ -119,10 +119,8 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, sl
   # Adjust total depth to allow for boundary layer
   totalDepth <- 1.5 * totalDepth
   s <- which(newsoilparamstable$Soil.type == soiltype)
-  # Named extraction (not positional) of just the Campbell parameters this
-  # model uses -- robust to newsoilparamstable's column order/composition,
-  # and doesn't pick up the van Genuchten-only columns (alpha, VGn, VGpsie)
-  # that belong to a different model, not this one.
+  # Extract by name (not position) so this is robust to column order and
+  # skips the van Genuchten-only columns (alpha, VGn, VGpsie).
   campbellcols <- c("Smax", "Smin", "Ksat", "Vq", "Vm", "Vo", "Mc", "rho", "b", "psi_e")
   v <- as.numeric(newsoilparamstable[s, campbellcols])
   names(v) <- campbellcols
@@ -225,30 +223,24 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
-  # Create SoilTemp and Theta vectors if not provided
   if (class(SoilTempIni) == "logical") {
     surfaceT <- climdata$temp[1]
     SoilTempIni = (geometricCpp(15, boundaryT - surfaceT) + surfaceT)[1:16]
   }
   mutheta <- seq(0.6, 1, length.out =  16)
   if (class(ThetaIni) == "logical")  ThetaIni <- 0.46 * mutheta
-  # Create vegp inputs
   vegp <-  createvegp(vegtype = "C3")
   vegp$h <- 0.12
   paii <- PAIgrass(0.12, 10)
   vegp$pai <- sum(paii)
   Lfrac <- seq(0.7, 0.9, length.out = length(paii))
-  # Create soilc inputs
   soilc <- createsoilc(soiltype = "Clay loam")
-  # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
-  # Estimate CO2
   if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
   obstime <- data.frame(year = tme$year +1900,
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  # Run model
   hgtvars <- WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, long,
                             SoilTempIni, ThetaIni, CO2ppm)
   clim2 <- climdata
@@ -420,7 +412,6 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
-  # Create SoilTemp and Theta vectors if not provided
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
@@ -429,7 +420,6 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
   }
   mutheta <- seq(0.6, 1, length.out =  nlay + 1)
   if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
-  # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
                         month = tme$mon + 1,
@@ -441,9 +431,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                          zm, maxiter, tolerance)
     zref2 <- zref
   }  else {
-    # Estimate CO2
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    # Create vegp inputs
     n <- length(paii)
     paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = 20),
                      method = "natural")$y
@@ -631,7 +619,6 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     boundaryT <- mean(climdata$temp)
   }
   nlay <- soilc$nLayers
-  # Create SoilTemp and Theta vectors if not provided
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
@@ -639,7 +626,6 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   }
   mutheta <- seq(0.6, 1, length.out =  nlay + 1)
   if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
-  # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
                         month = tme$mon + 1,
@@ -649,7 +635,6 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     mout <- RunBareR(reqhgt, obstime, climdata, soilc, zref, lat, long, SoilTempIni,
                      ThetaIni, zm, maxiter, tolerance)
   } else {
-    # Estimate CO2
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, maxiter, tolerance, 0.25, 1.25, C3)
@@ -750,7 +735,6 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     boundaryT <- mean(climdata$temp)
   }
   nlay <- soilc$nLayers
-  # Create SoilTemp and Theta vectors if not provided
   if (class(SoilTempIni) == "logical") {
     boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
@@ -758,19 +742,16 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
   }
   mutheta <- seq(0.6, 1, length.out =  nlay + 1)
   if (class(ThetaIni) == "logical")  ThetaIni <- mutheta * soilc$Smax
-  # Create obstime
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
   if (class(vegp) == "logical") {  # Bare ground assumed
-    # Create z vector
     z <- (c(1:20)/ 20) * zref
     mout <- RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, long,
                              SoilTempIni, ThetaIni, maxiter, tolerance)
   } else {
-    # Estimate CO2
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, maxiter, tolerance,

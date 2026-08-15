@@ -125,7 +125,7 @@ create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "r
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
 profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, long, zref, maxiter = 100, tolerance = 1e-2) {
-  # ** Compute ectotherm body temperature at ground level
+  # Ectotherm body temperature at ground level.
   n <- 2
   psie <- -abs(soilc$psi_e[1])
   psiw <- psie * (moutprofile$theta / soilc$Smax[1])^-soilc$b[1]
@@ -149,18 +149,16 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
                        pk = rep(climdata$pres[hr], n),
                        surfrh = rep(surfrh, n))
   Tbodyg <- Ectotherm(obstime, climin, ectop, lat, long, vegp$ltra, maxiter, tolerance)[1]
-  # ** Compute ectotherm body temperature below ground
+  # Ectotherm body temperature below ground.
   Tbodyb <- rev(moutprofile$Soiltemp)
   n2 <- length(moutprofile$zb) - 1
   zb <- moutprofile$zb[1:n2]
-  # ** Compute ectotherm body temperature above ground and within canopy
-  # Create obstime data frame
+  # Ectotherm body temperature above ground and within canopy.
   n <- length(moutprofile$Rswup)
   obstime <- data.frame(year = rep(tme$year +1900, n),
                         month = rep(tme$mon + 1, n),
                         day = rep(tme$mday, n),
                         hour = rep(tme$hour, n))
-  # Create input climate data
   climin <- data.frame(Rdirdown = moutprofile$Rdirdown,
                        Rdifdown = moutprofile$Rdifdown,
                        Rswup = moutprofile$Rswup,
@@ -179,10 +177,9 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     z <- c(rev(-zb), 0, moutprofile$z)
   } else {
     climin$Ts <- moutprofile$tleaf
-    # Compute ectotherm temperature within canopy
+    # Ectotherm temperature within canopy.
     Tbodyc <- Ectotherm(obstime, climin, ectop, lat, long, vegp$ltra, maxiter, tolerance)
-    # Compute bpdy temperature above canopy
-    # wind speed
+    # Ectotherm temperature above canopy.
     za <- moutprofile$za
     n2 <- length(za)
     n <- length(moutprofile$Rswup)
@@ -329,13 +326,11 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
 full_ecto <- function(mout, climdata, vegp, soilc, ectop, lat, long, maxiter = 100, tolerance = 1e-2) {
-  # Calculate for canopy bit
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   obstime <- data.frame(year = tme$year +1900,
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  # Create List of climate input variables
   climin <- list(Rdirdown = mout$Rdirdown,
                  Rdifdown = mout$Rdifdown,
                  Rswup = mout$Rswup,
