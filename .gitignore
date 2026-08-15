@@ -9,11 +9,8 @@ vignettes/rsconnect/
 
 # Local-only working notes/docs -- not for public consumption, kept on
 # disk for continuity across future Claude Code sessions only.
+# CLAUDE.md stays at repo root (Claude Code only auto-loads it there),
+# everything else lives in dev-notes/.
 CLAUDE.md
-model_architecture.md
-performance_assessment.md
 restructuretask.txt
-soil_freezing_assessment.md
-soil_freezing_design_notes.md
-multilayer_TL_blowup_handover.md
-stable_side_clip_handover.md
+dev-notes/
