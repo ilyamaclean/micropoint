@@ -2074,11 +2074,11 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         // Ground-to-air sensible/latent heat exchange at this layer.
         double ph = phairCpp(tair[i], pk);
         double cp = cpairCpp(tair[i]);
-        double GT = (ph * cp / rHa) * (tground - tair[i]) * dz;
+        double GT = (ph * cp / rHa) * (tground - tair[i]);
         double ea = satvapCpp2(tair[i]) * (rh[i] / 100.0);
         double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
             : (45068.7 - 42.8428 * tground);
-        double GL = (la / (rHa * pk)) * (esg - ea) * dz;
+        double GL = (la / (rHa * pk)) * (esg - ea);
         // Total sensible/latent source strength from the ground and every
         // foliage layer up to and including this one.
         double H = 0.0;
