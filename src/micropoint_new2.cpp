@@ -1967,6 +1967,44 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
 // ******************************************* Below-canopy Langrangian model ********************************************** //
 // Distributed canopy sources do not directly prescribe air temperature/humidity.  This section
 // uses a Lagrangian dispersion representation of within-canopy turbulence to convert heat and vapour sources into vertical profiles.
+static constexpr double KN_C1 = -0.39894;   // fixes the kernel's logarithmic behaviour at zero separation
+static constexpr double KN_C2 = -0.15623;   // fixes its integral, and hence total scalar conservation
+static constexpr double PI_SQ_OVER_6 = 1.6449340668482264;
+// Raupach's (1989) near-field dispersion kernel: the fraction of a source's
+// scalar output still found at a separation of zeta, where zeta is the
+// source-to-observation distance measured in units of the distance an eddy
+// travels over one Lagrangian time scale. Even in zeta, and diverging
+// logarithmically at zero separation.
+static inline double nearFieldKernel(double zeta)
+{
+    double e = std::exp(-std::abs(zeta));
+    return KN_C1 * std::log(1.0 - e) + KN_C2 * e;
+}
+// Dilogarithm on (0,1), by its defining series with the reflection identity
+// applied on the upper half where that series converges too slowly. Needed only
+// to integrate the kernel in closed form below.
+static inline double dilog01(double x)
+{
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return PI_SQ_OVER_6;
+    const bool reflect = (x > 0.5);
+    const double y = reflect ? (1.0 - x) : x;
+    double sum = 0.0, term = y;
+    for (int k = 1; k <= 60; ++k) { sum += term / (static_cast<double>(k) * k); term *= y; }
+    return reflect ? (PI_SQ_OVER_6 - std::log(x) * std::log(1.0 - x) - sum) : sum;
+}
+// Mean value of the near-field kernel across a canopy layer, the layer's
+// half-thickness expressed in the kernel's own units. Every layer's true
+// contribution is its source strength times this mean; the sum below estimates
+// it from the kernel at the layer's midpoint, which works everywhere except at
+// the observation height itself, where the kernel is infinite. There the mean
+// must be taken exactly, which the kernel's integral supplies in closed form.
+static inline double nearFieldLayerMean(double halfthick)
+{
+    const double e = std::exp(-halfthick);
+    const double integral = KN_C1 * (dilog01(e) - PI_SQ_OVER_6) + KN_C2 * (1.0 - e);
+    return integral / halfthick;
+}
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Below-canopy air temperature and humidity at each layer, from a
 // localised near-field/far-field Lagrangian dispersion solution (Raupach
@@ -2029,26 +2067,34 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         ST_over_ow[i] = ST[i] / ow[i];
         SL_over_ow[i] = SL[i] / ow[i];
     }
-    // Finite-canopy correction to the near-field kernel integral below,
-    // larger when the canopy is resolved with fewer layers (Raupach's
-    // localised near-field theory).
-    const double mu = 1.0 + 0.894 * std::exp(-0.01386 * nnd) + 9.82 * std::exp(-0.15 * nnd);
     // Near-field concentration at canopy top, used as the upper boundary
     // condition below (subtracted back out of each layer's own near-field
     // term, since that term already includes the canopy-top contribution).
     double CnTh = 0.0;
     double CnLh = 0.0;
     for (size_t i = 0; i < (nn - 1); ++i) {
-        double dz1 = (vegp.hgt - z[i]) * inowTL[i];
-        double dz2 = (vegp.hgt + z[i]) * inowTL[i];
-        double e = std::exp(-dz1);
-        double kn = -0.39894 * std::log(1.0 - e) - 0.15623 * e; // near-field dispersion kernel
-        double common = kn * (dz1 + dz2);
+        // Each source reaches the observation height by two paths: directly,
+        // and reflected at the ground, which imposes the no-flux condition
+        // there. Each path is attenuated by the kernel over its own distance.
+        double zeta1 = (vegp.hgt - z[i]) * inowTL[i];
+        double zeta2 = (vegp.hgt + z[i]) * inowTL[i];
+        double common = nearFieldKernel(zeta1) + nearFieldKernel(zeta2);
         CnTh += ST[i] / ow[i] * common;
         CnLh += SL[i] / ow[i] * common;
     }
-    CnTh *= mu;
-    CnLh *= mu;
+    // The topmost layer is the one holding the observation height, so the sum
+    // above cannot sample it and its heat is added here instead, as the layer's
+    // exact mean. Only the lower half of that layer carries foliage - nothing
+    // grows above canopy top - so it contributes half of what an interior layer
+    // would. Its ground reflection is picked up in the same term.
+    {
+        const size_t t = nn - 1;
+        double halfthick = 0.5 * dz * inowTL[t];
+        double toplayer = 0.5 * nearFieldLayerMean(halfthick)
+            + nearFieldKernel(2.0 * z[t] * inowTL[t]);
+        CnTh += ST[t] / ow[t] * toplayer;
+        CnLh += SL[t] / ow[t] * toplayer;
+    }
     // Far-field concentration at canopy top: the above-canopy air
     // temperature/vapour pressure expressed in the same flux-like units
     // (enthalpy/latent-heat-flux equivalent) as the source terms below.
@@ -2102,20 +2148,29 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         double CnT = 0.0;
         double CnL = 0.0;
         for (size_t j = 0; j < nn; ++j) if (i != j) {
-            double dz1 = (z[i] - z[j]) * inowTL[j];
-            double dz2 = (z[i] + z[j]) * inowTL[j];
-            double Zeta = std::abs(dz1);
-            double e = std::exp(-Zeta);
-            double kn = -0.39894 * std::log(1.0 - e) - 0.15623 * e;
-            double common = kn * (dz1 + dz2);
+            double zeta1 = (z[i] - z[j]) * inowTL[j];
+            double zeta2 = (z[i] + z[j]) * inowTL[j];
+            double common = nearFieldKernel(zeta1) + nearFieldKernel(zeta2);
             CnT += ST_over_ow[j] * common;
             CnL += SL_over_ow[j] * common;
+        }
+        // The layer holding this observation height is absent from the loop
+        // above, since a source at zero separation carries infinite kernel
+        // weight. Its heat is real and finite, and is added back here as the
+        // layer's exact mean weight rather than the midpoint sample used for
+        // every other layer, together with its reflection off the ground.
+        {
+            double halfthick = 0.5 * dz * inowTL[i];
+            double ownlayer = nearFieldLayerMean(halfthick)
+                + nearFieldKernel(2.0 * z[i] * inowTL[i]);
+            CnT += ST_over_ow[i] * ownlayer;
+            CnL += SL_over_ow[i] * ownlayer;
         }
         // Raupach's near-field/far-field superposition: canopy-top
         // boundary value, replacing its own near-field term with this
         // layer's, plus this layer's far-field contribution.
-        double CT = CfTh - CnTh + CfT + CnT * mu;
-        double CL = CfLh - CnLh + CfL + CnL * mu;
+        double CT = CfTh - CnTh + CfT + CnT;
+        double CL = CfLh - CnLh + CfL + CnL;
         tair[i] = CT / (cp * ph);
         double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
             : (45068.7 - 42.8428 * tleaf[i]);
