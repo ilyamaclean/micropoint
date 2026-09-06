@@ -14,3 +14,12 @@ vignettes/rsconnect/
 CLAUDE.md
 restructuretask.txt
 dev-notes/
+
+# Task handovers and their rendered copies, dropped at the repo root for a
+# session to pick up. Investigation material -- never for the public repo.
+task.md
+task.html
+*_handover.md
+*_handover.html
+*_task.md
+*_task.html
