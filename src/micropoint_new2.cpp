@@ -791,6 +791,9 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
             iter += 1;
         }
     }
+    // Captured before psi_m is re-expressed for the canopy-top profile below,
+    // so it matches the momentum profile that actually produced uf.
+    double ufratio = ka / (std::log((zref - d) / zm) + psi_m);
     if (H != 0.0) {
         double ln1 = std::log((zref - d) / zm);
         if (psi_m < -0.9 * ln1) psi_m = -0.9 * ln1;
@@ -801,11 +804,19 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    // a2 describes within-canopy exchange (feeds rhcanopy for the
-    // ground-to-canopy-top leg), so phi_h reflects stability at canopy
-    // top, not at the reference height zref.
+    // Within-canopy mixing is not free to take any value: at canopy top the
+    // eddy diffusivity of the canopy air equals that of the air immediately
+    // above, which Monin-Obukhov similarity fixes. That match determines a2.
+    //
+    // The dimensionless temperature gradient sits in the denominator because
+    // it measures how steep a gradient a given heat flux must sustain -- a
+    // resistance, not a conductance. Convection therefore strengthens canopy
+    // mixing and stable stratification suppresses it. Stability is read at
+    // canopy top, since what is described is exchange inside the canopy. The
+    // squared gust constant cancels the value the gust profile reaches at
+    // canopy top, making the match exact.
     phi_h = dphihCpp2((hgt - d) / LL);
-    double a2 = (phi_h * ka * (1.0 - d / hgt)) / (a1 * a1);
+    double a2 = (ka * (1.0 - d / hgt)) / (a1 * a1 * phi_h);
     windmodel out;
     out.uz = uz;
     out.LL = LL;
@@ -816,6 +827,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     out.psi_m = psi_m;
     out.psi_h = psi_h;
     out.phi_h = phi_h;
+    out.ufratio = ufratio;
     return out;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -2027,12 +2039,29 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     auto& rh = onestepin.rh;
     const size_t nn = rh.size();
     const double nnd = static_cast<double>(nn);
-    // Floor uf for TL only (not elsewhere): near-calm wind sends TL, and
-    // the near-field kernel's zeta, to a log singularity. See
-    // dev-notes/multilayer_TL_blowup_handover.md.
-    constexpr double UF_MIN_FOR_TL = 0.3;
-    const double uf_for_TL = std::max(windvars.uf, UF_MIN_FOR_TL);
-    const double TL = windvars.a2 * vegp.hgt / uf_for_TL; // Lagrangian time scale
+    // Weakest wind the dispersion solution credits. In vanishing wind a fixed
+    // heat source demands an arbitrarily large temperature difference to carry
+    // it, and the solved profile ends up pinned across nearly every layer to
+    // the plausibility bounds imposed below, losing the vertical structure the
+    // multilayer solve exists to resolve.
+    //
+    // The threshold is a wind speed rather than a friction velocity, because
+    // the same friction velocity means very different weather over a forest
+    // and over a sward: converting through this canopy's own roughness lets
+    // one threshold stand for the same conditions everywhere. Combining in
+    // quadrature rather than clipping leaves ordinary winds essentially
+    // untouched while removing any threshold at which the solution would jump.
+    //
+    // The result is used for the gust velocity scale as well as the Lagrangian
+    // time scale. Those two are reciprocal in friction velocity, so their
+    // product -- the distance over which the near-field kernel acts -- is a
+    // property of the canopy alone, independent of wind. Deriving both from one
+    // value preserves that, and with it the balance between near-field and
+    // far-field transport on which the formulation rests.
+    constexpr double U_MIN_MIXING = 0.5;
+    const double uf_calm = windvars.ufratio * U_MIN_MIXING;
+    const double uf_mix = std::sqrt(windvars.uf * windvars.uf + uf_calm * uf_calm);
+    const double TL = windvars.a2 * vegp.hgt / uf_mix; // Lagrangian time scale
     const double dz = vegp.hgt / nnd;
     // Physically plausible temperature/vapour-pressure range for this
     // step: between ground and canopy-top values, widened to also cover
@@ -2056,8 +2085,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // below. ST/SL are each layer's sensible/latent heat source strength
     // (per-layer flux Hz/Lz weighted by that layer's foliage area).
     std::vector<double> ow(nn), inowTL(nn), KH(nn), ST(nn), SL(nn), ST_over_ow(nn), SL_over_ow(nn);
-    const double mu1 = (a1 + a0) * 0.5 * windvars.uf;
-    const double mu2 = (a1 - a0) * 0.5 * windvars.uf;
+    const double mu1 = (a1 + a0) * 0.5 * uf_mix;
+    const double mu2 = (a1 - a0) * 0.5 * uf_mix;
     for (size_t i = 0; i < nn; ++i) {
         ow[i] = mu1 + mu2 * std::cos(pi * (1.0 - z[i] / vegp.hgt));
         KH[i] = TL * ow[i] * ow[i];
@@ -2843,10 +2872,16 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
             double rHh = (std::log((vegp.hgt - d) / zh) + psihh) / (ka * uf);
             rhz = rHa - rHh;
         }
-        // Resistance from ground to top of canopy. phih reflects stability
-        // at canopy top (a2 describes within-canopy exchange), not at zref.
+        // Resistance from the ground to canopy top. Mixing within the canopy
+        // follows from matching its eddy diffusivity at canopy top to that
+        // of the air above. The dimensionless temperature gradient sits in
+        // the denominator: it expresses how steep a gradient a given flux
+        // must sustain, so it raises this resistance under stable
+        // stratification and lowers it under convection. Stability is read
+        // at canopy top, since what is described is exchange inside the
+        // canopy.
         double phih = dphihCpp2((vegp.hgt - d) / LL);
-        double a2 = (phih * 0.41 * (1 - d / vegp.hgt)) / 1.5625;
+        double a2 = (0.41 * (1 - d / vegp.hgt)) / (1.5625 * phih);
         double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt);
         double rGz = rhg + rhz; // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;

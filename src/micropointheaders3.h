@@ -156,6 +156,10 @@ namespace newmodel {
         double psi_m;
         double psi_h;
         double phi_h;
+        // Friction velocity generated per unit driving wind. Set by canopy
+        // roughness and stability, so it converts a wind speed into the
+        // friction velocity that wind produces over this particular canopy.
+        double ufratio;
     };
     struct rainmodel {
         std::vector<double> kd; // extinction coefficient
