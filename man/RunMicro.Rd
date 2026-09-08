@@ -33,7 +33,9 @@ values are above ground, `0` is the soil surface, and negative values are
 below ground.}
 
 \item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed.}
+If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+which are too short for the vegetation to present the wind a surface distinct
+from the soil.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
