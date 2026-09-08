@@ -257,10 +257,9 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
 #'   If `NA`, bare-ground conditions are assumed.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param paii Numeric vector of plant area index values for each canopy layer,
-#'   as returned by [PAIgeometry()] or [PAIgrass()] (see Details).
-#' @param Lfrac Single numeric value or numeric vector giving the fraction of plant area
-#'   that is living vegetation in each canopy layer.
+#' @param Lfrac Fraction of plant area that is living vegetation, given either as
+#'   a single value or as a vector giving the fraction in each canopy layer.
+#'   Required unless `vegp` is `NA`.
 #' @param lat Numeric. Latitude in decimal degrees.
 #' @param long Numeric. Longitude in decimal degrees.
 #' @param zref Numeric. Height (m) of the meteorological forcing data.
@@ -287,7 +286,8 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
 InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
-                            CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE) {
+                            CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE,
+                            Lfrac = NA) {
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -302,7 +302,10 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
     blm <- BigLeafBareCpp(obstime, climdata, soilc, zref, zmr, lat, long,
                           boundaryT, maxiter)
   } else {
-    if (length(Lfrac) == 1) Lfrac=rep(Lfrac, 10)
+    if (length(Lfrac) == 1 && is.na(Lfrac)) {
+      stop("Lfrac must be supplied when vegp describes a canopy\n")
+    }
+    if (length(Lfrac) == 1) Lfrac <- rep(Lfrac, 10)
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
                        lat, long, boundaryT, maxiter, C3)

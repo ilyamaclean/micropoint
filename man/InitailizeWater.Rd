@@ -15,7 +15,8 @@ InitailizeWater(
   CO2ppm = NA,
   boundaryT = NA,
   maxiter = 100,
-  C3 = TRUE
+  C3 = TRUE,
+  Lfrac = NA
 )
 }
 \arguments{
@@ -48,11 +49,9 @@ within each time step.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
-\item{paii}{Numeric vector of plant area index values for each canopy layer,
-as returned by [PAIgeometry()] or [PAIgrass()] (see Details).}
-
-\item{Lfrac}{Single numeric value or numeric vector giving the fraction of plant area
-that is living vegetation in each canopy layer.}
+\item{Lfrac}{Fraction of plant area that is living vegetation, given either as
+a single value or as a vector giving the fraction in each canopy layer.
+Required unless `vegp` is `NA`.}
 }
 \value{
 Numeric vector of initial volumetric soil water contents in each layer
