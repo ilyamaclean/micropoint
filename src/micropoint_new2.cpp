@@ -2017,6 +2017,26 @@ static inline double nearFieldLayerMean(double halfthick)
     const double integral = KN_C1 * (dilog01(e) - PI_SQ_OVER_6) + KN_C2 * (1.0 - e);
     return integral / halfthick;
 }
+// Every layer but the one holding the observation height is represented by the
+// kernel at its midpoint. That is exact where the kernel is straight and loses a
+// little where it curves, and it curves most sharply immediately either side of
+// the observation height, so nearly all the loss comes from the two adjacent
+// layers. It is always a loss, the kernel being convex there, so a midpoint
+// sample sits below the layer's true mean.
+//
+// What is lost is a fixed fraction of the observation layer's own source
+// strength, independent of wind, canopy and how vigorously the air is stirred.
+// Two dependences cancel to leave that: the sampling error grows as the cube of
+// layer thickness while the kernel's curvature beside the singularity falls as
+// its square, leaving a single power of thickness, which is what a layer's
+// source strength already carries.
+//
+// The term makes the accuracy of the sum improve with the square of the layer
+// count rather than in proportion to it, so a coarsely resolved canopy is not
+// penalised for its resolution. It is halved where the sum runs one way only, as
+// it does at canopy top.
+constexpr double LN_PI = 1.1447298858494002;
+constexpr double NF_NEIGHBOUR = -KN_C1 * (LN_PI - 1.0);
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Below-canopy air temperature and humidity at each layer, from a
 // localised near-field/far-field Lagrangian dispersion solution (Raupach
@@ -2120,7 +2140,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         const size_t t = nn - 1;
         double halfthick = 0.5 * dz * inowTL[t];
         double toplayer = 0.5 * nearFieldLayerMean(halfthick)
-            + nearFieldKernel(2.0 * z[t] * inowTL[t]);
+            + nearFieldKernel(2.0 * z[t] * inowTL[t])
+            + 0.5 * NF_NEIGHBOUR;
         CnTh += ST[t] / ow[t] * toplayer;
         CnLh += SL[t] / ow[t] * toplayer;
     }
@@ -2191,7 +2212,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         {
             double halfthick = 0.5 * dz * inowTL[i];
             double ownlayer = nearFieldLayerMean(halfthick)
-                + nearFieldKernel(2.0 * z[i] * inowTL[i]);
+                + nearFieldKernel(2.0 * z[i] * inowTL[i])
+                + NF_NEIGHBOUR;
             CnT += ST_over_ow[i] * ownlayer;
             CnL += SL_over_ow[i] * ownlayer;
         }
