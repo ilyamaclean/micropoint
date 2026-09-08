@@ -727,6 +727,29 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
     }
     return ui;
 }
+// How vigorously the canopy air is stirred, expressed as the time a parcel of
+// air keeps its vertical motion as a fraction of the time the friction velocity
+// takes to cross the canopy.
+//
+// It is not free to take any value. At canopy top the eddy diffusivity of the
+// canopy air must equal that of the air immediately above, which Monin-Obukhov
+// similarity fixes, and that match determines it. The squared gust constant
+// cancels the value the gust profile reaches at canopy top, which is what makes
+// the match exact.
+//
+// The dimensionless temperature gradient divides rather than multiplies, because
+// it measures how steep a gradient a given heat flux must sustain -- a
+// resistance, not a conductance. Convection therefore strengthens canopy mixing
+// and stable stratification suppresses it. Stability is read at canopy top,
+// since what is described is exchange inside the canopy.
+//
+// Both the multilayer solve and the big-leaf spin-up need this, under their own
+// conditions: each brings its own stability correction, so the two are not
+// expected to agree at any given moment. Only the expression is shared.
+static double canopyMixing(double d, double hgt, double a1, double phi_h)
+{
+    return (ka * (1.0 - d / hgt)) / (a1 * a1 * phi_h);
+}
 // Friction velocity (uf) and Monin-Obukhov length (LL) above the canopy,
 // solved jointly since each depends on the other (uf sets LL via the
 // sensible heat flux H, LL's stability correction feeds back into uf).
@@ -804,19 +827,8 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    // Within-canopy mixing is not free to take any value: at canopy top the
-    // eddy diffusivity of the canopy air equals that of the air immediately
-    // above, which Monin-Obukhov similarity fixes. That match determines a2.
-    //
-    // The dimensionless temperature gradient sits in the denominator because
-    // it measures how steep a gradient a given heat flux must sustain -- a
-    // resistance, not a conductance. Convection therefore strengthens canopy
-    // mixing and stable stratification suppresses it. Stability is read at
-    // canopy top, since what is described is exchange inside the canopy. The
-    // squared gust constant cancels the value the gust profile reaches at
-    // canopy top, making the match exact.
     phi_h = dphihCpp2((hgt - d) / LL);
-    double a2 = (ka * (1.0 - d / hgt)) / (a1 * a1 * phi_h);
+    double a2 = canopyMixing(d, hgt, a1, phi_h);
     windmodel out;
     out.uz = uz;
     out.LL = LL;
@@ -2894,16 +2906,11 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
             double rHh = (std::log((vegp.hgt - d) / zh) + psihh) / (ka * uf);
             rhz = rHa - rHh;
         }
-        // Resistance from the ground to canopy top. Mixing within the canopy
-        // follows from matching its eddy diffusivity at canopy top to that
-        // of the air above. The dimensionless temperature gradient sits in
-        // the denominator: it expresses how steep a gradient a given flux
-        // must sustain, so it raises this resistance under stable
-        // stratification and lowers it under convection. Stability is read
-        // at canopy top, since what is described is exchange inside the
-        // canopy.
+        // Resistance from the ground to canopy top. The gust constant is given
+        // as a literal because this routine has no parameter for it and cannot
+        // be reached with any value but the default.
         double phih = dphihCpp2((vegp.hgt - d) / LL);
-        double a2 = (0.41 * (1 - d / vegp.hgt)) / (1.5625 * phih);
+        double a2 = canopyMixing(d, vegp.hgt, 1.25, phih);
         double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt);
         double rGz = rhg + rhz; // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
