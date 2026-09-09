@@ -18,6 +18,16 @@ constexpr double Mw = 0.018015; // kg/mol
 constexpr double RgasC = 8.314; // J/mol/K
 constexpr double g = 9.80665;
 constexpr double torad = 3.14159265358979323846 / 180.0;
+// Temperature offset used to measure how fast a surface energy balance
+// weakens as the surface warms; small enough to be a local slope, large
+// enough to stay clear of rounding in the balance itself.
+constexpr double EB_SLOPE_DT = 0.01;
+// Matric-potential offset used to measure how fast evaporation responds to
+// surface wetness. Taken as a fraction of the potential itself, which spans
+// orders of magnitude between saturation and the dry limit, with a floor for
+// the near-saturated end where the potential approaches zero.
+constexpr double PSI_SLOPE_FRAC = 1e-4;
+constexpr double PSI_SLOPE_MIN = 1.0;
 // Forward declaration: defined below (Bigleaf section), needed by several
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
 // SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
@@ -1744,32 +1754,36 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     std::vector<double> Vm = soilp.Vm;
     std::vector<double> Vo = soilp.Vo;
     std::vector<double> Mc = soilp.Mc;
-    double max_qsurface = 0.0;
     int nrIterations = 0;
     double maxdT = 1e99;
     double qsurface = 0.0;
-    double qsurf1;
-    double qsurf2;
-    // Aitken-damps the surface-temperature iterate feeding Tav/qsurface
-    // below -- this Tav<->qsurface<->tridiagonal-solve loop can diverge
-    // undamped when seeded from a too-hot oldTe_fixed[0].
+    // Aitken-damps the surface-temperature iterate that the surface energy
+    // balance below is evaluated at -- this balance<->tridiagonal-solve loop
+    // can diverge undamped when seeded from a too-hot oldTe_fixed[0].
     Aitken1DState st_Tsurf;
     double Tsurf_iter = state.Te[0];
     while (maxdT > tolerance && nrIterations < maxNrIterations) {
-        // Compute surface energy balance using midpoint temperature
-        // Compute qsurface dynamically if <=10 iterations otherwise hold at average of iter 8 & 9
-        if (nrIterations < 10) {
-            double Tav = 0.5 * (oldTe_fixed[0] + Tsurf_iter);
-            qsurface = soilsurfaceEB(soilp, Rabs, Tref, Tav, atmPressure, relhum, rHa, wc[0]);
-            // Limit qsurface to value obtained in first or second iteration
-            if (nrIterations < 2 && std::abs(qsurface) > std::abs(max_qsurface)) max_qsurface = std::abs(qsurface);
-            if (nrIterations > 1) {
-                if (std::abs(qsurface) > std::abs(max_qsurface)) qsurface = std::copysign(std::abs(max_qsurface), qsurface);
-            }
-            if (nrIterations == 8) qsurf1 = qsurface;
-            if (nrIterations == 9) qsurf2 = qsurface;
-        }
-        else if (nrIterations == 10) qsurface = (qsurf1 + qsurf2) / 2.0;
+        // The surface temperature and the energy balance driving it are solved
+        // together rather than in alternation: the balance is linearised about
+        // the current surface temperature and its slope carried into the
+        // surface layer's own equation below. Emitted longwave, sensible and
+        // latent heat all weaken as the surface warms, so the slope measures
+        // how strongly the atmosphere restores the surface towards the
+        // temperature at which the balance closes -- the stronger that pull,
+        // the less the surface may move in one step. Left out, nothing in the
+        // step limits the move, and where the ground is tightly coupled to the
+        // air the surface overshoots and reverses sign from hour to hour
+        // instead of settling. The slope terms cancel once the surface
+        // temperature stops changing, so they set how the solution is reached,
+        // not what it converges to.
+        qsurface = soilsurfaceEB(soilp, Rabs, Tref, Tsurf_iter, atmPressure, relhum, rHa, wc[0]);
+        double qprobe = soilsurfaceEB(soilp, Rabs, Tref, Tsurf_iter + EB_SLOPE_DT,
+            atmPressure, relhum, rHa, wc[0]);
+        double lamS = -(qprobe - qsurface) / EB_SLOPE_DT;
+        // Radiative cooling alone restores the surface this strongly, whatever
+        // the wind and wetness do, so it is the floor on the whole balance.
+        double lamRad = 4.0 * soilp.groundem * 5.67e-8 * std::pow(Tsurf_iter + 273.15, 3.0);
+        if (!(lamS > lamRad)) lamS = lamRad;
         for (int i = 0; i <= n; ++i) {
             double Vw_ice = 0.0;
             double dtheta_ice_dTc = 0.0;
@@ -1794,9 +1808,9 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         for (int i = 0; i < n; ++i) {
             if (i == 0) {
                 aa[i] = 0.0;
-                bb[i] = CT[i] / dT + ff[i];
+                bb[i] = CT[i] / dT + ff[i] + lamS;
                 cc[i] = -ff[i];
-                dd[i] = CT[i] / dT * oldTe_fixed[i] + qsurface;
+                dd[i] = CT[i] / dT * oldTe_fixed[i] + qsurface + lamS * Tsurf_iter;
             }
             else if (i < (n - 1)) {
                 aa[i] = -ff[i - 1] * Fact;
@@ -1897,6 +1911,26 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         Evapmmhr = evaporation_flux(soilp, theta[0], soilmod.Tc[0], climdata.Tair,
             climdata.relhum, climdata.rHa, dT);
         double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
+        // Evaporation is set by how tightly the surface holds its water, so it
+        // is not independent of the wetness being solved for here. Its
+        // sensitivity to surface water potential joins the sensitivities of the
+        // internal flows in the surface layer's equation below. A wetter
+        // surface evaporates faster, so this too is a restoring strength, and
+        // it limits how far the layer may dry in one step; left out, the layer
+        // can dry past the wetness its own evaporation rate is consistent with
+        // and correct back the other way afterwards. Like the internal terms it
+        // vanishes once the profile stops changing, so it sets the path to the
+        // solution rather than the solution.
+        double dEvap_dpsi = 0.0;
+        {
+            double hp = PSI_SLOPE_FRAC * std::abs(psiw[0]);
+            if (hp < PSI_SLOPE_MIN) hp = PSI_SLOPE_MIN;
+            double theta_probe = thetaFromPsi(soilp, psiw[0] + hp, 0);
+            double Evprobe = evaporation_flux(soilp, theta_probe, soilmod.Tc[0], climdata.Tair,
+                climdata.relhum, climdata.rHa, dT);
+            dEvap_dpsi = ((Evprobe - Evapmmhr) / hp) / dT;
+            if (!(dEvap_dpsi > 0.0)) dEvap_dpsi = 0.0;
+        }
         // Transpiration outside Newton update, but based on current state
         std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
             climdata.Et, dT, psiw, pTAW);
@@ -1952,7 +1986,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         massBalance = 0.0;
         aa[0] = 0.0;
         cc[0] = -k[1] / soilmod.dz[0];
-        bb[0] = k[0] / soilmod.dz[0] + Ca[0] + du[0];
+        bb[0] = k[0] / soilmod.dz[0] + Ca[0] + du[0] + dEvap_dpsi;
         dd[0] = surfaceFlux + STr[0] - ff[0]
             + soilmod.vol[0] * (rho * (theta[0] - oldtheta[0]) + (vapor[0] - oldvapor[0])) / dT;
         massBalance += std::abs(dd[0]);
