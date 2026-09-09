@@ -1175,28 +1175,36 @@ static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector
 // the within-canopy eddy diffusivity profile (K-theory).
 // Integrates turbulent resistance from the ground to a specified height inside the canopy.
 // It represents the within-canopy leg of sensible/latent transport; the above-canopy leg to zref is added separately.
-static double rhcanopy(double a2, double uf, double h, double z)
+static double rhcanopy(double a2, double uf, double h, double z, double a0, double a1)
 {
+    // Resistance is the integral of one over the eddy diffusivity, and the
+    // diffusivity follows from the gust profile: sigma_w rises from a0*uf at the
+    // ground to a1*uf at canopy top as a raised cosine, so in terms of its mean
+    // and half-range it is uf*(Aw - Bw*cos(pi*z/h)). The integral has a closed
+    // form in those two numbers, which is what is evaluated here -- the ground
+    // energy balance needs an analytic resistance, not a quadrature.
+    const double Aw = 0.5 * (a1 + a0);
+    const double Bw = 0.5 * (a1 - a0);
+    const double D = Aw * Aw - Bw * Bw;   // positive whenever the gust profile
+                                          // does not reach zero at the ground
     const double mu = 1.0 / (a2 * h * uf);
     double inth;
     if (z == h) {
-        inth = 4.293251 * h;
+        // At canopy top the oscillatory part integrates away and only the
+        // secular term survives.
+        inth = Aw * h / std::pow(D, 1.5);
     }
     else {
-        const double invh = 1.0 / h;
-        const double x = pi * z * invh;
+        const double x = pi * z / h;
         const double s = std::sin(x);
-        const double c = std::cos(x);
-        const double c1 = c + 1.0;
-        const double sqrt5 = 2.2360679774997896964;
-        const double five32 = 11.180339887498948482; // 5^(3/2)
-        const double t = (sqrt5 * s) / c1;
-        const double atan_term = std::atan(t);
-        const double s2 = s * s;
-        const double c1_2 = c1 * c1;
-        const double denom = c1 * ((25.0 * s2) / c1_2 + 5.0);
-        const double inner = (48.0 * atan_term) / five32 + (32.0 * s) / denom;
-        inth = (2.0 * h * inner) / pi;
+        const double c1 = std::cos(x) + 1.0;
+        const double r = std::sqrt((Aw + Bw) / (Aw - Bw));
+        const double sqrtD = std::sqrt(D);
+        // Half-angle form of the tangent, so the argument stays well behaved
+        // over the canopy rather than diverging at mid-height.
+        const double I1 = (2.0 / sqrtD) * std::atan(r * s / c1);
+        const double I2 = Bw * s / (D * (Aw - Bw * std::cos(x))) + (Aw / D) * I1;
+        inth = (h / pi) * I2;
     }
     double rHa = inth * mu;
     if (rHa < 0.001) rHa = 0.001;
@@ -2495,11 +2503,11 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
             for (size_t i = 0; i < na; ++i) dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
         }
         std::vector<double> tleaf = onestepin.tleaf;
-        double rhg = rhcanopy(wind.a2, wind.uf, vegpc.hgt, vegpc.hgt); // rHa from ground to top of canopy
+        double rhg = rhcanopy(wind.a2, wind.uf, vegpc.hgt, vegpc.hgt, a0, a1); // rHa from ground to top of canopy
         double rhz = rh_hzref(wind, vegpc.hgt, vegpc.pai, zref); // rHa from top of canopy to zref
         double rHa = rhg + rhz; // resistance from ground to zref
         for (size_t i = 0; i < na; ++i) {
-            rz_zref[i] = rhg - rhcanopy(wind.a2, wind.uf, vegpc.hgt, z[i]) + rhz;
+            rz_zref[i] = rhg - rhcanopy(wind.a2, wind.uf, vegpc.hgt, z[i], a0, a1) + rhz;
         }
         plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, dTs, 3600.0, C3); // updates onestepin in place
         aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, st_leaf);
@@ -2958,7 +2966,9 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         // be reached with any value but the default.
         double phih = dphihCpp2((vegp.hgt - d) / LL);
         double a2 = canopyMixing(d, vegp.hgt, 1.25, phih);
-        double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt);
+        // Literal gust constants: this routine takes no a0/a1 of its own, and the
+        // big-leaf spin-up it serves is only ever run at the model defaults.
+        double rhg = rhcanopy(a2, uf, vegp.hgt, vegp.hgt, 0.25, 1.25);
         double rGz = rhg + rhz; // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
         double RabsG = RabsG_sw + RabsG_lw;
