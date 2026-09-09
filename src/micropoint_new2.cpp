@@ -507,6 +507,22 @@ double zeroplanedisCpp2(double h, double pai)
     double d = (1.0 - (1.0 - exp(-std::sqrt(7.5 * pai))) / std::sqrt(7.5 * pai)) * h;
     return d;
 }
+// Drag partition between the foliage and the ground beneath it, after Raupach
+// (1994) Eq. 7 with his C_S = 0.003 and C_R = 0.2. Denser foliage takes a larger
+// share of the momentum and so generates a larger friction velocity for a given
+// wind at canopy top -- but only until the elements begin to shelter one another,
+// beyond which further foliage adds no drag and the ratio stops rising. Raupach
+// sets that ceiling from measurements over canopies dense enough for sheltering
+// to have set in.
+constexpr double DRAG_SUBSTRATE = 0.003;
+constexpr double DRAG_ELEMENT = 0.2;
+constexpr double UF_UH_MAX = 0.3;
+static double frictionVelocityRatio(double pai)
+{
+    double be = std::sqrt(DRAG_SUBSTRATE + DRAG_ELEMENT * pai / 2.0);
+    if (be > UF_UH_MAX) be = UF_UH_MAX;
+    return be;
+}
 // Roughness length of bare soil, and the lower bound on any vegetated surface,
 // since no canopy presents the wind a smoother surface than the ground it stands on.
 constexpr double Z0_GROUND = 0.004;
@@ -530,7 +546,7 @@ constexpr double LNTERM_MIN = 0.05;
 // [[Rcpp::export]]
 double roughlengthCpp2(double h, double pai, double d)
 {
-    double Be = std::sqrt(0.003 + (0.2 * pai) / 2.0);
+    double Be = frictionVelocityRatio(pai);
     double zm = (h - d) * std::exp(-ka / Be - PSI_RSL);
     // safety check to stop the roughness-sublayer correction reversing profile
     if (zm > (0.9 * (h - d))) zm = 0.9 * (h - d);
@@ -729,7 +745,7 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
 static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
     int n = static_cast<int>(vegp.paii.size());
     if (n < 10) Rcpp::stop("Wind profile requires at least 10 layers");
-    double Be = std::sqrt(0.003 + 0.1 * vegp.pai);
+    double Be = frictionVelocityRatio(vegp.pai);
     double a = vegp.pai / vegp.hgt;
     double Lc = std::pow(0.25 * a, -1.0);
     double Lm = 2.0 * std::pow(Be, 3.0) * Lc;
@@ -737,7 +753,7 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
     std::vector<double> ati(n);
     double sati = 0;
     for (int i = 0; i < n; ++i) {
-        double Bei = std::sqrt(0.003 + 0.1 * vegp.paii[i]);
+        double Bei = frictionVelocityRatio(vegp.paii[i]);
         double ai = vegp.paii[i] / vegp.hgt;
         double Lci = std::pow(0.25 * ai, -1.0);
         double Lmi = 2.0 * std::pow(Bei, 3.0) * Lci;
