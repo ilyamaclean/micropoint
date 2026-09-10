@@ -526,6 +526,12 @@ static double frictionVelocityRatio(double pai)
 // Roughness length of bare soil, and the lower bound on any vegetated surface,
 // since no canopy presents the wind a smoother surface than the ground it stands on.
 constexpr double Z0_GROUND = 0.004;
+// Convergence of the mixing depth against the wind profile that determines it.
+// Drag a leaf exerts on the air moving past it, per unit of leaf area.
+constexpr double LEAF_DRAG = 0.25;
+constexpr int WIND_MAX_ITER = 60;
+constexpr double WIND_TOL = 1e-10;
+constexpr double WIND_RELAX = 0.6;
 // Coherent eddies shed at the canopy top stir the air through a layer one to two
 // canopy heights deep. Within it the wind is stronger, and its gradient weaker,
 // than surface-layer theory allows for, so the surface grips the air above more
@@ -733,45 +739,79 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
     return L;
 }
 // ** Calculate scaled wind profile ** //
-// Calculate canopy wind profile
-// Within-canopy wind attenuation profile (relative to canopy-top speed):
-// an exponential decay shaped by each layer's own leaf-area density,
-// normalised so the whole-canopy decay matches an attenuation coefficient
-// fitted from total PAI (Be/Lc/Lm follow the mixing-length form used
-// throughout this section). The bottom 10% of layers switch to a neutral
-// log-law profile instead, since the exponential decay becomes
-// unrealistic (and can invert) very close to the ground.
-// Constructs the dimensionless vertical wind profile inside the canopy.
-// The profile is scaled later by canopy-top wind speed, allowing canopy geometry to determine attenuation while atmospheric forcing determines its magnitude.
+// How far into the canopy wind penetrates, as a fraction of the speed at canopy
+// top. Only the shape of the canopy sets it, so it is fixed for a given stand
+// and the weather scales it afterwards -- which is why it is worked out once
+// rather than every hour.
 static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
     int n = static_cast<int>(vegp.paii.size());
     if (n < 10) Rcpp::stop("Wind profile requires at least 10 layers");
-    double Be = frictionVelocityRatio(vegp.pai);
-    double a = vegp.pai / vegp.hgt;
-    double Lc = std::pow(0.25 * a, -1.0);
-    double Lm = 2.0 * std::pow(Be, 3.0) * Lc;
-    double at = Be * vegp.hgt / Lm;
-    std::vector<double> ati(n);
-    double sati = 0;
+    const double dz = vegp.hgt / n;
+    const double beta = frictionVelocityRatio(vegp.pai);
+
+    // Wind is bled out of the canopy by drag on the foliage it passes, and the
+    // depth over which that happens is set by the size of the eddies doing the
+    // mixing. Where foliage is dense the momentum is taken from the air quickly
+    // and the wind falls away sharply; through an open trunk space it survives
+    // almost unchanged. The cube root is what the balance between drag and
+    // mixing yields -- doubling the foliage in a layer does not double the
+    // slowing, because the wind reaching it has already been reduced.
+    std::vector<double> a(n), a13(n), cumA(n), ui(n);
     for (int i = 0; i < n; ++i) {
-        double Bei = frictionVelocityRatio(vegp.paii[i]);
-        double ai = vegp.paii[i] / vegp.hgt;
-        double Lci = std::pow(0.25 * ai, -1.0);
-        double Lmi = 2.0 * std::pow(Bei, 3.0) * Lci;
-        ati[i] = Bei * vegp.hgt / Lmi;
-        sati += ati[i];
+        a[i] = vegp.paii[i] / dz;
+        a13[i] = std::cbrt(a[i]);
     }
-    for (int i = 0; i < n; ++i) ati[i] = (ati[i] / sati) * at;
-    int n2 = std::trunc(n / 10);
-    std::vector<double> ui(n, 1.0);
-    for (int i = n - 1; i >= n2; --i) {
-        ui[i - 1] = ui[i] * (1.0 - ati[i - 1]);
+    double running = 0.0;
+    for (int i = n - 1; i >= 0; --i) {
+        running += a13[i] * dz;
+        cumA[i] = running;              // foliage encountered between here and canopy top
     }
-    double zm = vegp.hgt / (20.0 * n2);
-    for (int i = 0; i < n2; ++i) {
-        double z2 = (i + 1) * vegp.hgt / (10 * n2);
-        double uf = (ka * ui[n2 - 1]) / std::log(vegp.hgt / (10.0 * zm));
-        ui[i] = (uf / ka) * std::log(z2 / zm);
+
+    // The eddies are as deep as the foliage that generates them, so the mixing
+    // depth and the wind profile settle on each other: foliage carried high in
+    // the canopy shortens the mixing depth, which in turn concentrates the
+    // slowing higher up. The foliage density that sets it is the one the wind
+    // actually meets -- weighted towards where momentum is being removed, not a
+    // plain average over a depth much of which the wind may never reach. For a
+    // canopy of uniform foliage that weighting returns the plain average, and
+    // the profile is then the single exponential of Harman and Finnigan (2007).
+    double aeff = vegp.pai / vegp.hgt;
+    double lmix = 2.0 * beta * beta * beta / (LEAF_DRAG * aeff);
+    for (int iter = 0; iter < WIND_MAX_ITER; ++iter) {
+        const double kA = std::cbrt(LEAF_DRAG / (2.0 * lmix * lmix));
+        double num = 0.0, den = 0.0;
+        for (int i = 0; i < n; ++i) {
+            ui[i] = std::exp(-kA * (cumA[i] - 0.5 * a13[i] * dz));
+            double w = a[i] * ui[i] * ui[i];
+            num += a[i] * w;
+            den += w;
+        }
+        double anew = (den > 0.0) ? (num / den) : aeff;
+        double lnew = 2.0 * beta * beta * beta / (LEAF_DRAG * anew);
+        if (std::abs(lnew - lmix) < WIND_TOL * lmix) { lmix = lnew; break; }
+        lmix += WIND_RELAX * (lnew - lmix);
+    }
+
+    // Foliage drag alone would leave the air still moving where it meets the
+    // soil. Nearest the ground it is the soil surface rather than the foliage
+    // that brings the wind to rest, and the shear this leaves is what ventilates
+    // the litter and the soil below it. How deep that reaches is a judgement
+    // rather than a result, taken here as a tenth of the canopy; the wind is
+    // carried across the join unbroken, so the choice shifts where the two
+    // descriptions meet without putting a step in the profile.
+    // Vegetation short enough that its lowest layers sit among the soil's own
+    // roughness elements has no such near-ground layer to resolve: there the
+    // ground is not a surface the wind runs over but part of the roughness
+    // itself, and the foliage description holds all the way down.
+    int nground = n / 10;
+    const double zLowest = 0.5 * dz;
+    if (nground >= 1 && zLowest > Z0_GROUND) {
+        const double zAnchor = (nground + 0.5) * dz;
+        const double lnAnchor = std::log(zAnchor / Z0_GROUND);
+        const double uAnchor = ui[nground];
+        for (int i = 0; i < nground; ++i) {
+            ui[i] = uAnchor * std::log((i + 0.5) * dz / Z0_GROUND) / lnAnchor;
+        }
     }
     return ui;
 }
