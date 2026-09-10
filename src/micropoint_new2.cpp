@@ -529,23 +529,21 @@ constexpr double Z0_GROUND = 0.004;
 // Coherent eddies shed at the canopy top stir the air through a layer one to two
 // canopy heights deep. Within it the wind is stronger, and its gradient weaker,
 // than surface-layer theory allows for, so the surface grips the air above more
-// firmly than its geometry alone suggests. Raupach (1992) Eq. 31 as corrected
-// sets the size of that departure at the canopy top as ln(c_w) - 1 + 1/c_w,
-// where c_w is the sublayer depth in units of the canopy's aerodynamic depth,
-// taken as 2.
+// firmly than its geometry alone suggests. Raupach (1992) sets the size of that
+// departure at the canopy top as ln(c_w) - 1 + 1/c_w, where c_w is the depth of
+// the sublayer in units of the canopy's own aerodynamic depth, taken as 2.
 constexpr double PSI_RSL = 0.193;
 // Vegetation no taller than the soil beneath it is rough presents no canopy
 // profile for the sublayer description to apply to. This bounds the canopy-top
 // wind away from zero over such a surface.
 constexpr double LNTERM_MIN = 0.05;
 // ** Calculate roughness length ** //
-// Follows Raupach (1994) Eq. 4: z0/h = (1-d/h)*exp(-ka*Uh/u* - PsiH), using
-// Be (the capped drag partition above) as a stand-in for u*/Uh and the fixed
-// roughness-sublayer influence PSI_RSL above
-// -- a canopy-geometry constant, not a function
-// of atmospheric stability, so no diabatic correction is passed in here.
-// Estimates aerodynamic roughness length from canopy geometry using the Raupach formulation.
-// The result sets the momentum-profile origin above the canopy and is bounded only to prevent degenerate profiles.
+// The height at which a logarithmic wind profile extrapolated down from well
+// above the canopy reaches zero, and so the measure of how firmly the surface
+// grips the air passing over it. Raupach (1992) Eq. 27 builds it from the drag
+// partition and the roughness-sublayer influence. Both are properties of canopy
+// geometry alone and neither varies with atmospheric stability, so no diabatic
+// correction is passed in here.
 // [[Rcpp::export]]
 double roughlengthCpp2(double h, double pai, double d)
 {
