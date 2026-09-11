@@ -247,6 +247,8 @@ namespace newmodel {
         std::vector<double> Hz; // Sensible heat flux exchange with surrounding air
         std::vector<double> Lz;  // Sensible heat flux exchange with surrounding air
         std::vector<double> gs;  // Stomatal conductance
+        std::vector<double> dSTdT; // response of each layer's sensible heat source to its own air temperature (W m-2 K-1)
+        std::vector<double> dSLde; // response of each layer's latent heat source to its own air vapour pressure (W m-2 kPa-1)
         double precipground; // Precipitation eaching the ground
         soilmod soilheatvars; // soil heat model input / output
         soilwatermod soilwatervars; // soil water model input / output;

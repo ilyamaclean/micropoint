@@ -1500,6 +1500,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     std::vector<double> Hz(n);
     std::vector<double> Lz(n);
     std::vector<double> rLB(n);
+    std::vector<double> dSTdT(n), dSLde(n);
     for (int i = 0; i < n; ++i) {
         rLB[i] = leafrHa(onestepin.tair[i], dTs[i], onestepin.uz[i], vegp.len, vegp.wid, vegp.x);
         envdata.tair = onestepin.tair[i];
@@ -1521,37 +1522,52 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
         const double gwet = fw / rLB[i];
         const double tomm = (Mw / (RgasC * Tk)) * timestep;
-        auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et) {
+        // Each surface also reports how far its temperature follows its air
+        // (at fixed air vapour pressure) and the vapour conductance it used:
+        // together they give how strongly the layer's heat and vapour sources
+        // push back against a change in its own air, which the dispersion solve
+        // uses to find air and sources together (LangrangianOne).
+        const double eair = satvap_tair * onestepin.rh[i] / 100.0;
+        const double dTa = 0.1;
+        const double rh_warm = 100.0 * eair / satvapCpp2(onestepin.tair[i] + dTa);
+        auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et,
+            double& follow, double& gused) {
             const double g = gt + gwet;
-            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i],
-                (g > 0.0) ? 1.0 / g : 1e9, 0.0, 4);
+            double rV = (g > 0.0) ? 1.0 / g : 1e9;
+            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
             // vapour pressure deficit of the surface against the air (Pa)
-            double DD = (satvapCpp2(ts) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
+            double DD = (satvapCpp2(ts) - eair) * 1000.0;
             if (DD >= 0.0) {
                 Ew = tomm * DD * gwet;
                 Et = tomm * DD * gt;
-                return;
+                gused = g;
             }
-            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rLB[i], 0.0, 4);
-            DD = (satvapCpp2(ts) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
-            Ew = tomm * std::min(DD, 0.0) / rLB[i];
-            Et = 0.0;
+            else {
+                rV = rLB[i];
+                ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
+                DD = (satvapCpp2(ts) - eair) * 1000.0;
+                Ew = tomm * std::min(DD, 0.0) / rLB[i];
+                Et = 0.0;
+                gused = 1.0 / rLB[i];
+            }
+            const double tsw = PenmanMonteithCpp2(Rabs, onestepin.tair[i] + dTa, envdata.pk, rh_warm, vegp.vegem, rLB[i], rV, 0.0, 4);
+            follow = (tsw - ts) / dTa;
         };
         // Woody vegetation
-        double twood, Ewwood, Etwood;
-        surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood);
+        double twood, Ewwood, Etwood, fwood, gwood;
+        surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
         // Sunlit leaves
         envdata.PARabs = swout.RPARsun[i];
         const double gssun = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
         const double gtsun = (gssun > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gssun) : 0.0;
-        double tsun, Ewsun, Etsun;
-        surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun);
+        double tsun, Ewsun, Etsun, fsun, gsun;
+        surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
         // Shaded leaves
         envdata.PARabs = swout.RPARshade[i];
         const double gsshade = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
         const double gtshade = (gsshade > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gsshade) : 0.0;
-        double tshade, Ewshade, Etshade;
-        surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade);
+        double tshade, Ewshade, Etshade, fshade, gshade;
+        surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
         // Layer averages. Each quantity is weighted once by the live share of
         // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
         const double sf = swout.sunfrac[i];
@@ -1562,6 +1578,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         Ezt[i] = vegp.Lfrac[i] * vegp.paii[i] * (sf * Etsun + (1.0 - sf) * Etshade); // per unit ground area
         const double cp = cpairCpp(onestepin.tair[i]);
         Hz[i] = ((ph * cp) / rLB[i]) * (tleafn[i] - onestepin.tair[i]);
+        // Response of the layer's sources to its own air, per unit ground area
+        const double follow = vegp.Lfrac[i] * (sf * fsun + (1.0 - sf) * fshade) + (1.0 - vegp.Lfrac[i]) * fwood;
+        const double gV = vegp.Lfrac[i] * (sf * gsun + (1.0 - sf) * gshade) + (1.0 - vegp.Lfrac[i]) * gwood;
+        const double la_leaf = (tleafn[i] >= 0.0) ? (45068.7 - 42.8428 * tleafn[i])
+            : (51078.69 - 4.338 * tleafn[i] - 0.06367 * tleafn[i] * tleafn[i]);
+        dSTdT[i] = vegp.paii[i] * ((ph * cp) / rLB[i]) * (follow - 1.0);
+        dSLde[i] = -vegp.paii[i] * la_leaf * gV * 1000.0 / (RgasC * Tk);
     }
     // Rain interception, top layer down: each layer's surface water depth
     // from throughfall (attenuated by rainvars.tr) plus drip carried over
@@ -1597,6 +1620,8 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     onestepin.Et = Et;
     onestepin.Hz = std::move(Hz);
     onestepin.Lz = std::move(Lz);
+    onestepin.dSTdT = std::move(dSTdT);
+    onestepin.dSLde = std::move(dSLde);
     onestepin.rLB = std::move(rLB);
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -2356,6 +2381,32 @@ static inline double nearFieldLayerMean(double halfthick)
 // it does at canopy top.
 constexpr double LN_PI = 1.1447298858494002;
 constexpr double NF_NEIGHBOUR = -KN_C1 * (LN_PI - 1.0);
+// Solves the dense linear system A x = b (A row-major, n by n) by Gaussian
+// elimination with partial pivoting.
+static std::vector<double> solveDense(std::vector<double> A, std::vector<double> b, size_t n)
+{
+    for (size_t k = 0; k < n; ++k) {
+        size_t p = k;
+        for (size_t r = k + 1; r < n; ++r) if (std::abs(A[r * n + k]) > std::abs(A[p * n + k])) p = r;
+        if (p != k) {
+            for (size_t c = 0; c < n; ++c) std::swap(A[k * n + c], A[p * n + c]);
+            std::swap(b[k], b[p]);
+        }
+        for (size_t r = k + 1; r < n; ++r) {
+            const double f = A[r * n + k] / A[k * n + k];
+            if (f == 0.0) continue;
+            for (size_t c = k; c < n; ++c) A[r * n + c] -= f * A[k * n + c];
+            b[r] -= f * b[k];
+        }
+    }
+    std::vector<double> x(n);
+    for (size_t k = n; k-- > 0;) {
+        double sum = b[k];
+        for (size_t c = k + 1; c < n; ++c) sum -= A[k * n + c] * x[c];
+        x[k] = sum / A[k * n + k];
+    }
+    return x;
+}
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Below-canopy air temperature and humidity at each layer, from a
 // localised near-field/far-field Lagrangian dispersion solution (Raupach
@@ -2371,7 +2422,7 @@ constexpr double NF_NEIGHBOUR = -KN_C1 * (LN_PI - 1.0);
 static void LangrangianOne(onestep& onestepin, double pk, double tground, double soilrelhum,
     double th, double eh, const vegpstruct& vegp,
     const std::vector<double>& z, const windmodel& windvars,
-    double a0, double a1)
+    double a0, double a1, double rTop)
 {
     auto& tair = onestepin.tair;
     const auto& tleaf = onestepin.tleaf;
@@ -2433,7 +2484,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // layer's foliage, and latent heat already per unit ground area, as the
     // layer's transpiration and evaporation of intercepted water. Rz is the
     // resistance from the soil to each node.
-    std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn), ST_over_ow(nn), SL_over_ow(nn), Rz(nn);
+    std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn), Rz(nn);
     const double mu1 = (a1 + a0) * 0.5 * uf_mix;
     const double mu2 = (a1 - a0) * 0.5 * uf_mix;
     for (size_t i = 0; i < nn; ++i) {
@@ -2442,23 +2493,19 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         Rz[i] = soilToZ(col, z[i]);
         ST[i] = vegp.paii[i] * onestepin.Hz[i];
         SL[i] = onestepin.Lz[i];
-        ST_over_ow[i] = ST[i] / ow[i];
-        SL_over_ow[i] = SL[i] / ow[i];
     }
-    // Near-field concentration at canopy top, used as the upper boundary
-    // condition below (subtracted back out of each layer's own near-field
-    // term, since that term already includes the canopy-top contribution).
-    double CnTh = 0.0;
-    double CnLh = 0.0;
-    for (size_t i = 0; i < (nn - 1); ++i) {
+    // Near-field weight of each layer's source at canopy top, used as the
+    // upper boundary condition below (subtracted back out of each layer's own
+    // near-field term, since that term already includes the canopy-top
+    // contribution).
+    std::vector<double> cTop(nn);
+    for (size_t j = 0; j < (nn - 1); ++j) {
         // Each source reaches the observation height by two paths: directly,
         // and reflected at the ground, which imposes the no-flux condition
         // there. Each path is attenuated by the kernel over its own distance.
-        double zeta1 = (vegp.hgt - z[i]) * inowTL[i];
-        double zeta2 = (vegp.hgt + z[i]) * inowTL[i];
-        double common = nearFieldKernel(zeta1) + nearFieldKernel(zeta2);
-        CnTh += ST[i] / ow[i] * common;
-        CnLh += SL[i] / ow[i] * common;
+        double zeta1 = (vegp.hgt - z[j]) * inowTL[j];
+        double zeta2 = (vegp.hgt + z[j]) * inowTL[j];
+        cTop[j] = (nearFieldKernel(zeta1) + nearFieldKernel(zeta2)) / ow[j];
     }
     // The topmost layer is the one holding the observation height, so the sum
     // above cannot sample it and its heat is added here instead, as the layer's
@@ -2468,11 +2515,9 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     {
         const size_t t = nn - 1;
         double halfthick = 0.5 * dz * inowTL[t];
-        double toplayer = 0.5 * nearFieldLayerMean(halfthick)
+        cTop[t] = (0.5 * nearFieldLayerMean(halfthick)
             + nearFieldKernel(2.0 * z[t] * inowTL[t])
-            + 0.5 * NF_NEIGHBOUR;
-        CnTh += ST[t] / ow[t] * toplayer;
-        CnLh += SL[t] / ow[t] * toplayer;
+            + 0.5 * NF_NEIGHBOUR) / ow[t];
     }
     // Far-field concentration at canopy top: the above-canopy air
     // temperature/vapour pressure expressed in the same flux-like units
@@ -2482,72 +2527,83 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     const double phh = phairCpp(th, pk);
     const double CfTh = phh * cpairCpp(th) * th;
     const double CfLh = eh * phh * lah / pk;
-    // For each layer: combine far-field (diffusive, integrated over all
-    // other layers' + ground's source strength) and near-field
-    // (non-diffusive, from the localised kernel) contributions to get the
-    // layer's total scalar concentration, then convert back to air
-    // temperature and vapour pressure/RH.
+    // Response of the scalar at each node to each layer's source, W[i][j]:
+    // Raupach's near-field/far-field superposition about the canopy-top value.
+    //
+    // Far field: the heat carried up through a node, from the foliage below it,
+    // adds its strength times the resistance from the node to canopy top.
+    //
+    // Near field: the localised kernel's response to every other layer's source.
+    // The layer holding the observation height is excluded from the midpoint
+    // sampling, since a source at zero separation carries infinite kernel
+    // weight; its heat is real and finite, and enters as the layer's exact mean
+    // weight, together with its reflection off the ground.
+    std::vector<double> W(nn * nn);
     for (size_t i = 0; i < nn; ++i) {
-        // Heat and vapour from the ground reach this layer across the resistance
-        // below it, Rz, and the flux through the layer then crosses the
-        // resistance above it, Rup, to canopy top. Air temperature and vapour
-        // pressure enter the ground's exchange linearly, so they are solved for
-        // directly below rather than substituted from the last pass -- a
-        // substitution that diverges for layers close to the ground, where the
-        // resistance below is small against the resistance above. A layer inside
-        // the soil's own roughness then takes the soil's temperature and vapour
-        // pressure, as it should.
         const double Rup = col.Rh - Rz[i];
-        double ph = phairCpp(tair[i], pk);
-        double cp = cpairCpp(tair[i]);
-        double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
-            : (45068.7 - 42.8428 * tground);
-        // Sensible and latent source strength of every foliage layer up to and
-        // including this one.
-        double Hs = 0.0;
-        double Ls = 0.0;
-        for (size_t j = 0; j <= i; ++j) {
-            Hs += ST[j];
-            Ls += SL[j];
+        for (size_t j = 0; j < nn; ++j) {
+            double nf;
+            if (i != j) {
+                double zeta1 = (z[i] - z[j]) * inowTL[j];
+                double zeta2 = (z[i] + z[j]) * inowTL[j];
+                nf = (nearFieldKernel(zeta1) + nearFieldKernel(zeta2)) / ow[j];
+            }
+            else {
+                double halfthick = 0.5 * dz * inowTL[i];
+                nf = (nearFieldLayerMean(halfthick) + nearFieldKernel(2.0 * z[i] * inowTL[i])
+                    + NF_NEIGHBOUR) / ow[i];
+            }
+            const double ff = (j <= i) ? Rup : 0.0;
+            W[i * nn + j] = nf - cTop[j] + ff;
         }
-        // Near-field (non-diffusive) contribution: the localised kernel's
-        // response to every other layer's own source strength.
-        double CnT = 0.0;
-        double CnL = 0.0;
-        for (size_t j = 0; j < nn; ++j) if (i != j) {
-            double zeta1 = (z[i] - z[j]) * inowTL[j];
-            double zeta2 = (z[i] + z[j]) * inowTL[j];
-            double common = nearFieldKernel(zeta1) + nearFieldKernel(zeta2);
-            CnT += ST_over_ow[j] * common;
-            CnL += SL_over_ow[j] * common;
-        }
-        // The layer holding this observation height is absent from the loop
-        // above, since a source at zero separation carries infinite kernel
-        // weight. Its heat is real and finite, and is added back here as the
-        // layer's exact mean weight rather than the midpoint sample used for
-        // every other layer, together with its reflection off the ground.
-        {
-            double halfthick = 0.5 * dz * inowTL[i];
-            double ownlayer = nearFieldLayerMean(halfthick)
-                + nearFieldKernel(2.0 * z[i] * inowTL[i])
-                + NF_NEIGHBOUR;
-            CnT += ST_over_ow[i] * ownlayer;
-            CnL += SL_over_ow[i] * ownlayer;
-        }
-        // Raupach's near-field/far-field superposition: canopy-top boundary
-        // value, replacing its own near-field term with this layer's, plus the
-        // far-field carried by the foliage below and by the ground, whose share
-        // depends on this layer's own air (see above).
-        double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
+    }
+    // Air temperature and vapour pressure at every node, found together with
+    // the foliage sources that depend on them. The ground exchanges with each
+    // node across the resistance below it, Rz, and what it delivers then
+    // crosses the resistance above, Rup; each layer's sources change with its
+    // own air as the leaf model reports. Everything enters linearly, so all
+    // nodes are solved at once. Substituting sources from the last pass instead
+    // overshoots wherever a layer's sources respond to its air more strongly
+    // than its air to its sources, as in dense, very short canopies. The
+    // responses cancel at the converged state: they set the path to the
+    // solution, not the solution. A node inside the soil's own roughness takes
+    // the soil's temperature and vapour pressure, as it should.
+    //
+    // Canopy-top air responds to the sources too: it lies between the
+    // reference air and the ground, reached across rTop, their resistances in
+    // parallel, so a change in any layer's source moves it by that change times
+    // rTop, and every node with it. Where the reference height is at canopy top
+    // its air is fixed and rTop is zero.
+    const double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
+        : (45068.7 - 42.8428 * tground);
+    std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
+    for (size_t i = 0; i < nn; ++i) {
+        const double Rup = col.Rh - Rz[i];
+        const double ph = phairCpp(tair[i], pk);
+        const double cp = cpairCpp(tair[i]);
+        const double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
             : (45068.7 - 42.8428 * tleaf[i]);
-        const double CT0 = CfTh - CnTh + CnT + Hs * Rup;
-        const double CL0 = CfLh - CnLh + CnL + Ls * Rup;
-        tair[i] = (Rz[i] * CT0 / (ph * cp) + Rup * tground) / col.Rh;
-        double ean = (pk * Rz[i] * CL0 + la * ph * Rup * esg) / (ph * (la_i * Rz[i] + la * Rup));
-        if (tair[i] > tmx) tair[i] = tmx;
-        if (tair[i] < tmn) tair[i] = tmn;
-        if (ean > emx) ean = emx;
-        if (ean < emn) ean = emn;
+        double sT = CfTh, sL = CfLh;
+        for (size_t j = 0; j < nn; ++j) {
+            const double w = W[i * nn + j];
+            const double t0 = tair[j];
+            const double e0 = satvapCpp2(tair[j]) * rh[j] / 100.0;
+            const double wr = w + rTop;
+            sT += w * ST[j] - wr * onestepin.dSTdT[j] * t0;
+            sL += w * SL[j] - wr * onestepin.dSLde[j] * e0;
+            AT[i * nn + j] = -Rz[i] * wr * onestepin.dSTdT[j];
+            AL[i * nn + j] = -pk * Rz[i] * wr * onestepin.dSLde[j];
+        }
+        AT[i * nn + i] += ph * cp * col.Rh;
+        AL[i * nn + i] += ph * (la_i * Rz[i] + la * Rup);
+        bT[i] = Rz[i] * sT + ph * cp * Rup * tground;
+        bL[i] = pk * Rz[i] * sL + la * ph * Rup * esg;
+    }
+    const std::vector<double> tnew = solveDense(AT, bT, nn);
+    const std::vector<double> enew = solveDense(AL, bL, nn);
+    for (size_t i = 0; i < nn; ++i) {
+        tair[i] = std::min(std::max(tnew[i], tmn), tmx);
+        const double ean = std::min(std::max(enew[i], emn), emx);
         rh[i] = (ean / satvapCpp2(tair[i])) * 100.0;
         if (rh[i] > 100.0) rh[i] = 100.0;
         if (rh[i] < 20.0)  rh[i] = 20.0;
@@ -2563,7 +2619,7 @@ static inline void aitkin_weightdif(
     WAitkenState& st,
     double omega_min = 0.02,
     double omega_max = 0.90,
-    double w_bot = 0.05,   // share of each step taken at the ground,
+    double w_bot = 0.50,   // share of each step taken at the ground,
     double w_top = 0.80    // rising to this at canopy top
 )
 {
@@ -2814,7 +2870,8 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         }
         std::vector<double> tair = onestepin.tair;
         std::vector<double> rh = onestepin.rh;
-        LangrangianOne(onestepin, climdata.pk, tground, soilrh, Th, eh, vegpc, z, wind, a0v, a1); // updates onestepin.tair/rh in place
+        LangrangianOne(onestepin, climdata.pk, tground, soilrh, Th, eh, vegpc, z, wind, a0v, a1,
+            (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0); // updates onestepin.tair/rh in place
         aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
         aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
         tdif = 0.0; // max air-temperature change this pass, drives the convergence check above
@@ -3982,6 +4039,8 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.Hz = v0;
     onestepin.Lz = v0;
     onestepin.gs = v0;
+    onestepin.dSTdT = v0;
+    onestepin.dSLde = v0;
     onestepin.precipground = 0.0;
     onestepin.H = 0.0;
     onestepin.L = 0.0;
