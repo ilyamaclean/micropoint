@@ -2774,7 +2774,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
             zmd = zm;
         }
         zh = 0.2 * zmd;
-        double uf = (ka * climdata.uref) / (std::log(zref / zmd) + psi_m);
+        uf = (ka * climdata.uref) / (std::log(zref / zmd) + psi_m);
         rHa = (std::log(zref / zh) + psi_h) / (ka * uf);
         soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 0.5, maxIter);
         climforwaterstruct cfw = {};
