@@ -482,7 +482,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     }
     mout <- profileR(hr - 1, obstime, climdata2, soilc, vegp, paii20, paii,
                      Lfrac20, Lfrac, zref2, CO2ppm, lat, long, SoilTempIni, ThetaIni,
-                     maxiter, tolerance, 0.25, 1.25, C3)
+                     maxiter, tolerance, -1, 1.25, C3)
   }
   if (class(vegp) != "logical") {
     na <- round((2 / vegp$h) * length(paii), 0)
@@ -674,7 +674,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
-                      ThetaIni, maxiter, tolerance, 0.25, 1.25, C3)
+                      ThetaIni, maxiter, tolerance, -1, 1.25, C3)
   }
   # Rename variables if below ground
   if (reqhgt <= 0) {
@@ -796,7 +796,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, maxiter, tolerance,
-                         0.25, 1.25, C3)
+                         -1, 1.25, C3)
 
   }
   return(mout)

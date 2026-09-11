@@ -53,7 +53,7 @@ profilebareR <- function(hourtoplot, obstime, climdata, soilc, z, zref, lat, lon
     .Call(`_micropoint_profilebareR`, hourtoplot, obstime, climdata, soilc, z, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance)
 }
 
-profileR <- function(hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = 0.25, a1 = 1.25, C3 = TRUE) {
+profileR <- function(hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_profileR`, hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
@@ -61,7 +61,7 @@ RunBareR <- function(reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempI
     .Call(`_micropoint_RunBareR`, reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance)
 }
 
-RunModelR <- function(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = 0.25, a1 = 1.25, C3 = TRUE) {
+RunModelR <- function(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_RunModelR`, reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
@@ -73,7 +73,7 @@ RunBelowFullBare <- function(obstime, climdata, soilc, z, zref, zm, lat, lon, So
     .Call(`_micropoint_RunBelowFullBare`, obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance)
 }
 
-RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-2, a0 = 0.25, a1 = 1.25, C3 = TRUE) {
+RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-2, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_RunBelowFull`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
