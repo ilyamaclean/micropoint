@@ -867,7 +867,8 @@ static double floorGustRatio(const vegpstruct& vegp, double a1)
     const size_t n = vegp.paii.size();
     double zeta = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        // n*paii is the local foliage density times canopy height
+        // Sheltering grows with how closely the layer's foliage is packed: its plant
+        // area per unit height, expressed relative to the canopy's height.
         zeta += LEAF_DRAG * vegp.paii[i] / (1.0 + SHELTER * static_cast<double>(n) * vegp.paii[i]);
     }
     return a1 * std::exp(-GUST_DECAY * zeta);
@@ -2995,7 +2996,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         return Ueff;
     };
     double uf = (ka * driveWind(H)) / (std::log(zref / zm) + psi_m);
-    // Monin-Obukhov length; recomputed each pass below from that pass's friction velocity.
+    // Monin-Obukhov length, from the friction velocity of the same pass.
     double LL = (H != 0.0) ? (cpph * std::pow(uf, 3.0) * Tk) / (-ka * g * H) : 1e99;
     double dif = 1e99;
     int nrIterations = 0;
