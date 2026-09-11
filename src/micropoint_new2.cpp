@@ -1221,26 +1221,15 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
     }
     return gs;
 }
-// Compute leaf vapour resistance
-// Combines leaf boundary-layer and stomatal resistances into an effective vapour-transfer resistance.
-// Wet intercepted water bypasses stomatal control, whereas a dry leaf exchanges vapour through stomata in series with its boundary layer.
-static double leafrV(double rHa, double gs, double Lfrac, double ph,
-    double surfwater = 0.0, double precip = 0.0)
+// Share of a plant surface covered by intercepted water: all of it while rain
+// falls, and afterwards a share that shrinks as the film held on it (mm)
+// evaporates. Where it is wet, vapour leaves across the boundary layer alone;
+// where it is dry, a leaf transpires through its stomata as well. The two parts
+// of the surface exchange vapour side by side, so their conductances add.
+static double wetFraction(double surfwater, double precip)
 {
-    // compute leaf stomatal resistance
-    double rs = 1e9;
-    if (gs > 0.0) {
-        rs = ph / gs;
-    }
-    double rVwet = rHa;
-    double rVdry = 1e9;
-    if (Lfrac > 0.0) rVdry = (rHa + rs) / Lfrac;
-    double drywgt = std::exp(-surfwater * 30.0);
-    double rV = rVwet;
-    if (precip == 0.0) {
-        rV = drywgt * rVdry + (1.0 - drywgt) * rVwet;
-    }
-    return rV;
+    if (precip > 0.0) return 1.0;
+    return 1.0 - std::exp(-surfwater * 30.0);
 }
 // Solves surface temperature from a Penman-Monteith-style energy balance.
 // Given absorbed radiation and heat/vapour resistances, it iterates radiative and latent-heat terms to obtain the temperature at which the surface energy budget closes.
@@ -1520,69 +1509,87 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double Tk = onestepin.tair[i] + 273.15;
         // Reused below across the woody/sunlit/shaded branches (same argument each time).
         const double satvap_tair = satvapCpp2(onestepin.tair[i]);
+        // Vapour exchange per unit plant surface. Intercepted water evaporates
+        // from the wet share of every surface across its boundary layer; the dry
+        // share of a leaf transpires through its stomata and boundary layer in
+        // series. Wood does not transpire. A surface colder than the dew point
+        // of the air instead gains water, condensing across its boundary layer
+        // over its whole area whatever its stomata do. Vapour conductances (m/s)
+        // convert to water exchanged over the step (mm) through the vapour
+        // density difference; the surface's temperature comes from its energy
+        // balance with the conductance that applies.
+        const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
+        const double gwet = fw / rLB[i];
+        const double tomm = (Mw / (RgasC * Tk)) * timestep;
+        auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et) {
+            const double g = gt + gwet;
+            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i],
+                (g > 0.0) ? 1.0 / g : 1e9, 0.0, 4);
+            // vapour pressure deficit of the surface against the air (Pa)
+            double DD = (satvapCpp2(ts) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
+            if (DD >= 0.0) {
+                Ew = tomm * DD * gwet;
+                Et = tomm * DD * gt;
+                return;
+            }
+            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rLB[i], 0.0, 4);
+            DD = (satvapCpp2(ts) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
+            Ew = tomm * std::min(DD, 0.0) / rLB[i];
+            Et = 0.0;
+        };
         // Woody vegetation
-        double rV = 9999.99;
-        if (onestepin.swaterdepth[i] > 0.0) rV = rLB[i];
-        double Rabs = swout.RswLav[i] + lwout.RlwLabs[i];
-        const double twood = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        // Vapour pressure deficit: es(Twood) - es(Tair)*RH/100, matching
-        // the sunlit/shaded DD formula below (RH applies only to the Tair term).
-        double DD = (satvapCpp2(twood) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
-        const double Evwood = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
+        double twood, Ewwood, Etwood;
+        surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood);
         // Sunlit leaves
         envdata.PARabs = swout.RPARsun[i];
         const double gssun = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
-        rV = leafrV(rLB[i], gssun, vegp.Lfrac[i], ph, onestepin.swaterdepth[i], envdata.precip);
-        Rabs = swout.RswLsun[i] + lwout.RlwLabs[i];
-        const double tsun = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        DD = (satvapCpp2(tsun) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
-        double rVt = rLB[i] + ph / gssun;
-        const double Evsun = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
-        const double Etsun = (Mw / (RgasC * Tk)) * (DD / rVt) * timestep; // transpiration
+        const double gtsun = (gssun > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gssun) : 0.0;
+        double tsun, Ewsun, Etsun;
+        surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun);
         // Shaded leaves
         envdata.PARabs = swout.RPARshade[i];
         const double gsshade = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
-        rV = leafrV(rLB[i], gsshade, vegp.Lfrac[i], ph, onestepin.swaterdepth[i], envdata.precip);
-        Rabs = swout.RswLshade[i] + lwout.RlwLabs[i];
-        const double tshade = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], vegp.vegem, rLB[i], rV, 0.0, 4);
-        DD = (satvapCpp2(tshade) - satvap_tair * (onestepin.rh[i] / 100.0)) * 1000.0;
-        rVt = rLB[i] + ph / gsshade;
-        const double Evshade = (Mw / (RgasC * Tk)) * (DD / rV) * timestep; // surface water evaporation
-        const double Etshade = (Mw / (RgasC * Tk)) * (DD / rVt) * timestep; // transpiration
-        // Perform averaging
-        onestepin.gs[i] = swout.sunfrac[i] * gssun + (1.0 - swout.sunfrac[i]) * gsshade; // average stomatal conductance
-        const double Evleaf = swout.sunfrac[i] * Evsun + (1.0 - swout.sunfrac[i]) * Evshade; // evaporation from leaves
-        Ez[i] = vegp.Lfrac[i] * Evleaf + (1.0 - vegp.Lfrac[i]) * Evwood; // total evaporation
-        const double tgreen = swout.sunfrac[i] * tsun + (1.0 - swout.sunfrac[i]) * tshade; // temperature of leaves
+        const double gtshade = (gsshade > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gsshade) : 0.0;
+        double tshade, Ewshade, Etshade;
+        surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade);
+        // Layer averages. Each quantity is weighted once by the live share of
+        // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
+        const double sf = swout.sunfrac[i];
+        onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
+        Ez[i] = vegp.Lfrac[i] * (sf * Ewsun + (1.0 - sf) * Ewshade) + (1.0 - vegp.Lfrac[i]) * Ewwood; // per unit plant area
+        const double tgreen = sf * tsun + (1.0 - sf) * tshade; // temperature of leaves
         tleafn[i] = vegp.Lfrac[i] * tgreen + (1.0 - vegp.Lfrac[i]) * twood; // temperature of foliage including woody
-        Ezt[i] = vegp.Lfrac[i] * vegp.paii[i] * (swout.sunfrac[i] * Etsun + (1.0 - swout.sunfrac[i]) * Etshade);
-        double la;
-        if (tleafn[i] >= 0.0)
-            la = 45068.7 - 42.8428 * tleafn[i];
-        else
-            la = 51078.69 - 4.338 * tleafn[i] - 0.06367 * tleafn[i] * tleafn[i];
-        const double la_Jkg = la / Mw;
+        Ezt[i] = vegp.Lfrac[i] * vegp.paii[i] * (sf * Etsun + (1.0 - sf) * Etshade); // per unit ground area
         const double cp = cpairCpp(onestepin.tair[i]);
-        Lz[i] = la_Jkg * (Ezt[i] / timestep);
         Hz[i] = ((ph * cp) / rLB[i]) * (tleafn[i] - onestepin.tair[i]);
     }
     // Rain interception, top layer down: each layer's surface water depth
     // from throughfall (attenuated by rainvars.tr) plus drip carried over
     // from the layer above, capped at max water film thickness (mwft).
+    // Evaporation of intercepted water cannot exceed the water held.
+    std::vector<double> Efilm(n);
     double dripfrac = 0.0; // fraction of precipitation that drops to lower down
     for (int i = n - 1; i >= 0; --i) {
         const double truetrans = 1.0 - (1.0 - rainvars.tr[i]) * (1.0 - dripfrac);
         const double rainl = truetrans * envdata.precip; // precipitation reaching leaf surface
-        if (i == 0) onestepin.precipground = rainl;  
-        swaterdepthn[i] = onestepin.swaterdepth[i] + rainl - Ez[i]; // leaf surface water depth
+        if (i == 0) onestepin.precipground = rainl;
+        const double held = onestepin.swaterdepth[i] + rainl;
+        Efilm[i] = std::min(Ez[i], held);
+        swaterdepthn[i] = held - Efilm[i]; // leaf surface water depth
         if (swaterdepthn[i] > vegp.mwft && envdata.precip > 0.0) {
             dripfrac = (swaterdepthn[i] - vegp.mwft) / envdata.precip;
             if (dripfrac > 1.0) dripfrac = 1.0;
         }
         if (swaterdepthn[i] > vegp.mwft) swaterdepthn[i] = vegp.mwft;
-        if (swaterdepthn[i] < 0.0) swaterdepthn[i] = 0.0;
     }
-    // Calculate total transpiration
+    // Latent heat each layer releases into the canopy air, per unit ground
+    // area: its transpiration and the intercepted water it evaporates.
+    for (int i = 0; i < n; ++i) {
+        const double la = (tleafn[i] >= 0.0) ? (45068.7 - 42.8428 * tleafn[i])
+            : (51078.69 - 4.338 * tleafn[i] - 0.06367 * tleafn[i] * tleafn[i]);
+        Lz[i] = (la / Mw) * (Ezt[i] + vegp.paii[i] * Efilm[i]) / timestep;
+    }
+    // Transpiration drawn from the soil through the roots
     double Et = 0.0;
     for (int i = 0; i < n; ++i) if (Ezt[i] > 0.0) Et += Ezt[i];
     onestepin.tleaf = std::move(tleafn);
@@ -2423,8 +2430,9 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // non-dimensionalise distances in the near-field kernel below. ST/SL are each
     // layer's sensible/latent heat source strength per unit ground area: the leaf
     // model gives sensible heat per unit foliage area, weighted here by the
-    // layer's foliage, and latent heat already per unit ground area, since it is
-    // the layer's transpiration. Rz is the resistance from the soil to each node.
+    // layer's foliage, and latent heat already per unit ground area, as the
+    // layer's transpiration and evaporation of intercepted water. Rz is the
+    // resistance from the soil to each node.
     std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn), ST_over_ow(nn), SL_over_ow(nn), Rz(nn);
     const double mu1 = (a1 + a0) * 0.5 * uf_mix;
     const double mu2 = (a1 - a0) * 0.5 * uf_mix;
@@ -2622,7 +2630,8 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     double FcL = 0.0;
     // Sensible and latent heat released by the foliage, per unit ground area.
     // The leaf model gives the first per unit foliage area and the second, the
-    // layer's transpiration, already per unit ground area.
+    // layer's transpiration and evaporation of intercepted water, already per
+    // unit ground area.
     for (size_t i = 0; i < nb; ++i) {
         FcH += Hz[i] * vegpc.paii[i];
         FcL += Lz[i];
