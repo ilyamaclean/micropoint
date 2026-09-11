@@ -442,7 +442,6 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
   }
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
-    boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
     SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(nlay + 1)]
   }
@@ -651,7 +650,6 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   }
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
-    boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
     SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(nlay + 1)]
   }
@@ -770,7 +768,6 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
   }
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
-    boundaryT <- mean(climdata$temp)
     surfaceT <- climdata$temp[1]
     SoilTempIni = (geometricCpp(nlay, boundaryT - surfaceT) + surfaceT)[1:(1+nlay)]
   }
