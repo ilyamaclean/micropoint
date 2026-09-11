@@ -235,6 +235,7 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
   vegp$pai <- sum(paii)
   Lfrac <- seq(0.7, 0.9, length.out = length(paii))
   soilc <- createsoilc(soiltype = "Clay loam")
+  climdata <- runchecks(climdata, NA, soilc, lat, long)$climdata
   tme <- as.POSIXlt(climdata$obs_time, tz = "UTC")
   if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
   obstime <- data.frame(year = tme$year +1900,
@@ -310,6 +311,8 @@ asbareifshort <- function(vegp) {
 InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
                             CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE,
                             Lfrac = NA) {
+  chk <- runchecks(climdata, vegp, soilc, lat, long, Lfrac = Lfrac)
+  climdata <- chk$climdata; soilc <- chk$soilc
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -435,6 +438,8 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                            SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                            maxiter = 100, tolerance = 1e-2, C3 = TRUE, plotout = TRUE, varn = "temp") {
+  chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
+  climdata <- chk$climdata; soilc <- chk$soilc
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -470,7 +475,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     # Check whether height adjustment is required
     if (vegp$h > (zref - 1)) {
       zref2 <- vegp$h + 2
-      climdata2 <- weatherhgt_adjust(climdata, zref, zref2, lat, long, SoilTempIni, ThetaIni, CO2ppm, boundaryT)
+      climdata2 <- suppressWarnings(weatherhgt_adjust(climdata, zref, zref2, lat, long, SoilTempIni, ThetaIni, CO2ppm, boundaryT))  # forcing already checked above
     } else {
       zref2 <- zref
       climdata2 <- climdata
@@ -643,6 +648,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                      SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                      maxiter = 100, tolerance = 1e-2, C3 = TRUE) {
+  chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
+  climdata <- chk$climdata; soilc <- chk$soilc
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -760,6 +767,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2,
                        SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA,
                        zm = 0.004, maxiter = 100, tolerance = 1e-2, C3 = TRUE) {
+  chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
+  climdata <- chk$climdata; soilc <- chk$soilc
   # Derive boundary temperature if not supplied
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)

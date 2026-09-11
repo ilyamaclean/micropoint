@@ -224,11 +224,11 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, double pai, do
 
     // Separate incoming shortwave into direct-beam and diffuse components.
     // Rbeam is irradiance normal to the solar beam; Rb is its horizontal
-    // component. The extraterrestrial-scale cap prevents unrealistically
-    // large beam estimates when the sun is close to the horizon.
+    // component. The forcing is checked before any run (runchecks in R) so that
+    // the beam never exceeds what the sun can deliver; with the sun at or below
+    // the horizon there is no beam.
     const double cosz = std::cos(solp.zenr);
-    double Rbeam = (Rswdown - Rdif) / cosz;
-    if (Rbeam > 1352.0) Rbeam = 1352.0;
+    const double Rbeam = (cosz > 0.0) ? (Rswdown - Rdif) / cosz : 0.0;
     const double Rb = Rbeam * cosz;
 
     // Bounds used below for beam-generated diffuse fluxes. These cannot
@@ -2973,8 +2973,8 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     double RabsG_sw = 0.0;
     double amx = soilp.gref; if (amx < vegp.lref) amx = vegp.lref;
     if (climdata.Rsw > 0.0) {
-        double Rb0 = (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr);
-        if (Rb0 > 900.0) Rb0 = 900.0;
+        // beam normal to the sun; none with the sun at or below the horizon
+        double Rb0 = (std::cos(solp.zenr) > 0.0) ? (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr) : 0.0;
         double Rdirdowng = 0.0;
         double Rdbdg = 0.0;
         double kksi = 0.0;
@@ -3125,8 +3125,8 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
     double si = solarindexCpp2(sloper, aspectr, solp.zenr, solp.azir);
     double Rabs_sw = 0.0;
     if (climdata.Rsw > 0.0) {
-        double Rb0 = (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr);
-        if (Rb0 > 900.0) Rb0 = 900.0;
+        // beam normal to the sun; none with the sun at or below the horizon
+        double Rb0 = (std::cos(solp.zenr) > 0.0) ? (climdata.Rsw - climdata.Rdif) / std::cos(solp.zenr) : 0.0;
         Rabs_sw = (1.0 - soilp.gref) * (climdata.Rdif + si * Rb0);
     }
     double Rabs = Rabs_sw + soilp.groundem * climdata.Rlw;
