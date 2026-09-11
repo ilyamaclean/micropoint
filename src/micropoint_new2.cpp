@@ -2530,8 +2530,12 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // Response of the scalar at each node to each layer's source, W[i][j]:
     // Raupach's near-field/far-field superposition about the canopy-top value.
     //
-    // Far field: the heat carried up through a node, from the foliage below it,
-    // adds its strength times the resistance from the node to canopy top.
+    // Far field: a source below a node is carried up through it, adding its
+    // strength times the resistance from the node to canopy top. A source above
+    // a node carries nothing down, and the air beneath it stands at the level
+    // the source sets where it is released: its strength times the resistance
+    // from there to canopy top. Together these are Raupach's (1989, Eq. 19a)
+    // integral of the flux, which at each height includes every source below it.
     //
     // Near field: the localised kernel's response to every other layer's source.
     // The layer holding the observation height is excluded from the midpoint
@@ -2553,7 +2557,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
                 nf = (nearFieldLayerMean(halfthick) + nearFieldKernel(2.0 * z[i] * inowTL[i])
                     + NF_NEIGHBOUR) / ow[i];
             }
-            const double ff = (j <= i) ? Rup : 0.0;
+            const double ff = (j <= i) ? Rup : (col.Rh - Rz[j]);
             W[i * nn + j] = nf - cTop[j] + ff;
         }
     }
