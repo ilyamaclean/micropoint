@@ -2238,8 +2238,10 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // a1*uf at canopy top. KH = sigma_w^2*TL is the equivalent far-field
     // (K-theory) eddy diffusivity; inowTL is 1/(sigma_w*TL), the length
     // scale used to non-dimensionalise distances in the near-field kernel
-    // below. ST/SL are each layer's sensible/latent heat source strength
-    // (per-layer flux Hz/Lz weighted by that layer's foliage area).
+    // below. ST/SL are each layer's sensible/latent heat source strength per
+    // unit ground area: the leaf model gives sensible heat per unit foliage
+    // area, weighted here by the layer's foliage, and latent heat already per
+    // unit ground area, since it is the layer's transpiration.
     std::vector<double> ow(nn), inowTL(nn), KH(nn), ST(nn), SL(nn), ST_over_ow(nn), SL_over_ow(nn);
     const double mu1 = (a1 + a0) * 0.5 * uf_mix;
     const double mu2 = (a1 - a0) * 0.5 * uf_mix;
@@ -2248,7 +2250,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         KH[i] = TL * ow[i] * ow[i];
         inowTL[i] = 1.0 / (ow[i] * TL);
         ST[i] = vegp.paii[i] * onestepin.Hz[i];
-        SL[i] = vegp.paii[i] * onestepin.Lz[i];
+        SL[i] = onestepin.Lz[i];
         ST_over_ow[i] = ST[i] / ow[i];
         SL_over_ow[i] = SL[i] / ow[i];
     }
@@ -2310,7 +2312,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         double ea = satvapCpp2(tair[i]) * (rh[i] / 100.0);
         double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
             : (45068.7 - 42.8428 * tground);
-        double GL = (la / (rHa * pk)) * (esg - ea);
+        double GL = ((la * ph) / (rHa * pk)) * (esg - ea);
         // Total sensible/latent source strength from the ground and every
         // foliage layer up to and including this one.
         double H = 0.0;
@@ -2452,16 +2454,19 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     const double rH_h = (std::log((vegpc.hgt - d) / zh) + psih_h) / (ka * wind.uf); // canopy top to h
     double FcH = 0.0;
     double FcL = 0.0;
+    // Sensible and latent heat released by the foliage, per unit ground area.
+    // The leaf model gives the first per unit foliage area and the second, the
+    // layer's transpiration, already per unit ground area.
     for (size_t i = 0; i < nb; ++i) {
         FcH += Hz[i] * vegpc.paii[i];
-        FcL += Lz[i] * vegpc.paii[i];
+        FcL += Lz[i];
     }
     const double eground = satvapCpp2(tground) * soilrh;
     const double eref = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     double err = 1e99;
     int nrIterations = 0;
     while (err > tolerance && nrIterations < maxIter) {
-        double ph = phairCpp(Th, 101.3);
+        double ph = phairCpp(Th, climdata.pk);
         double cp = cpairCpp(Th);
         double la;
         if (tground >= 0) {
