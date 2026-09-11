@@ -1299,15 +1299,15 @@ static double rh_hzref(const windmodel& uzw, double h, double pai, double zref)
     }
     return rhgt_zref;
 }
-// Calculate total sensible heat flux from canopy elements and ground and resulting heat exchange surface temperature
-// Aggregates sensible heat exchange from all canopy elements and the ground.
-// The summed flux is converted to the effective canopy heat-exchange surface temperature that feeds back into the above-canopy stability calculation.
-static Hstruct sumHCpp(double tref, double tground, double pk, double zref,
+// Sensible heat leaving the whole surface: each leaf layer and the ground
+// exchange heat with the reference air across their own resistance to it, and
+// the total drives the stability of the air above.
+static Hstruct sumHCpp(double tref, double tground, double pk,
     const std::vector<double>& z, const std::vector<double>& tleaf, 
     const std::vector<double>& rz_zref, // resistance from z to zref
     const std::vector<double>& rLB, // Leaf boundary layer resistance
     double rg_zref, // resistance from ground to zref
-    const vegpstruct& vegp, const windmodel& uzw)
+    const vegpstruct& vegp)
 {
     size_t n = z.size();
     double Htot = 0.0;
@@ -1321,13 +1321,8 @@ static Hstruct sumHCpp(double tref, double tground, double pk, double zref,
     // Compute flux from ground;
     double Hground = ((ph * cp) / rg_zref) * (tground - tref);
     Htot += Hground;
-    // Compute heat exchange surface temperature
-    double d = zeroplanedisCpp2(vegp.hgt, vegp.pai);
-    double zh = 0.2 * uzw.zm;
-    double rHa_zref = (std::log((zref - d) / zh) + uzw.psi_h) / (ka * uzw.uf);
     Hstruct out;
     out.Htot = Htot;
-    out.Tsurf = tref + (rHa_zref / (ph * cp)) * Htot;
     return out;
 }
 // Leaf energy balance for every canopy layer: Penman-Monteith temperature
@@ -1445,6 +1440,21 @@ static double soilrelhumCpp(const soilpstruct& soilp, double Tsoil, double theta
     double hr = std::exp(Mw * psiw / (RgasC * Tk));
     return hr;
 }
+// Latent heat carried from the soil surface to the reference height: vapour
+// leaves the soil at the humidity its water potential allows and diffuses up
+// across the resistance between the two. Bare and vegetated ground share this,
+// so the ground's evaporation is the same description in both.
+static double groundLatentFlux(const soilpstruct& soilp, double Tsurface, double Tref,
+    double relhum, double pk, double rHa, double theta)
+{
+    const double ph = phairCpp(Tref, pk);
+    const double es = satvapCpp2(Tsurface) * soilrelhumCpp(soilp, Tsurface, theta);
+    const double ea = satvapCpp2(Tref) * relhum / 100.0;
+    // latent heat of vaporisation, or of sublimation below freezing (J/mol)
+    const double la = (Tsurface >= 0.0) ? (45068.7 - 42.8428 * Tsurface)
+        : (51078.69 - 4.338 * Tsurface - 0.06367 * Tsurface * Tsurface);
+    return ((la * ph) / (rHa * pk)) * (es - ea);
+}
 // Ground surface energy balance residual (net radiation minus sensible
 // and latent heat) -- this residual is what the ground heat flux G is set
 // to, elsewhere, to close the surface energy budget.
@@ -1455,22 +1465,10 @@ static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
 {
     double sb = 5.67e-8;
     double Rnet = Rabs - soilp.groundem * sb * radem(Tsurface);
-    // Sensible heat
     double cp = cpairCpp(Tref);
     double ph = phairCpp(Tref, pk);
     double H = ((ph * cp) / rHa) * (Tsurface - Tref);
-    // Latent heat
-    double hr = soilrelhumCpp(soilp, Tsurface, theta);
-    double es = satvapCpp2(Tsurface) * hr;
-    double ea = satvapCpp2(Tref) * relhum / 100;
-    double la;
-    if (Tsurface >= 0) {
-        la = 45068.7 - 42.8428 * Tsurface;
-    }
-    else {
-        la = 51078.69 - 4.338 * Tsurface - 0.06367 * Tsurface * Tsurface;
-    }
-    double L = ((la * ph) / (rHa * pk)) * (es - ea);
+    double L = groundLatentFlux(soilp, Tsurface, Tref, relhum, pk, rHa, theta);
     double Ba = Rnet - H - L;
     return Ba;
 }
@@ -2603,10 +2601,15 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.soilwatervars = soilwater.swo;
         onestepin.Ev = soilwater.Evapmmhr;
         onestepin.theta = soilwater.swo.theta[0];
-        Hstruct HT = sumHCpp(climdata.tref, tground, climdata.pk, zref, z, onestepin.tleaf, rz_zref, onestepin.rLB, rHa, vegpc, wind);
+        Hstruct HT = sumHCpp(climdata.tref, tground, climdata.pk, z, onestepin.tleaf, rz_zref, onestepin.rLB, rHa, vegpc);
         onestepin.H = HT.Htot;
         H_iter = aitken1d(H_iter, onestepin.H, st_H);
-        onestepin.L = swrad.RswCabs - vegpc.vegem * sb * radem(HT.Tsurf) - onestepin.H - soilheat.Gflux;
+        // Latent heat leaving the whole surface, gathered as sensible heat is:
+        // from every leaf layer and from the ground.
+        double Lcanopy = 0.0;
+        for (size_t i = 0; i < na; ++i) Lcanopy += onestepin.Lz[i];
+        onestepin.L = Lcanopy + groundLatentFlux(soilpc, tground, climdata.tref, climdata.relhum,
+            climdata.pk, rHa, soilwater.swo.theta[0]);
         if (zref > vegpc.hgt) {
             cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, Th, eh, tground, soilrh,
                 rhg, rhz, maxIter, tolerance);
@@ -2698,7 +2701,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     const std::vector<double>& z, double latr, double lonr, double zref, double zm = 0.004, int maxIter = 100,
     double  tolerance = 1e-8)
 {
-    double Rswabs = 0.0;
+    double Rswin = 0.0;   // shortwave arriving on the (possibly sloping) ground
     double Rb0 = 0.0;
     if (climdata.Rsw > 0.0) {
         solmodel solp = solpositionCpp2(latr, lonr, obsdata.year, obsdata.month, obsdata.day, obsdata.hour);
@@ -2707,8 +2710,9 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         }
         double si = solarindexCpp2(soilpc.slope, soilpc.aspect, solp.zenr, solp.azir);
         if (si < 0.0) si = 0.0;
-        Rswabs = (1.0 - soilpc.gref) * (climdata.Rdif + si * Rb0);
+        Rswin = climdata.Rdif + si * Rb0;
     }
+    const double Rswabs = (1.0 - soilpc.gref) * Rswin;
     double Rlwabs = soilpc.groundem * climdata.Rlw;
     double Rabs = Rswabs + Rlwabs;
     double Tk = climdata.tref + 273.15;
@@ -2778,9 +2782,9 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     }
     double soilrh = soilrelhumCpp(soilpc, Ts, soilwater.swo.theta[0]);
     double eg = satvapCpp2(Ts) * soilrh;
-    double ea = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     double la = (Ts < 0.0) ? (51078.69 - 4.338 * Ts - 0.06367 * Ts * Ts) : (45068.7 - 42.8428 * Ts);
-    onestepin.L = ((la * ph) / (climdata.pk * rHa)) * (eg - ea);
+    onestepin.L = groundLatentFlux(soilpc, Ts, climdata.tref, climdata.relhum, climdata.pk, rHa,
+        soilwater.swo.theta[0]);
     // One-shot, post-convergence height sweep: turns the converged
     // LL/uf/H/L into profile values (tair, rh, uz) at each height z[i].
     size_t n = z.size();
@@ -2810,7 +2814,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         }
     }
     onestepin.Rb0 = Rb0;
-    onestepin.Rswup = (1.0 - soilpc.gref) * climdata.Rsw;
+    onestepin.Rswup = soilpc.gref * Rswin;   // reflected by the ground
     onestepin.Rlwup = soilpc.groundem * sb * radem(Ts);
     onestepin.uz = uz;
     onestepin.tair = tair;

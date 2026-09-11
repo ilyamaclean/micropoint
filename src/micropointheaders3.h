@@ -226,7 +226,6 @@ namespace newmodel {
         bool have_prev = false;
     };
     struct Hstruct {
-        double Tsurf;
         double Htot;
     };
     struct cantop {
