@@ -2755,9 +2755,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // Resistances from the soil and from each layer to the reference height,
         // all from one diffusivity column (soilToZ).
         const aerocolumn col = makeColumn(vegpc.hgt, dcan, wind.uf, wind.LL, wind.a2, a2neutral, a0v, a1);
-        // A reference height at or below canopy top is taken as canopy top,
-        // where the forcing then applies.
-        double rHa = soilToZ(col, std::max(zref, vegpc.hgt)); // soil surface to zref
+        double rHa = soilToZ(col, zref); // soil surface to zref
         double rhg = col.Rh;             // soil surface to canopy top
         double rhz = rHa - rhg;          // canopy top to zref
         for (size_t i = 0; i < na; ++i) {
@@ -3232,7 +3230,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         const double phih = dphihCpp2((vegp.hgt - d) / LL);
         const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, canopyMixing(d, vegp.hgt, a1s, phih),
             canopyMixing(d, vegp.hgt, a1s, 1.0), floorGustRatio(vegp, a1s), a1s);
-        double rGz = soilToZ(col, std::max(zref, vegp.hgt)); // resistance from ground to zref, or canopy top if higher
+        double rGz = soilToZ(col, zref); // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
         double RabsG = RabsG_sw + RabsG_lw;
         double Tkc = tcanopy + 273.15;
