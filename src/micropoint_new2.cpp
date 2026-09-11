@@ -1958,9 +1958,17 @@ static std::vector<double> root_distribute(const std::vector<double>& dz, double
 // where the soil is partly frozen.
 // Advances liquid water and water vapour through the soil profile for one timestep.
 // An implicit Richards-type solve handles vertical redistribution and phase-coupled vapour transport, while rainfall/evaporation set the surface boundary and transpiration removes water through the root profile.
+//
+// The solve is converged when the water unaccounted for, summed over the layers,
+// is small against the fluxes that move it. Evaporation and rainfall are of order
+// 1e-5 to 1e-4 kg/m2/s, and an imbalance of 1e-7 kg/m2/s held for an hour shifts
+// the thin surface layer's wetness by well under a thousandth. The bound is in
+// the solve's own units and is independent of the temperature tolerance the rest
+// of the model iterates to.
+constexpr double SOIL_WATER_TOL = 1e-7;   // kg m-2 s-1
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
-    int maxNrIterations = 100, double tolerance = 1e-4, bool useDamping = true)
+    int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL, bool useDamping = true)
 {
     const double rho = 1000.0;
     const int n = soilp.nLayers;
@@ -2593,7 +2601,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
-        soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, tolerance);
+        soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
         onestepin.witers = soilwater.iterations;
         tground = soilheat.Te[0];
         double soilrh = soilrelhumCpp(soilpc, tground, soilwater.swo.theta[0]);
@@ -2774,7 +2782,10 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
-        soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, tolerance);
+        soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
+        // The next pass resumes the water solve where this one ended, as over
+        // vegetation; the start-of-hour state it balances against is unchanged.
+        onestepin.soilwatervars = soilwater.swo;
         onestepin.soilheatvars.wc = soilwater.swo.theta;
         double G_raw = soilsurfaceEB(soilpc, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rHa, soilwater.swo.theta[0]);
@@ -3063,7 +3074,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         cfw.precip = climdata.precip; cfw.Et = Tr;
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
-        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
+        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, RabsG, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rGz, soilwater.swo.theta[0]); // surface energy balance residual
         G = aitken1d(G, G_raw, st);
@@ -3147,7 +3158,7 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
-        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, 1e-4);
+        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rHa, soilwater.swo.theta[0]);
         G = aitken1d(G, G_raw, st_G);
