@@ -1485,16 +1485,18 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double satvap_tair = satvapCpp2(onestepin.tair[i]);
         const double rH2 = 0.5 * rLB[i];      // both faces in parallel
         const double em2 = 2.0 * vegp.vegem;  // both faces emit
-        // Intercepted water evaporates from the wet share of both faces across
-        // the boundary layer; the dry share of a leaf transpires through its
-        // stomata. Wood does not transpire. A surface colder than the dew point
-        // of the air instead gains water, condensing across the boundary layer
-        // over both faces whatever its stomata do. Vapour conductances (m/s)
-        // convert to water exchanged over the step (mm) through the vapour
-        // density difference; the surface's temperature comes from its energy
-        // balance with the conductance that applies.
+        // Rain wets the upward-facing surface, one face's worth per unit plant
+        // area for a canopy of mixed leaf inclinations, and it is that film
+        // that evaporates across the boundary layer; the dry share of a leaf
+        // transpires through its stomata. Wood does not transpire. A surface
+        // colder than the dew point of the air instead gains water, condensing
+        // across the boundary layer over both faces whatever its stomata do.
+        // Vapour conductances (m/s) convert to water exchanged over the step
+        // (mm) through the vapour density difference; the surface's
+        // temperature comes from its energy balance with the conductance that
+        // applies.
         const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
-        const double gwet = 2.0 * fw / rLB[i];
+        const double gwet = fw / rLB[i];
         const double tomm = (Mw / (RgasC * Tk)) * timestep;
         // Each surface also reports how far its temperature follows its air
         // (at fixed air vapour pressure) and the vapour conductance it used:
