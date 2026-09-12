@@ -2094,19 +2094,18 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
 // distribute roots across soil profile
 // Creates the prescribed root-fraction profile across soil layers from total rooting depth and skew.
 // The resulting fractions are used to allocate transpiration uptake in SoilWaterCpp.
+// The deepest node is the lower boundary, whose water content is prescribed
+// rather than solved, so water taken from it would leave no trace in the soil
+// water balance; it holds no roots, and the fractions sum to one over the
+// nodes above it.
 static std::vector<double> root_distribute(const std::vector<double>& dz, double totalDepth, double skew)
 {
     int n = static_cast<int>(dz.size());
     if (skew == 0.0) skew = 1e-12;
-    std::vector<double> v(n);
-    for (int i = 0; i < n; ++i) {
+    std::vector<double> v(n, 0.0);
+    for (int i = 0; i < (n - 1); ++i) {
         double z = (i / static_cast<double>(n)) * totalDepth;
-        if (i < (n - 1)) {
-            v[i] = std::exp(-z * skew) * dz[i];
-        }
-        else {
-            v[i] = std::exp(-z * skew) * dz[i - 1];
-        }
+        v[i] = std::exp(-z * skew) * dz[i];
     }
     double sumv = std::accumulate(v.begin(), v.end(), 0.0);
     for (int i = 0; i < n; ++i) v[i] = v[i] / sumv;
