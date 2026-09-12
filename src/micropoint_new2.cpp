@@ -1945,10 +1945,12 @@ static std::vector<double> transpiration_distribute(const soilpstruct& soilp, co
     }
     return S;
 }
-// Soil layer boundary depths: a thin top layer, then geometrically
-// widening with depth (weighted by i^2) down to totalDepth.
-// Creates the vertically stretched soil-layer geometry used by both heat and water solvers.
-// Thin near-surface layers resolve rapid changes while deeper layers provide the lower boundary with fewer cells.
+// Soil node depths: a thin top layer, then geometrically widening with depth
+// (weighted by i^2), so that node n, the fixed-temperature lower boundary,
+// lies at totalDepth. Thin near-surface layers resolve rapid changes while
+// deeper layers reach the boundary with few cells. One further depth continues
+// the series below the boundary so that every node has a layer thickness
+// beneath it; no node sits there.
 // [[Rcpp::export]]
 std::vector<double> geometricCpp(int n, double totalDepth) {
     std::vector<double> z(n + 2);
@@ -1959,7 +1961,7 @@ std::vector<double> geometricCpp(int n, double totalDepth) {
     double dz_unit = totalDepth / weightSum;
     z[0] = 0.0;
     z[1] = dz_unit;  // thin top layer to avoid zero thickness
-    for (int i = 2; i <= n; ++i) {
+    for (int i = 2; i <= n + 1; ++i) {
         z[i] = z[i - 1] + dz_unit * static_cast<double>(i) * static_cast<double>(i);
     }
     return z;
@@ -2044,14 +2046,16 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         ff[0] = kMeanCpp("LOGARITHMIC", lambda[0], lambda[1]) / dz[0];
         for (int i = 1; i < n; ++i) ff[i] = lambda[i] / dz[i];
         // assemble tri-di system using oldTe_fixed ALWAYS
-        for (int i = 0; i < n; ++i) {
+        // Every node above the deepest is solved; the deepest node, at the full
+        // soil depth, is held at the lower boundary temperature.
+        for (int i = 0; i <= n; ++i) {
             if (i == 0) {
                 aa[i] = 0.0;
                 bb[i] = CT[i] / dT + ff[i] + lamS;
                 cc[i] = -ff[i];
                 dd[i] = CT[i] / dT * oldTe_fixed[i] + qsurface + lamS * Tsurf_iter;
             }
-            else if (i < (n - 1)) {
+            else if (i < n) {
                 aa[i] = -ff[i - 1] * Fact;
                 bb[i] = CT[i] / dT + (ff[i - 1] + ff[i]) * Fact;
                 cc[i] = -ff[i] * Fact;
@@ -2067,7 +2071,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             }
         }
         Te_prev = Te_new;
-        Thomas TBC = ThomasBoundaryCondition(aa, bb, cc, dd, Te_new, 0, n - 1);
+        Thomas TBC = ThomasBoundaryCondition(aa, bb, cc, dd, Te_new, 0, n);
         Te_new = TBC.x;
         // The balance was linearised about the surface iterate used in this
         // pass, and closes only once the solved surface temperature agrees with
@@ -4348,9 +4352,10 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     // identifiy which value to select if below ground
     size_t sel = 0;
     if (reqhgt < 0.0) {
+        // Nodes only: the last depth lies below the boundary and holds no node.
         std::vector<double> zz = onestepin.soilheatvars.z;
         double mn = std::abs(reqhgt + zz[0]);
-        for (size_t i = 1, n = zz.size(); i < n; ++i) {
+        for (size_t i = 1, n = zz.size() - 1; i < n; ++i) {
             double dif = std::abs(reqhgt + zz[i]);
             if (dif < mn) {
                 mn = dif;
@@ -4496,7 +4501,9 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     double lonr = lon * torad;
     std::vector<double> zz = z;
     if (reqhgt < 0.0) {
+        // Nodes only: the last depth lies below the boundary and holds no node.
         zz = soilheatvars.z;
+        zz.pop_back();
         for (size_t i = 0; i < zz.size(); ++i)
             zz[i] = -zz[i];
     }
