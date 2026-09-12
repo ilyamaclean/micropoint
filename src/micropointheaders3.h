@@ -225,9 +225,6 @@ namespace newmodel {
         double omega = 0.2;   // default: quite high backweight
         bool have_prev = false;
     };
-    struct Hstruct {
-        double Htot;
-    };
     struct cantop {
         double Th;
         double eh;

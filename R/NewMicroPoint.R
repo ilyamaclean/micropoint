@@ -468,10 +468,12 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     n <- length(paii)
     paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = 20),
                      method = "natural")$y
+    paii20 <- pmax(paii20, 0)
     mu <- sum(paii) / sum(paii20)
     paii20 <- paii20 * mu
-    Lfrac20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = 20),
+    Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = 20),
                       method = "natural")$y
+    Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
     # Check whether height adjustment is required
     if (vegp$h > (zref - 1)) {
       zref2 <- vegp$h + 2
@@ -493,8 +495,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     tabove <- 0
     rhabove <- 0
     for (i in 1:length(za)) {
-      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai)
-      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai)
+      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai, mout$LL)
+      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai, mout$LL)
     }
     mout$za <- za
     mout$tair_above <- tabove
