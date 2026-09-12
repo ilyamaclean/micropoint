@@ -645,8 +645,8 @@ static double dpsihCpp2(double ze)
 // The dimensionless temperature gradient that the correction above implies,
 // phi = 1 - zeta*dpsi/dzeta. A surface layer's diffusivity is ka*u*(z-d)/phi,
 // so wherever this model joins a layer of its own to one described by the
-// integrated correction, it uses this gradient -- not dphihCpp2, which is a
-// separate, clamped form -- so that diffusivity is continuous at the join.
+// integrated correction, it uses this gradient, so that diffusivity is
+// continuous at the join. Canopy mixing (canopyMixing) uses it too.
 static double phihStar(double ze)
 {
     if (ze < 0.0) {
@@ -662,25 +662,6 @@ static double phihStar(double ze)
     }
     const double c = std::cosh(ze / PSIH_STABLE_ZMAX);
     return 1.0 + PSIH_STABLE_SLOPE * ze / (c * c);
-}
-// **  Calculate diabatic influencing factor for heat ** //  
-// Local stability factor for heat transfer at a specified z/L.
-// It is used in the within-canopy exchange scaling, linking above-canopy stability to canopy turbulent transport.
-static double dphihCpp2(double ze)
-{
-    double phih;
-    // unstable
-    if (ze < 0.0) {
-        double phim = 1.0 / std::pow((1.0 - 16.0 * ze), 0.25);
-        phih = std::pow(phim, 2.0);
-    }
-    // stable
-    else {
-        phih = 1.0 + ((6.0 * ze) / (1.0 + ze));
-    }
-    if (phih > 1.5) phih = 1.5;
-    if (phih < 0.5) phih = 0.5;
-    return phih;
 }
 // Inverts psi_m(L) on the stable branch: finds the Obukhov length L whose
 // stability correction equals a given target. psi_m(L) is 0 at both
@@ -978,7 +959,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    phi_h = dphihCpp2((hgt - d) / LL);
+    phi_h = phihStar((hgt - d) / LL);
     double a2 = canopyMixing(d, hgt, a1, phi_h);
     windmodel out;
     out.uz = uz;
@@ -2934,7 +2915,7 @@ static double aboveCanopyFraction(double za, double zref, double hgt, double pai
 {
     const double a1 = 1.25;
     const double d = zeroplanedisCpp2(hgt, pai);
-    const double a2 = canopyMixing(d, hgt, a1, dphihCpp2((hgt - d) / LL));
+    const double a2 = canopyMixing(d, hgt, a1, phihStar((hgt - d) / LL));
     const double a2n = canopyMixing(d, hgt, a1, 1.0);
     const double a0 = a1 * std::exp(-GUST_DECAY * LEAF_DRAG * pai / (1.0 + SHELTER * pai));
     const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a2, a2n, a0, a1);
@@ -3317,7 +3298,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         // literal because this routine has no parameter for it and cannot be
         // reached with any value but the default.
         const double a1s = 1.25;
-        const double phih = dphihCpp2((vegp.hgt - d) / LL);
+        const double phih = phihStar((vegp.hgt - d) / LL);
         const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, canopyMixing(d, vegp.hgt, a1s, phih),
             canopyMixing(d, vegp.hgt, a1s, 1.0), floorGustRatio(vegp, a1s), a1s);
         double rGz = soilToZ(col, zref); // resistance from ground to zref
