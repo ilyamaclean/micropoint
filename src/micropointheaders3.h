@@ -31,7 +31,8 @@ namespace newmodel {
         double vegem; // Vegetation emissivity (unitless)
         double mwft; // max water film thickness (mm)
         double pTAW; // Fraction of total available water plant can deplete before stress (unitless)
-        double rootskew; // Skew towards top of root layer (unitless)
+        double root50; // Depth above which half of all roots lie (m)
+        double root95; // Depth above which 95% of all roots lie (m)
         std::vector<double> paii; // one-sided plant area index at each canopy node
         std::vector<double> pia; // one-sided plant area index above each canopy node
         std::vector<double> Lfrac; // Fraction of paii that is living plant material

@@ -98,6 +98,10 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
     if (vegp$Vcmx25 < 0) stop("vegp$Vcmx25 cannot be negative")
     if (vegp$Tup <= vegp$Tlow) stop("vegp$Tup must exceed vegp$Tlow")
     if (vegp$psi50 > 0) stop("vegp$psi50 must be negative")
+    if (is.null(vegp$root50) || is.null(vegp$root95))
+      stop("vegp needs root50 and root95, the depths (m) above which 50% and 95% of roots lie; rootskew is no longer used")
+    if (vegp$root50 <= 0) stop("vegp$root50 must be positive")
+    if (vegp$root95 <= vegp$root50) stop("vegp$root95 must exceed vegp$root50")
     if (!(length(paii) == 1 && is.na(paii[1]))) {
       if (any(paii < 0)) stop("paii cannot be negative")
       if (abs(sum(paii) - vegp$pai) > 0.01 * max(vegp$pai, 1e-6))

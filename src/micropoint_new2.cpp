@@ -2091,24 +2091,36 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     state.iters = nrIterations;
     return state;
 }
-// distribute roots across soil profile
-// Creates the prescribed root-fraction profile across soil layers from total rooting depth and skew.
-// The resulting fractions are used to allocate transpiration uptake in SoilWaterCpp.
-// The deepest node is the lower boundary, whose water content is prescribed
-// rather than solved, so water taken from it would leave no trace in the soil
-// water balance; it holds no roots, and the fractions sum to one over the
-// nodes above it.
-static std::vector<double> root_distribute(const std::vector<double>& dz, double totalDepth, double skew)
+// Share of the plant's roots, and hence of its water uptake, in each soil layer.
+// Cumulative root amount with depth follows the logistic dose-response curve
+// Schenk & Jackson (2002, Eq. 1) fitted to 475 profiles worldwide: the fraction
+// of roots above depth D is 1 / (1 + (D/D50)^c), fixed by the depths above
+// which half (D50) and 95% (D95) of roots lie, which is what their Table 4
+// tabulates by vegetation type. Roots are always densest near the surface; a
+// deeper D95 relative to D50 gives a longer tail. Each node takes the roots
+// lying within its own layer, bounded halfway to each neighbour as in the soil
+// water balance, so the shares are exact integrals of the curve and do not
+// depend on how finely the soil is divided. The deepest node is the lower
+// boundary, whose water content is prescribed rather than solved, so it holds
+// no roots; the deepest solved node takes every root below its upper bound,
+// including any beyond the modelled soil depth.
+static std::vector<double> root_distribute(const std::vector<double>& z, double D50, double D95)
 {
-    int n = static_cast<int>(dz.size());
-    if (skew == 0.0) skew = 1e-12;
-    std::vector<double> v(n, 0.0);
-    for (int i = 0; i < (n - 1); ++i) {
-        double z = (i / static_cast<double>(n)) * totalDepth;
-        v[i] = std::exp(-z * skew) * dz[i];
+    int n = static_cast<int>(z.size()) - 2;   // nodes 0..n, plus one depth below the boundary
+    std::vector<double> v(n + 1, 0.0);
+    // The shape exponent follows from the 95% point: (D95/D50)^c = 1/19.
+    double p = std::log(19.0) / std::log(D95 / D50);
+    auto cumulative = [&](double D) {
+        if (D <= 0.0) return 0.0;
+        double x = std::pow(D / D50, p);
+        return x / (1.0 + x);
+    };
+    double above = 0.0;
+    for (int i = 0; i < n; ++i) {
+        double below = (i < n - 1) ? cumulative(0.5 * (z[i] + z[i + 1])) : 1.0;
+        v[i] = below - above;
+        above = below;
     }
-    double sumv = std::accumulate(v.begin(), v.end(), 0.0);
-    for (int i = 0; i < n; ++i) v[i] = v[i] / sumv;
     return v;
 }
 // Soil water potential profile for one time step: Richards' equation
@@ -3900,7 +3912,8 @@ static vegpstruct tovegpstruct(List vegp, std::vector<double> paii, std::vector<
     out.vegem = vegp["vegem"]; // Vegetation emissivity (unitless)
     out.mwft = vegp["mwft"]; // max water film thickness (mm)
     out.pTAW = vegp["pTAW"]; // Fraction of total available water plant can deplete before stress (unitless)
-    out.rootskew = vegp["rootskew"]; // Skew towards top of root layer (unitless)
+    out.root50 = vegp["root50"]; // Depth above which half of all roots lie (m)
+    out.root95 = vegp["root95"]; // Depth above which 95% of all roots lie (m)
     int n = static_cast<int>(paii.size());
     out.pai = 0.0; // Total one-sided plant area index (m^2 / m^2)
     for (int i = 0; i < n; ++i) out.pai += paii[i];
@@ -3969,7 +3982,7 @@ static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<dou
 }
 // Creates input file for soil water model
 // Builds the initial dynamic soil-water state, including matric potential, vapour and the root distribution derived from the soil/vegetation setup.
-static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double rootskew)
+static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double root50, double root95)
 {
     soilwatermod out;
     out.n = state.n; // number of layers
@@ -4002,11 +4015,7 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     out.k = k;
     out.oldvapor = vapor;
     out.oldtheta = out.theta;
-    double totalDepth = 0.0; // deepest node depth, used to scale root_distribute below
-    for (int i = 0; i <= out.n; ++i) {
-        if (out.z[i] > totalDepth) totalDepth = out.z[i];
-    }
-    out.rootfrac = root_distribute(out.dz, totalDepth, rootskew);
+    out.rootfrac = root_distribute(out.z, root50, root95);
     return out;
 }
 // Initial onestep state: every canopy layer set to the same starting
@@ -4140,7 +4149,7 @@ List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List
     onestepin.rh = { relhum[0], relhum[0] };
     onestepin.uz = { wspeed[0], wspeed[0] };
     onestepin.soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 10.0);
+    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 0.05, 0.4);
     onestepin.H = 0.0;
     onestepin.L = 0.0;
     onestepin.psim = 0.0;
@@ -4264,7 +4273,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     std::vector<double> z(na);
     for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.rootskew);
+    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
     double latr = lat * torad;
     double lonr = lon * torad;
@@ -4343,7 +4352,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     onestepin.rh = { relhum[0], relhum[0] };
     onestepin.uz = { wspeed[0], wspeed[0] };
     onestepin.soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 10.0);
+    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 0.05, 0.4);
     onestepin.H = 0.0; onestepin.L = 0.0; onestepin.psim = 0.0; onestepin.psih = 0.0; 
     onestepin.Rswup = 0.0; onestepin.Rb0 = 0.0; onestepin.Rlwup = 0.0;
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
@@ -4494,7 +4503,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     for (size_t i = 0; i < na; ++i)
         z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.rootskew);
+    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
     double latr = lat * torad;
     double lonr = lon * torad;
@@ -4649,7 +4658,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
     std::vector<double> z(na);
     for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.rootskew);
+    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     tsvegstruct  tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
     tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.gref);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
@@ -4738,7 +4747,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
     onestepin.rh = std::vector<double>(na, relhum[0]);
     onestepin.uz = std::vector<double>(na, wspeed[0]);
     onestepin.soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 10.0);
+    onestepin.soilwatervars = toSoilwatermod(soilpc, onestepin.soilheatvars, 0.05, 0.4);
     onestepin.H = 0.0; onestepin.L = 0.0; onestepin.psim = 0.0; onestepin.psih = 0.0;
     onestepin.Rswup = 0.0; onestepin.Rb0 = 0.0; onestepin.Rlwup = 0.0;
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
@@ -4819,7 +4828,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     std::vector<double> z(na);
     for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.rootskew);
+    soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
     // Create Numeric Matrices for above ground
     NumericMatrix Rdirdown(n, na);
@@ -5072,7 +5081,7 @@ List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List s
         SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
     }
     soilmod soilheat = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, vegpc.rootskew);
+    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, vegpc.root50, vegpc.root95);
     soilwaterout water;
     water.swo = soilwater;
     water.success = false;
@@ -5159,7 +5168,7 @@ List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::Lis
         SoilThetaIni[i] = start2 + (end2 - start2) * static_cast<double>(i) / static_cast<double>(n - 1);
     }
     soilmod soilheat = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
-    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, 10.0);
+    soilwatermod soilwater = toSoilwatermod(soilpc, soilheat, 0.05, 0.4);
     soilwaterout water;
     water.swo = soilwater;
     water.success = false;

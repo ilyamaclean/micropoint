@@ -36,8 +36,14 @@ a list of vegetation parameters:
   \item{vegem}{Vegetation emissivity (unitless)}
   \item{mwft}{Maximum water film thickness (mm)}
   \item{pTAW}{Fraction of total available soil water that can be depleted before stress (unitless)}
-  \item{rootskew}{Root distribution skew towards the top of the soil profile (unitless)}
+  \item{root50}{Depth above which half of all roots lie (m)}
+  \item{root95}{Depth above which 95\% of all roots lie (m)}
 }
+Root depths are from Schenk & Jackson (2002) Table 4: tropical evergreen
+forest (`BET.Tr`), warm-temperate forest (`BET.Te`), cool-temperate forest
+(`BDT`, `NET`), boreal forest (`NDT`), meadows and pastures in the forest zone
+(`C3`), humid tropical savannas (`C4`), Mediterranean shrublands and woodlands
+(`ESh`) and semi-desert shrublands (`DSh`).
 }
 \description{
 Create list of vegetation parameters for running the microclimate model
@@ -47,4 +53,8 @@ Recognised plant functional types are `BET.Tr`	- Broadleaf Evergreen Tree (Tropi
 `BET.Te` - Broadleaf Evergreen Tree (Temperate), 	`BDT`	-  Broadleaf Deciduous Tree,
 `NET` - Needleleaf Evergreen Tree,	`NDT`	- Needleleaf Deciduous Tree, `C3` - C3 grass,
 	`C4` - C4 grass,	`ESh` - Evergreen Shrub and	`DSh`- Deciduous Shrub.
+}
+\references{
+Schenk, H.J. & Jackson, R.B. (2002) The global biogeography of
+roots. Ecological Monographs, 72, 311-328.
 }

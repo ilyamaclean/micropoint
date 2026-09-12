@@ -33,8 +33,16 @@
 #'   \item{vegem}{Vegetation emissivity (unitless)}
 #'   \item{mwft}{Maximum water film thickness (mm)}
 #'   \item{pTAW}{Fraction of total available soil water that can be depleted before stress (unitless)}
-#'   \item{rootskew}{Root distribution skew towards the top of the soil profile (unitless)}
+#'   \item{root50}{Depth above which half of all roots lie (m)}
+#'   \item{root95}{Depth above which 95\% of all roots lie (m)}
 #' }
+#' Root depths are from Schenk & Jackson (2002) Table 4: tropical evergreen
+#' forest (`BET.Tr`), warm-temperate forest (`BET.Te`), cool-temperate forest
+#' (`BDT`, `NET`), boreal forest (`NDT`), meadows and pastures in the forest zone
+#' (`C3`), humid tropical savannas (`C4`), Mediterranean shrublands and woodlands
+#' (`ESh`) and semi-desert shrublands (`DSh`).
+#' @references Schenk, H.J. & Jackson, R.B. (2002) The global biogeography of
+#' roots. Ecological Monographs, 72, 311-328.
 #' @export
 createvegp <- function(vegtype = "BET.Te") {
   nms <- names(PFTparams)
