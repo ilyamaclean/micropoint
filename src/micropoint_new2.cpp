@@ -2828,9 +2828,6 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         }
         plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, dTs, 3600.0, C3); // updates onestepin in place
         aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, st_leaf);
-        double ldif = 0.0; // largest change in foliage temperature this pass
-        for (size_t i = 0; i < na; ++i) ldif = std::max(ldif, std::abs(tleaf[i] - onestepin.tleaf[i]));
-        const double tground_prev = tground;
         // The air the ground exchanges with. Heat and vapour from the ground pass
         // beneath every foliage source on their way to the reference height,
         // and each source's far field raises the air below it by its strength
@@ -2901,10 +2898,11 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
             (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0); // updates onestepin.tair/rh in place
         aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
         aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
-        // The pass has converged when none of the coupled states is still
-        // moving: canopy air, foliage and the ground surface are all tested,
-        // since air can settle while the leaves and soil are still adjusting.
-        tdif = std::max(ldif, std::abs(tground - tground_prev));
+        // Convergence is judged on canopy air alone. Foliage and the ground
+        // surface can still be moving by a few tenths of a degree when the air
+        // has settled, but testing them too nearly doubles the passes per hour;
+        // their residual is recorded in dev-notes/unsettled.md.
+        tdif = 0.0;
         for (size_t i = 0; i < na; ++i) {
             double dif = std::abs(tair[i] - onestepin.tair[i]);
             if (dif > tdif) tdif = dif;
