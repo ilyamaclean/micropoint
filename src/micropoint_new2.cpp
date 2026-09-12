@@ -206,9 +206,9 @@ static tsdirstruct twostreamdirCpp(double pai, double kd, double gref, tsvegstru
     params.p6 = (1.0 / tsvegp.D1) * ((v1 / tsvegp.S1) * (tsvegp.u1 - tsvegp.h) - (tsvegp.a + tsvegp.gma - tsvegp.h) * S2 * v2);
     params.p7 = (-1.0 / tsvegp.D1) * ((v1 * tsvegp.S1) * (tsvegp.u1 + tsvegp.h) - (tsvegp.a + tsvegp.gma + tsvegp.h) * S2 * v2);
     params.sig = -sig;
-    // Particular solution for the downward beam-scattered stream: the beam
-    // feeds it directly (sstr) and by way of the upward stream (gma*ss), so
-    // both terms carry the same sign.
+    // Source of the downward beam-scattered stream: the beam scatters forward
+    // into it directly, and what it scatters upward is in turn scattered back
+    // down by the foliage above.
     params.p8 = sstr * (tsvegp.a + tsvegp.gma + kd) + tsvegp.gma * ss;
     double v3 = (sstr + tsvegp.gma * gref - (params.p8 / params.sig) * (tsvegp.u2 - kd)) * S2;
     params.p9 = (-1.0 / tsvegp.D2) * ((params.p8 / (params.sig * tsvegp.S1)) * (tsvegp.u2 + tsvegp.h) + v3);
@@ -1980,7 +1980,8 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     std::vector<double> ff(n + 1), CT(n + 1), lambda(n + 1);
     std::vector<double> aa(n + 1), bb(n + 1), cc(n + 1), dd(n + 1);
     const double gg = 1.0 - Fact;
-    // FIX: old state for THIS timestep must be constant through the nonlinear iterations
+    // The start-of-hour profile that the step advances from, held fixed while
+    // the thermal properties and the surface balance are iterated.
     const std::vector<double> oldTe_fixed = state.oldTe;
     // Start guess (use last solution if you have it)
     std::vector<double> Te_new = state.Te;
@@ -2881,10 +2882,9 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
             (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0); // updates onestepin.tair/rh in place
         aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
         aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
-        // Convergence is judged on canopy air alone. Foliage and the ground
-        // surface can still be moving by a few tenths of a degree when the air
-        // has settled, but testing them too nearly doubles the passes per hour;
-        // their residual is recorded in dev-notes/unsettled.md.
+        // Convergence is judged on canopy air alone, for speed: foliage and the
+        // ground surface may still be settling by a few tenths of a degree
+        // once the air has stopped moving.
         tdif = 0.0;
         for (size_t i = 0; i < na; ++i) {
             double dif = std::abs(tair[i] - onestepin.tair[i]);
