@@ -1449,6 +1449,28 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     std::vector<double> Lz(n);
     std::vector<double> rLB(n);
     std::vector<double> dSTdT(n), dSLde(n);
+    // Rain interception, top layer down. Each layer intercepts a share of the
+    // rain arriving from above, set by its own plant area along the rain's
+    // path, and holds what fits beneath its maximum film; the rest passes on
+    // with the rain that missed it. What leaves the lowest layer reaches the
+    // ground, so every drop is accounted for. The film a layer held at the
+    // start of the step plus the rain it keeps is all the water it can
+    // evaporate over the step, whenever in the step that rain fell, and it
+    // does not depend on how fast the film evaporates, so it is known before
+    // the surfaces are solved.
+    std::vector<double> held(n); // mm per unit plant area
+    double arriving = envdata.precip; // rain still falling, per unit ground area
+    for (int i = n - 1; i >= 0; --i) {
+        double kept = 0.0; // added to this layer's film, per unit ground area
+        if (vegp.paii[i] > 0.0 && arriving > 0.0) {
+            const double intercepted = (1.0 - std::exp(-rainvars.kd[i] * vegp.paii[i])) * arriving;
+            const double room = std::max(vegp.mwft - onestepin.swaterdepth[i], 0.0) * vegp.paii[i];
+            kept = std::min(intercepted, room);
+        }
+        held[i] = onestepin.swaterdepth[i] + ((vegp.paii[i] > 0.0) ? kept / vegp.paii[i] : 0.0);
+        arriving -= kept;
+    }
+    onestepin.precipground = arriving;
     // Every load and flux on a plant surface is per unit one-sided plant area.
     // Both faces exchange heat with the air across the same boundary layer, so
     // the surface's heat conductance is twice the single-face value, and both
@@ -1477,7 +1499,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         // temperature comes from its energy balance with the conductance that
         // applies.
         const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
-        const double gwet = fw / rLB[i];
+        double gwet = fw / rLB[i];
         const double tomm = (Mw / (RgasC * Tk)) * timestep;
         // Each surface also reports how far its temperature follows its air
         // (at fixed air vapour pressure) and the vapour conductance it used:
@@ -1510,26 +1532,38 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             const double tsw = PenmanMonteithCpp2(Rabs, onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2, rH2, rV, 0.0, 4);
             follow = (tsw - ts) / dTa;
         };
-        // Woody vegetation
-        double twood, Ewwood, Etwood, fwood, gwood;
-        surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
-        // Sunlit leaves
+        // Stomatal conductance responds to the light each leaf class absorbs
         envdata.PARabs = swout.RPARsun[i];
         const double gssun = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
         const double gtsun = (gssun > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gssun) : 0.0;
-        double tsun, Ewsun, Etsun, fsun, gsun;
-        surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
-        // Shaded leaves
         envdata.PARabs = swout.RPARshade[i];
         const double gsshade = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
         const double gtshade = (gsshade > 0.0) ? (1.0 - fw) / (rLB[i] + ph / gsshade) : 0.0;
-        double tshade, Ewshade, Etshade, fshade, gshade;
-        surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
-        // Layer averages. Each quantity is weighted once by the live share of
-        // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
         const double sf = swout.sunfrac[i];
         onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
-        Ez[i] = vegp.Lfrac[i] * (sf * Ewsun + (1.0 - sf) * Ewshade) + (1.0 - vegp.Lfrac[i]) * Ewwood; // per unit plant area
+        // A film cannot evaporate more over the step than the water it has.
+        // Where the free rate would exhaust it, the surfaces stay wet all step
+        // (the dry, transpiring share is unchanged) but evaporate at the rate
+        // the water can sustain, and it is that rate which cools them: the wet
+        // conductance of woody, sunlit and shaded surfaces alike is scaled
+        // down by the ratio of water held to water demanded. Surfaces relieved
+        // of evaporative cooling warm and evaporate a little more, so the
+        // scaling is repeated a few times. Temperature, sensible heat, latent
+        // heat and the film then all describe the same evaporation.
+        // Condensation is not limited.
+        double twood, Ewwood, Etwood, fwood, gwood;
+        double tsun, Ewsun, Etsun, fsun, gsun;
+        double tshade, Ewshade, Etshade, fshade, gshade;
+        for (int pass = 0; ; ++pass) {
+            surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
+            surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
+            surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
+            // Layer averages. Each quantity is weighted once by the live share of
+            // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
+            Ez[i] = vegp.Lfrac[i] * (sf * Ewsun + (1.0 - sf) * Ewshade) + (1.0 - vegp.Lfrac[i]) * Ewwood; // per unit plant area
+            if (Ez[i] <= 1.01 * held[i] || pass == 3) break;
+            gwet *= held[i] / Ez[i];
+        }
         const double tgreen = sf * tsun + (1.0 - sf) * tshade; // temperature of leaves
         tleafn[i] = vegp.Lfrac[i] * tgreen + (1.0 - vegp.Lfrac[i]) * twood; // temperature of foliage including woody
         Ezt[i] = vegp.Lfrac[i] * vegp.paii[i] * (sf * Etsun + (1.0 - sf) * Etshade); // per unit ground area
@@ -1543,28 +1577,15 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         dSTdT[i] = vegp.paii[i] * ((ph * cp) / rH2) * (follow - 1.0);
         dSLde[i] = -vegp.paii[i] * la_leaf * gV * 1000.0 / (RgasC * Tk);
     }
-    // Rain interception, top layer down. Each layer intercepts a share of the
-    // rain arriving from above, set by its own plant area along the rain's
-    // path, and holds what fits beneath its maximum film; the rest passes on
-    // with the rain that missed it. What leaves the lowest layer reaches the
-    // ground, so every drop is accounted for. Evaporation of intercepted water
-    // cannot exceed the water held; condensation (negative) adds to it.
+    // Film carried to the next step: water held less what evaporated, or plus
+    // what condensed, up to the maximum film. The scaled wet rate already
+    // keeps evaporation within the water held; the limit here only absorbs
+    // what the repeat above leaves unresolved.
     std::vector<double> Efilm(n);
-    double arriving = envdata.precip; // rain still falling, per unit ground area
-    for (int i = n - 1; i >= 0; --i) {
-        double kept = 0.0; // added to this layer's film, per unit ground area
-        if (vegp.paii[i] > 0.0 && arriving > 0.0) {
-            const double intercepted = (1.0 - std::exp(-rainvars.kd[i] * vegp.paii[i])) * arriving;
-            const double room = std::max(vegp.mwft - onestepin.swaterdepth[i], 0.0) * vegp.paii[i];
-            kept = std::min(intercepted, room);
-        }
-        const double held = onestepin.swaterdepth[i] + ((vegp.paii[i] > 0.0) ? kept / vegp.paii[i] : 0.0);
-        Efilm[i] = std::min(Ez[i], held);
-        swaterdepthn[i] = held - Efilm[i]; // leaf surface water depth
-        if (swaterdepthn[i] > vegp.mwft) swaterdepthn[i] = vegp.mwft;
-        arriving -= kept;
+    for (int i = 0; i < n; ++i) {
+        Efilm[i] = std::min(Ez[i], held[i]);
+        swaterdepthn[i] = std::min(held[i] - Efilm[i], vegp.mwft); // leaf surface water depth
     }
-    onestepin.precipground = arriving;
     // Latent heat each layer releases into the canopy air, per unit ground
     // area: its transpiration and the intercepted water it evaporates.
     for (int i = 0; i < n; ++i) {
