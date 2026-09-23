@@ -2916,16 +2916,19 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         std::vector<double> rh = onestepin.rh;
         LangrangianOne(onestepin, climdata.pk, tground, soilrh, Th, eh, vegpc, z, wind, a0v, a1,
             (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0); // updates onestepin.tair/rh in place
-        aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
-        aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
         // Convergence is judged on canopy air alone, for speed: foliage and the
         // ground surface may still be settling by a few tenths of a degree
-        // once the air has stopped moving.
+        // once the air has stopped moving. It is judged on how far this pass's
+        // solution lies from the air the pass started from, before relaxation:
+        // the relaxed step can be a small fraction of that distance, and would
+        // report convergence while the air is still far from its solution.
         tdif = 0.0;
         for (size_t i = 0; i < na; ++i) {
             double dif = std::abs(tair[i] - onestepin.tair[i]);
             if (dif > tdif) tdif = dif;
         }
+        aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
+        aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
         psir = 0.0;
         for (size_t i = 0; i < nb; ++i) psir += soilwater.swo.rootfrac[i] * soilwater.swo.psiw[i];
         psir = psir / 1000.0; // J/kg -> MPa
@@ -3048,7 +3051,9 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     // G: surface energy balance residual, Aitken-damped across outer passes.
     Aitken1DState st_G;
     double G_iter = onestepin.soilheatvars.Gflux;
-    while (dif > tolerance && nrIterations < maxIter) {
+    // At least two passes, so that stability is evaluated at least once from
+    // this hour's own sensible heat flux before the solution is accepted.
+    while ((nrIterations < 2 || dif > tolerance) && nrIterations < maxIter) {
         if (H != 0.0) {
             LL = (cpph * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
             LL = clipMOlength(LL, zref, 0.0, zm);
@@ -3311,7 +3316,9 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     double uf = 0.0;
     double LL = 1e10;
     Aitken1DState st;
-    while (error > 1e-2 && itr < maxiter) {
+    // At least two passes, so that stability is evaluated at least once from
+    // this hour's own sensible heat flux before the solution is accepted.
+    while ((itr < 2 || error > 1e-2) && itr < maxiter) {
         double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
         double zh = 0.2 * zm;
@@ -3415,7 +3422,9 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
     // G: surface energy balance residual, Aitken-damped across outer passes.
     Aitken1DState st_G;
     double G = soilheat.Gflux;
-    while (error > 1e-2 && itr < maxiter) {
+    // At least two passes, so that stability is evaluated at least once from
+    // this hour's own sensible heat flux before the solution is accepted.
+    while ((itr < 2 || error > 1e-2) && itr < maxiter) {
         // As in OneStepBare: the surface layer from the soil's roughness height,
         // with the convective velocity scale in calm, sunny conditions.
         const double zm = zmr;
@@ -3439,6 +3448,10 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
             climdata.relhum, rHa, soilwater.swo.theta[0]);
         G = aitken1d(G, G_raw, st_G);
         soilheat.Gflux = G;
+        // Convergence is judged on how far this pass's surface temperature lies
+        // from the one the pass started from, before relaxation, since the
+        // relaxed step can be a small fraction of that distance.
+        error = std::abs(soilheat.Te[0] - oldtsoil);
         newtsoil = aitken1d(newtsoil, soilheat.Te[0], st);
         soilheat.Te[0] = newtsoil;
         H = (ph * cp / rHa) * (newtsoil - climdata.tref);
@@ -3446,7 +3459,6 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         LL = clipMOlength(LL, zref, 0.0, zm);
         psim = dpsimCpp2(zm / LL) - dpsimCpp2(zref / LL);
         psih = dpsihCpp2(zh / LL) - dpsihCpp2(zref / LL);
-        error = std::abs(newtsoil - oldtsoil);
         oldtsoil = newtsoil;
         ++itr;
     }
