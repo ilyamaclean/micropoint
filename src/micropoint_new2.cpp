@@ -28,6 +28,10 @@ constexpr double EB_SLOPE_DT = 0.01;
 // the near-saturated end where the potential approaches zero.
 constexpr double PSI_SLOPE_FRAC = 1e-4;
 constexpr double PSI_SLOPE_MIN = 1.0;
+// Soil water potential of oven-dry soil (J/kg), the lower limit of the water
+// solve. Pore-air humidity there is below 0.001, far drier than any atmosphere,
+// so evaporation has limited itself long before a layer could reach it.
+constexpr double PSI_OVEN_DRY = -1.0e6;
 // Forward declaration: defined below (Bigleaf section), needed by several
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
 // SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
@@ -2184,6 +2188,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> stepOrigin(n, 0.0), stepTaken(n, 0.0);
     double originResidual = 0.0, stepFraction = 1.0;
     bool haveStep = false;
+    double surplusRate = 0.0;   // water a saturated surface cannot take (kg m-2 s-1)
     int iter = 1;
     double massBalance = 1.0;
     double Evapmmhr = 0.0;
@@ -2318,6 +2323,19 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
                 + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
             massBalance += std::abs(dd[i]);
         }
+        // A surface already at saturation can take no more water, however
+        // much arrives: its potential is held there, and the water it cannot
+        // pass to the layer below runs off. Without this the surface balance
+        // has no solution below saturation and the excess would vanish.
+        surplusRate = 0.0;
+        if (psiw[0] >= soilp.psie[0] - 2e-8 && dd[0] < 0.0) {
+            surplusRate = -dd[0];
+            massBalance -= std::abs(dd[0]);
+            aa[0] = 0.0;
+            bb[0] = 1.0;
+            cc[0] = 0.0;
+            dd[0] = 0.0;
+        }
         // A profile that already balances takes no step.
         if (massBalance <= tolerance) break;
         // A full step that left more water unaccounted for than before is
@@ -2361,6 +2379,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     out.success = (massBalance <= tolerance);
     out.iterations = iter;
     out.Evapmmhr = Evapmmhr;
+    out.surplus = surplusRate * dT;
     return out;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -2931,6 +2950,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.soilwatervars.Tc = soilheat.Te;
         soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
         onestepin.witers = soilwater.iterations;
+        onestepin.runoff = soilwater.surplus;
         tground = soilheat.Te[0];
         double soilrh = soilrelhumCpp(soilpc, tground, soilwater.swo.theta[0]);
         soilheat.wc = soilwater.swo.theta;
@@ -3124,6 +3144,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
+        onestepin.runoff = soilwater.surplus;
         // The next pass resumes the water solve where this one ended, as over
         // vegetation; the start-of-hour state it balances against is unchanged.
         onestepin.soilwatervars = soilwater.swo;
@@ -4029,11 +4050,10 @@ static soilpstruct tosoilpstruct(List soilp) {
     out.FreeDrain = Rcpp::as<bool>(soilp["FreeDrain"]);
     // Ensure psi_e is negative (air entry potential)
     for (double& v : out.psie) v = -std::abs(v);
-    // Calculate minimum psie
-    out.psi_min = std::vector<double>(out.psie.size());
-    for (size_t i = 0; i < out.psie.size(); ++i) {
-        out.psi_min[i] = waterPotential(out, out.thetaR[i], i);
-    }
+    // The water solve's lower bound: oven dryness, in every layer. The residual
+    // water content belongs to a different retention model and on Campbell's
+    // curve lies where coarse soils are still wet, so it is not a bound here.
+    out.psi_min = std::vector<double>(out.psie.size(), PSI_OVEN_DRY);
     return out;
 }
 // Creates input file for soil heat model
@@ -4835,6 +4855,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
     onestepin.Rswup = 0.0; onestepin.Rb0 = 0.0; onestepin.Rlwup = 0.0;
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
     onestepin.theta = onestepin.soilwatervars.theta[0];
+    std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
     // Create Numeric Matrices for above ground
     NumericMatrix tair(n, na);
     NumericMatrix rh(n, na);
@@ -4856,6 +4877,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         onestepin = OneStepBare(onestepin, obsdata, climin, soilpc, z, latr, lonr, zref, zm,
             maxNrIterations, tolerance);
         // Extract values
+        runoff[hr] = onestepin.runoff;
         FillMyMatrix(tair, onestepin.tair, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
         FillMyMatrix(uz, onestepin.uz, hr);
@@ -4872,7 +4894,9 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         Named("windspeed") = Rcpp::wrap(uz),
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
-        Named("theta") = Rcpp::wrap(theta)
+        Named("theta") = Rcpp::wrap(theta),
+        // Surface runoff
+        Named("runoff") = Rcpp::wrap(runoff)
     );
 }
 // Vegetated time x height matrices for the whole input time series and
@@ -4923,6 +4947,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     NumericMatrix tleaf(n, na);
     NumericMatrix rh(n, na);
     NumericMatrix uz(n, na);
+    std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
     NumericMatrix tsoil(n, nb);
@@ -4940,6 +4965,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         onestepin = OneStepBelow(onestepin, obsdata, climin, vegpc, soilpc, z, tspveg, tspvegPAR, tspdif,
             tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
         // Extract values
+        runoff[hr] = onestepin.runoff;
         FillMyMatrix(Rdirdown, onestepin.Rdirdown, hr);
         FillMyMatrix(Rdifdown, onestepin.Rdifdown, hr);
         FillMyMatrix(Rswup, onestepin.Rswup, hr);
@@ -4969,7 +4995,9 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         Named("windspeed") = Rcpp::wrap(uz),
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
-        Named("theta") = Rcpp::wrap(theta)
+        Named("theta") = Rcpp::wrap(theta),
+        // Surface runoff
+        Named("runoff") = Rcpp::wrap(runoff)
     );
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //

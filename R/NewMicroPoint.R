@@ -754,6 +754,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
 #'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{runoff}{Rain reaching the ground that the saturated soil surface
+#'     could not take, each hour (mm). A vector, one value per time step.}
 #' }
 #'
 #' For **vegetated runs** the returned elements are:
@@ -769,6 +771,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
 #'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{runoff}{Rain reaching the ground that the saturated soil surface
+#'     could not take, each hour (mm). A vector, one value per time step.}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp

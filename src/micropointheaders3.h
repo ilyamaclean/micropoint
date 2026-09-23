@@ -54,7 +54,7 @@ namespace newmodel {
         std::vector<double> thetaR; // Residual soil water fraction at wilting point 
         std::vector<double> thetaS; // Volumetric soil water fraction at saturation
         std::vector<double> Ksat; // Saturated hydrualic conductivity (kg s / m^3 - same as cm/s)
-        std::vector<double> psi_min; // Minimum psiw determined from thetaR
+        std::vector<double> psi_min; // lower bound on psiw in the water solve: oven dryness (J/kg)
     };
     struct climstruct {
         double tref; // temperature (deg C)
@@ -214,6 +214,7 @@ namespace newmodel {
         bool success; // whether model converged
         int iterations; // how many iterations model run for
         double Evapmmhr; // surface evaporation
+        double surplus = 0.0; // water a saturated surface could not take, which runs off (mm)
     };
     // Strucxtures used for convergence function
     struct WAitkenState {
@@ -261,6 +262,7 @@ namespace newmodel {
         double LL; // // Monin�Obukhov length (m)
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run
+        double runoff = 0.0; // water a saturated surface could not take (mm)
         double error;
     };
     struct onestepbare {
@@ -281,6 +283,7 @@ namespace newmodel {
         double LL; // // Monin�Obukhov length (m)
         int iters; // number of iterations for which model run
         double error;
+        double runoff = 0.0; // water a saturated surface could not take (mm)
     };
     struct bigsmallleafstruct {
         double Hsmall;
