@@ -2162,7 +2162,7 @@ static std::vector<double> root_distribute(const std::vector<double>& z, double 
 constexpr double SOIL_WATER_TOL = 1e-4;   // kg m-2 s-1
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
-    int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL, bool useDamping = true)
+    int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL)
 {
     const double rho = 1000.0;
     const int n = soilp.nLayers;
@@ -2175,12 +2175,19 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> vapor = soilmod.vapor;
     std::vector<double> k(n + 1, 0.0);
     std::vector<double> aa(n, 0.0), bb(n, 0.0), cc(n, 0.0), dd(n, 0.0);
-    std::vector<double> ff(n, 0.0), u(n, 0.0), du(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
-    std::vector<double> kh(n + 1, 0.0), kv(n + 1, 0.0);
+    std::vector<double> ff(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
+    std::vector<double> kh(n + 1, 0.0), kv(n + 1, 0.0), dkh(n + 1, 0.0), dkv(n + 1, 0.0);
+    std::vector<double> dFaceA(n, 0.0), dFaceB(n, 0.0);
+    // Where the last full Newton step started and what it was, so that a step
+    // which leaves more water unaccounted for than before can be retraced at
+    // half the length.
+    std::vector<double> stepOrigin(n, 0.0), stepTaken(n, 0.0);
+    double originResidual = 0.0, stepFraction = 1.0;
+    bool haveStep = false;
     int iter = 1;
     double massBalance = 1.0;
     double Evapmmhr = 0.0;
-    while (massBalance > tolerance && iter < maxNrIterations) {
+    while (iter < maxNrIterations) {
         // Surface flux from current state
         Evapmmhr = evaporation_flux(soilp, theta[0], soilmod.Tc[0], climdata.Tair,
             climdata.relhum, climdata.rHa, dT);
@@ -2227,12 +2234,24 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             }
             kv[i] = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
             k[i] = kh[i] + kv[i];
-            u[i] = g * k[i];
-            double nCampbell = 2.0 * soilp.b[i] + 3.0;
-            du[i] = -u[i] * nCampbell / psiw[i];
             double Cw = dTheta_dPsi(soilp, psiw[i], i);
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
+            // How each conductivity responds to water potential. Unfrozen,
+            // liquid conductivity varies as psi^-(2+3/b). Where freezing holds
+            // the liquid at the content set by temperature alone, extra water
+            // becomes ice, and conductivity responds only through the ice
+            // impedance. Vapour conductivity responds through the Kelvin
+            // humidity and through the air-filled pore space.
+            if (theta_ice > 0.0 && theta_u < theta[i]) {
+                constexpr double Omega = 7.0;
+                dkh[i] = -kh[i] * Omega * std::log(10.0) * Cw;
+            }
+            else {
+                dkh[i] = -(2.0 + 3.0 / soilp.b[i]) * kh[i] / psiw[i];
+            }
+            double airFilled = soilp.thetaS[i] - theta[i];
+            dkv[i] = kv[i] * Mw / (RgasC * Tkelvin) - ((airFilled > 0.0) ? kv[i] / airFilled * Cw : 0.0);
         }
         // Lower boundary: a saturated fixed head, which holds no vapour
         // pathway, or under free drainage a continuation of the deepest layer,
@@ -2259,49 +2278,78 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         // is not moved by gravity.
         for (int i = 0; i < n; ++i) {
             double nPsi = 2.0 + 3.0 / soilp.b[i];
-            ff[i] = (psiw[i + 1] * kh[i + 1] - psiw[i] * kh[i]) / (soilmod.dz[i] * (1.0 - nPsi))
-                + 0.5 * (kv[i] + kv[i + 1]) * (psiw[i + 1] - psiw[i]) / soilmod.dz[i]
+            double sh = soilmod.dz[i] * (1.0 - nPsi);
+            double dpsiFace = psiw[i + 1] - psiw[i];
+            double kvFace = 0.5 * (kv[i] + kv[i + 1]);
+            ff[i] = (psiw[i + 1] * kh[i + 1] - psiw[i] * kh[i]) / sh
+                + kvFace * dpsiFace / soilmod.dz[i]
                 - g * kh[i];
+            // The flux's exact response to the potential of the node above the
+            // face (A) and the node below it (B). Beneath the deepest layer the
+            // node below is either held fixed or moves with the layer, so only
+            // the layer's own potential counts, and under free drainage only
+            // through gravity.
+            if (i == n - 1 && soilp.FreeDrain) {
+                dFaceA[i] = -g * dkh[i];
+                dFaceB[i] = 0.0;
+                continue;
+            }
+            dFaceA[i] = -(kh[i] + psiw[i] * dkh[i]) / sh - kvFace / soilmod.dz[i]
+                + 0.5 * dkv[i] * dpsiFace / soilmod.dz[i] - g * dkh[i];
+            dFaceB[i] = (i + 1 < n) ? (kh[i + 1] + psiw[i + 1] * dkh[i + 1]) / sh + kvFace / soilmod.dz[i]
+                + 0.5 * dkv[i + 1] * dpsiFace / soilmod.dz[i] : 0.0;
         }
-        // Assemble system
+        // Each layer's water balance: gained through the face below, lost
+        // through the face above, to roots, and into storage. What is left
+        // over is the water unaccounted for, and the rows' exact derivatives
+        // make the Newton step.
         massBalance = 0.0;
         aa[0] = 0.0;
-        cc[0] = -k[1] / soilmod.dz[0];
-        bb[0] = k[0] / soilmod.dz[0] + Ca[0] + du[0] + dEvap_dpsi;
+        cc[0] = -dFaceB[0];
+        bb[0] = -dFaceA[0] + Ca[0] + dEvap_dpsi;
         dd[0] = surfaceFlux + STr[0] - ff[0]
             + soilmod.vol[0] * (rho * (theta[0] - oldtheta[0]) + (vapor[0] - oldvapor[0])) / dT;
         massBalance += std::abs(dd[0]);
-
         for (int i = 1; i < n; ++i) {
-            aa[i] = -k[i - 1] / soilmod.dz[i - 1] - du[i - 1];
-            cc[i] = -k[i + 1] / soilmod.dz[i];
-            bb[i] = k[i] / soilmod.dz[i - 1] + k[i] / soilmod.dz[i] + Ca[i] + du[i];
+            aa[i] = dFaceA[i - 1];
+            cc[i] = -dFaceB[i];
+            bb[i] = dFaceB[i - 1] - dFaceA[i] + Ca[i];
             dd[i] = ff[i - 1] + STr[i] - ff[i]
                 + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
             massBalance += std::abs(dd[i]);
         }
-        // Solve tridiagonal system
+        // A profile that already balances takes no step.
+        if (massBalance <= tolerance) break;
+        // A full step that left more water unaccounted for than before is
+        // retraced from where it started at half the length, down to 1/128 of
+        // it. The check comes from this assembly, which is needed anyway.
+        if (haveStep && massBalance > originResidual && stepFraction > 1.0 / 128.0) {
+            stepFraction *= 0.5;
+            for (int i = 0; i < n; ++i) {
+                psiw[i] = stepOrigin[i] - stepFraction * stepTaken[i];
+                psiw[i] = std::min(psiw[i], soilp.psie[i] - 1e-8);
+                psiw[i] = std::max(psiw[i], soilp.psi_min[i]);
+                theta[i] = thetaFromPsi(soilp, psiw[i], i);
+                vapor[i] = vaporFromPsi(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
+            }
+            ++iter;
+            continue;
+        }
+        // The full Newton step, kept between the dry bound and air entry.
         Thomas TBC = ThomasBoundaryCondition(aa, bb, cc, dd, dpsi, 0, n - 1);
         dpsi = TBC.x;
-        // Update state
         for (int i = 0; i < n; ++i) {
-            double lambda = 1.0;
-
-            if (useDamping) {
-                double dryness = (psiw[i] - soilp.psie[i]) / (soilp.psi_min[i] - soilp.psie[i]);
-                if (dryness < 0.0) dryness = 0.0;
-                if (dryness > 1.0) dryness = 1.0;
-                lambda = 0.2 + 0.8 * dryness;
-            }
-
-            psiw[i] = psiw[i] - lambda * dpsi[i];
+            stepOrigin[i] = psiw[i];
+            stepTaken[i] = dpsi[i];
+            psiw[i] = psiw[i] - dpsi[i];
             psiw[i] = std::min(psiw[i], soilp.psie[i] - 1e-8);
             psiw[i] = std::max(psiw[i], soilp.psi_min[i]);
-
             theta[i] = thetaFromPsi(soilp, psiw[i], i);
             vapor[i] = vaporFromPsi(soilp, psiw[i], theta[i], soilmod.Tc[i] + 273.15, i);
         }
-
+        originResidual = massBalance;
+        stepFraction = 1.0;
+        haveStep = true;
         ++iter;
     }
     soilmod.psiw = psiw;
@@ -2310,7 +2358,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     soilmod.k = k;
     soilwaterout out;
     out.swo = soilmod;
-    out.success = (massBalance < tolerance);
+    out.success = (massBalance <= tolerance);
     out.iterations = iter;
     out.Evapmmhr = Evapmmhr;
     return out;
