@@ -2176,12 +2176,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> k(n + 1, 0.0);
     std::vector<double> aa(n, 0.0), bb(n, 0.0), cc(n, 0.0), dd(n, 0.0);
     std::vector<double> ff(n, 0.0), u(n, 0.0), du(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
-    // Bottom boundary initialisation if required
-    if (soilp.FreeDrain == false) {
-        psiw[n] = soilp.psie[n - 1];
-        theta[n] = soilp.thetaS[n - 1];
-        k[n] = soilp.Ksat[n - 1];
-    }
+    std::vector<double> kh(n + 1, 0.0), kv(n + 1, 0.0);
     int iter = 1;
     double massBalance = 1.0;
     double Evapmmhr = 0.0;
@@ -2214,16 +2209,6 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
             climdata.Et, dT, psiw, pTAW);
 
-        if (soilp.FreeDrain == false) {
-            psiw[n] = soilp.psie[n - 1];
-            theta[n] = soilp.thetaS[n - 1];
-            k[n] = soilp.Ksat[n - 1];
-        }
-        else {
-            psiw[n] = psiw[n - 1];
-            theta[n] = theta[n - 1];
-            k[n] = k[n - 1];
-        }
         // Hydraulic properties
         for (int i = 0; i < n; ++i) {
             double Tkelvin = soilmod.Tc[i] + 273.15;
@@ -2231,35 +2216,52 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             // unfrozen water content, reduced by an impedance factor for
             // the remaining ice (Lundin 1990 / Zhao et al. form). Vapour
             // conductivity stays on total theta -- ice blocks vapour
-            // diffusion like liquid water does.
+            // diffusion like liquid water does -- and is not impeded.
             double theta_u = unfrozenTheta(soilp, theta[i], soilmod.Tc[i], i);
             double theta_ice = theta[i] - theta_u;
             if (theta_ice < 0.0) theta_ice = 0.0;
-            double kh = hydraulicConductivityFromTheta(soilp, theta_u, i);
+            kh[i] = hydraulicConductivityFromTheta(soilp, theta_u, i);
             if (theta_ice > 0.0) {
                 constexpr double Omega = 7.0;
-                kh *= std::pow(10.0, -Omega * theta_ice);
+                kh[i] *= std::pow(10.0, -Omega * theta_ice);
             }
-            double kv = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
-            k[i] = kh + kv;
+            kv[i] = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
+            k[i] = kh[i] + kv[i];
             u[i] = g * k[i];
-            // Campbell conductivity exponent, matching
-            // hydraulicConductivityFromTheta exactly (this must stay in
-            // sync with that function's own local n).
             double nCampbell = 2.0 * soilp.b[i] + 3.0;
             du[i] = -u[i] * nCampbell / psiw[i];
             double Cw = dTheta_dPsi(soilp, psiw[i], i);
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
         }
-        if (!soilp.FreeDrain == false) {
-            k[n] = k[n - 1];
+        // Lower boundary: a saturated fixed head, which holds no vapour
+        // pathway, or under free drainage a continuation of the deepest layer,
+        // so that only gravity drains the profile.
+        if (!soilp.FreeDrain) {
+            psiw[n] = soilp.psie[n - 1];
+            theta[n] = soilp.thetaS[n - 1];
+            kh[n] = soilp.Ksat[n - 1];
+            kv[n] = 0.0;
         }
-        // Flux term
+        else {
+            psiw[n] = psiw[n - 1];
+            theta[n] = theta[n - 1];
+            kh[n] = kh[n - 1];
+            kv[n] = kv[n - 1];
+        }
+        k[n] = kh[n] + kv[n];
+        // Upward water flux across the face below each layer. Liquid water
+        // moves down the gradient of the matric flux potential, psi*kh/(1 - n)
+        // with n = 2 + 3/b the exponent of Campbell conductivity in potential,
+        // which integrates the conductivity exactly between the two nodes, and
+        // falls under gravity. Vapour diffuses down the gradient of water
+        // potential with the mean of the two nodes' vapour conductivities, and
+        // is not moved by gravity.
         for (int i = 0; i < n; ++i) {
-            double nCampbell = 2.0 * soilp.b[i] + 3.0;
-            ff[i] = ((psiw[i + 1] * k[i + 1] - psiw[i] * k[i]) /
-                (soilmod.dz[i] * (1.0 - nCampbell))) - u[i];
+            double nPsi = 2.0 + 3.0 / soilp.b[i];
+            ff[i] = (psiw[i + 1] * kh[i + 1] - psiw[i] * kh[i]) / (soilmod.dz[i] * (1.0 - nPsi))
+                + 0.5 * (kv[i] + kv[i + 1]) * (psiw[i + 1] - psiw[i]) / soilmod.dz[i]
+                - g * kh[i];
         }
         // Assemble system
         massBalance = 0.0;
