@@ -2154,12 +2154,12 @@ static std::vector<double> root_distribute(const std::vector<double>& z, double 
 // An implicit Richards-type solve handles vertical redistribution and phase-coupled vapour transport, while rainfall/evaporation set the surface boundary and transpiration removes water through the root profile.
 //
 // The solve is converged when the water unaccounted for, summed over the layers,
-// falls below 1e-4 kg/m2/s, comparable to the evaporation and rainfall that move
-// it. The last step then leaves the surface layer's wetness within one or two
-// hundredths of fully converged, which is as close as it needs to be. The bound is
-// in the solve's own units and is independent of the temperature tolerance the
-// rest of the model iterates to.
-constexpr double SOIL_WATER_TOL = 1e-4;   // kg m-2 s-1
+// falls below 1e-6 kg/m2/s, about 0.004 mm an hour. Whatever is left at the
+// tolerance is a real imbalance, of consistent sign, that accumulates in the
+// surface layer from hour to hour and moves ground temperature with it, so the
+// bound is set by that carry-over rather than by the size of a single hour's
+// fluxes. With exact Newton steps it costs one or two further steps a call.
+constexpr double SOIL_WATER_TOL = 1e-6;   // kg m-2 s-1
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
     int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL)
