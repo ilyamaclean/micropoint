@@ -19,7 +19,7 @@ A data.frame with the following elements:
   \item{C4}{Parameter values for C4 Grasses}
   \item{ESh}{Parameter values for Evergreen Shrubs}
   \item{DSh}{Parameter values for Deciduous Shrubs}
-  \item{multiplier}{value of PAR when stomatal conductances is at 50 percent of its maximum value (micro mol/m^2/s)}
+  \item{multiplier}{Factor applied to each value by \code{createvegp} to convert it from the units listed to those the model uses}
 }
 }
 \usage{

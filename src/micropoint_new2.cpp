@@ -32,6 +32,12 @@ constexpr double PSI_SLOPE_MIN = 1.0;
 // solve. Pore-air humidity there is below 0.001, far drier than any atmosphere,
 // so evaporation has limited itself long before a layer could reach it.
 constexpr double PSI_OVEN_DRY = -1.0e6;
+// The water available to roots runs from field capacity, the water a soil
+// holds against gravity, to the permanent wilting point, beyond which roots
+// draw nothing (both J/kg). They are plant-side potentials, the same in every
+// soil; each soil's retention curve turns them into water contents.
+constexpr double PSI_FIELD_CAPACITY = -33.0;
+constexpr double PSI_WILTING_POINT = -1500.0;
 // Forward declaration: defined below (Bigleaf section), needed by several
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
 // SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
@@ -1946,15 +1952,26 @@ static std::vector<double> transpiration_distribute(const soilpstruct& soilp, co
         std::vector<double> w(n);
         double Trate = totalTransp_mm / dT;
         for (int i = 0; i < n; ++i) {
-            double theta_dry = soilp.thetaR[i] + p * (soilp.thetaS[i] - soilp.thetaR[i]);
-            double psi_wilt = waterPotential(soilp, soilp.thetaR[i], i);
-            double psi_dry = waterPotential(soilp, theta_dry, i);
+            // Uptake from a layer starts to fall once the plant has drawn the
+            // share p of the water available between field capacity and the
+            // wilting point, and ceases at the wilting point.
+            double theta_fc = thetaFromPsi(soilp, PSI_FIELD_CAPACITY, i);
+            double theta_wilt = thetaFromPsi(soilp, PSI_WILTING_POINT, i);
+            double psi_wilt = PSI_WILTING_POINT;
+            double psi_dry = waterPotential(soilp, theta_fc - p * (theta_fc - theta_wilt), i);
             double aw = alpha_wet(psiw[i], soilp.psie[i]);
             double ad = alpha_dry(psiw[i], psi_dry, psi_wilt);
             double alpha = aw * ad;
             w[i] = rootfrac[i] * alpha;
         }
         double sumw = std::accumulate(w.begin(), w.end(), 0.0);
+        // Where every rooted layer is past wilting the water the canopy
+        // transpired must still come from the soil, so it is drawn in
+        // proportion to roots alone.
+        if (!(sumw > 0.0)) {
+            for (int i = 0; i < n; ++i) w[i] = rootfrac[i];
+            sumw = std::accumulate(w.begin(), w.end(), 0.0);
+        }
         for (int i = 0; i < n; ++i) {
             if (sumw > 0.0) {
                 w[i] = w[i] / sumw;
@@ -3143,6 +3160,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
+        // Bare ground transpires nothing, so the depletion fraction is inert here.
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
         onestepin.runoff = soilwater.surplus;
         // The next pass resumes the water solve where this one ended, as over
@@ -3429,7 +3447,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         cfw.precip = climdata.precip; cfw.Et = Tr;
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
-        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, SOIL_WATER_TOL);
+        soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, vegp.pTAW, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, RabsG, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rGz, soilwater.swo.theta[0]); // surface energy balance residual
         G = aitken1d(G, G_raw, st);
@@ -3514,6 +3532,7 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
+        // Bare ground transpires nothing, so the depletion fraction is inert here.
         soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rHa, soilwater.swo.theta[0]);
