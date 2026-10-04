@@ -905,6 +905,22 @@ static double canopyTopStabilityHeight(double h, double d, double enhancement)
 {
     return 0.5 * (1.0 + enhancement) * (h - d);
 }
+// Resistance between the level at which a canopy treated as one big leaf gives
+// up its heat and canopy top. A surface exchanges heat less readily than
+// momentum, which is expressed by a roughness length for heat a fifth of the one
+// for momentum; the big leaf sits that far above the displacement plane and the
+// path from it to canopy top is a surface layer's. The roughness length here
+// carries no roughness-sublayer term, because the air the sublayer occupies lies
+// above canopy top and is accounted for there by the diffusivity column.
+static double bigLeafToCanopyTop(double h, double pai, double d, double uf, double LL)
+{
+    const double dt = h - d;
+    double zm0 = dt * std::exp(-ka / frictionVelocityRatio(h, pai));
+    zm0 = std::max(std::min(zm0, 0.9 * dt), Z0_GROUND);
+    const double zh0 = 0.2 * zm0;
+    const double r = (std::log(dt / zh0) + dpsihCpp2(zh0 / LL) - dpsihCpp2(dt / LL)) / (ka * uf);
+    return std::max(r, 0.0);
+}
 // Friction velocity (uf) and Monin-Obukhov length (LL) above the canopy,
 // solved jointly since each depends on the other (uf sets LL via the
 // sensible heat flux H, LL's stability correction feeds back into uf).
@@ -3416,7 +3432,6 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     double tdew = dewpointCpp2(climdata.tref, climdata.relhum);
     double ea = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     // Initialize values
-    double psih = 0.0;
     double psim = 0.0;
     double H = 0.01;
     double G = 0.0;
@@ -3432,8 +3447,20 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     while ((itr < 2 || error > 1e-2) && itr < maxiter) {
         double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
-        double zh = 0.2 * zm;
-        double rHa = (std::log((zref - d) / zh) + psih) / (ka * uf);
+        // The air above the canopy is the diffusivity column of the multilayer
+        // model, so that the soil state the spin-up hands on was formed under
+        // the same description of it. The ground exchanges with the reference
+        // height across the whole column. The big leaf exchanges across two
+        // legs: from the level at which a single leaf standing for the whole
+        // canopy gives up its heat, up to canopy top, and from canopy top to the
+        // reference height through the column. The gust constant is given as a
+        // literal because this routine has no parameter for it and cannot be
+        // reached with any value but the default.
+        const double a1s = 1.25;
+        const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, floorGustRatio(vegp, a1s), a1s,
+            canopyEnhancement(vegp.hgt, vegp.pai));
+        const double rGz = soilToZ(col, zref);
+        const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL) + rGz - col.Rh;
         // Bulk surface stomatal resistance. psiw here needs to be
         // the root-zone mean water potential (rootfrac-weighted across all
         // soil layers), matching OneStepBelow's treatment -- not just the
@@ -3447,14 +3474,6 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
             Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
         rS = std::min(rS, 1e10);
         double rV = rS + rHa;
-        // Resistance from the soil surface to zref, from the same diffusivity
-        // column as the multilayer model. The gust constant is given as a
-        // literal because this routine has no parameter for it and cannot be
-        // reached with any value but the default.
-        const double a1s = 1.25;
-        const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, floorGustRatio(vegp, a1s), a1s,
-            canopyEnhancement(vegp.hgt, vegp.pai));
-        double rGz = soilToZ(col, zref); // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
         double RabsG = RabsG_sw + RabsG_lw;
         double Tkc = tcanopy + 273.15;
@@ -3485,7 +3504,6 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         LL = (ph * cp * std::pow(uf, 3.0) * Tk) / (-ka * g * H);
         LL = clipMOlength(LL, zref, d, zm);
         psim = dpsimCpp2(zm / LL) - dpsimCpp2((zref - d) / LL);
-        psih = dpsihCpp2(zh / LL) - dpsihCpp2((zref - d) / LL);
         error = std::abs(tcanopy - oldtcanopy);
         ++itr;
     }
