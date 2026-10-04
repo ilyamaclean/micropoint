@@ -61,8 +61,8 @@ createvegp <- function(vegtype = "BET.Te") {
 #'
 #' @param soiltype Character string giving the soil type. See details. Default is \code{"Clay loam"}.
 #' @param nlayers Integer. Number of soil layers.
-#' @param totalDepth Numeric. Total soil depth (m). Internally this is multiplied
-#'   by 1.5 to allow for a boundary layer.
+#' @param totalDepth Numeric. Total soil depth (m): the depth of the deepest
+#'   node, which is held at the boundary temperature.
 #' @param slope Numeric. Surface slope (degrees).
 #' @param aspect Numeric. Surface aspect (degrees).
 #' @param surface_organicmu Numeric. Multiplication factor controlling the
@@ -116,7 +116,7 @@ createvegp <- function(vegtype = "BET.Te") {
 #'   \item{slope}{Surface slope (degrees)}
 #'   \item{aspect}{Surface aspect (degrees)}
 #'   \item{nLayers}{Number of soil layers}
-#'   \item{totalDepth}{Total soil depth used internally (m), after multiplying input depth by 1.5}
+#'   \item{totalDepth}{Total soil depth (m)}
 #'   \item{FreeDrain}{Logical indicating whether lower boundary layer is free draining}
 #' }
 #' @importFrom Rcpp sourceCpp
@@ -124,8 +124,6 @@ createvegp <- function(vegtype = "BET.Te") {
 #' @export
 createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, slope = 0, aspect = 180,
                         surface_organicmu = 3, FreeDrain = TRUE) {
-  # Adjust total depth to allow for boundary layer
-  totalDepth <- 1.5 * totalDepth
   s <- which(newsoilparamstable$Soil.type == soiltype)
   # Extract by name (not position) so this is robust to column order and
   # skips the van Genuchten-only columns (alpha, VGn, VGpsie).

@@ -19,8 +19,8 @@ createsoilc(
 
 \item{nlayers}{Integer. Number of soil layers.}
 
-\item{totalDepth}{Numeric. Total soil depth (m). Internally this is multiplied
-by 1.5 to allow for a boundary layer.}
+\item{totalDepth}{Numeric. Total soil depth (m): the depth of the deepest
+node, which is held at the boundary temperature.}
 
 \item{slope}{Numeric. Surface slope (degrees).}
 
@@ -59,7 +59,7 @@ A list of soil parameters:
   \item{slope}{Surface slope (degrees)}
   \item{aspect}{Surface aspect (degrees)}
   \item{nLayers}{Number of soil layers}
-  \item{totalDepth}{Total soil depth used internally (m), after multiplying input depth by 1.5}
+  \item{totalDepth}{Total soil depth (m)}
   \item{FreeDrain}{Logical indicating whether lower boundary layer is free draining}
 }
 }
