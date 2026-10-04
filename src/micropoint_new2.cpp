@@ -1715,25 +1715,6 @@ static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
     double Ba = Rnet - H - L;
     return Ba;
 }
-// Calculate Kmean
-// Returns the requested mean of adjacent-layer conductivities for transport across a soil interface.
-// Different averaging rules can be selected without changing the heat/water solvers.
-static double kMeanCpp(std::string meanType, double k1, double k2) {
-    if (meanType == "GEOMETRIC") {
-        return std::sqrt(k1 * k2);
-    }
-    else if (meanType == "LOGARITHMIC") {
-        if (k1 == k2) {
-            return k1;
-        }
-        else {
-            return (k1 - k2) / std::log(k1 / k2);
-        }
-    }
-    else {
-        stop("Unknown mean type. Use 'GEOMETRIC' or 'LOGARITHMIC'.");
-    }
-}
 // Calculates soil thermal conductivity (W/m/K)
 // Calculates bulk soil thermal conductivity from mineral composition, porosity and water/ice content.
 // This makes heat transport respond to both soil texture and the evolving moisture/freezing state.
@@ -4142,16 +4123,11 @@ static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<dou
     double totalDepth = Rcpp::as<double>(soilp["totalDepth"]);
     std::vector<double> z = geometricCpp(n, totalDepth);
     std::vector<double> dz(n + 1);
-    std::vector<double> zCenter(n + 1);
-    for (int i = 0; i <= n; ++i) {
-        dz[i] = z[i + 1] - z[i];
-        zCenter[i] = z[i] + dz[i] * 0.5;
-    }
+    for (int i = 0; i <= n; ++i) dz[i] = z[i + 1] - z[i];
     soilmod state;
     state.n = n;
     state.z = z; // node depths
     state.dz = dz; // layer thickness
-    state.zCenter = zCenter; // centre between nodes
     // Each node stores the heat of the soil it exchanges with its neighbours
     // for: from half-way to the node above to half-way to the node below, and
     // for the surface node the upper half of the top layer (Campbell 1985,
@@ -4176,7 +4152,6 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     out.n = state.n; // number of layers
     out.z = state.z; // node depths
     out.dz = state.dz; // layer thickness
-    out.zCenter = state.zCenter; // centre between nodes
     out.Tc = state.Te; // temperature of soil profile
     out.oldTc = state.oldTe; // old temperature of soil profile
     out.theta = state.wc; // volumetric water content of soil profile
@@ -4261,7 +4236,6 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["nb"] = Rcpp::wrap(onestepin.soilheatvars.n);
     out["zb"] = Rcpp::wrap(onestepin.soilheatvars.z);
     out["dz"] = Rcpp::wrap(onestepin.soilheatvars.dz);
-    out["zCenter"] = Rcpp::wrap(onestepin.soilheatvars.zCenter);
     out["thetas"] = Rcpp::wrap(onestepin.soilwatervars.theta);
     out["Soiltemp"] = Rcpp::wrap(onestepin.soilheatvars.Te);
     out["G"] = Rcpp::wrap(onestepin.soilheatvars.Gflux);
@@ -4396,7 +4370,6 @@ List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List
     out["nb"] = onestepin.soilheatvars.n;
     out["zb"] = onestepin.soilheatvars.z;
     out["dz"] = onestepin.soilheatvars.dz;
-    out["zCenter"] = onestepin.soilheatvars.zCenter;
     out["thetas"] = onestepin.soilwatervars.theta;
     out["Soiltemp"] = onestepin.soilheatvars.Te;
     out["G"] = onestepin.soilheatvars.Gflux;

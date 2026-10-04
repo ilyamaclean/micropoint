@@ -175,7 +175,6 @@ namespace newmodel {
         int n; // number of layers
         std::vector<double> z; // node depths
         std::vector<double> dz; // layer thickness
-        std::vector<double> zCenter; // centre between nodes
         std::vector<double> vol; // soil per unit area whose heat each node stores: half the layer above and half the layer below
         std::vector<double> wc; // volumetric water fraction of layer
         std::vector<double> Te; // temperature of layer
@@ -196,7 +195,6 @@ namespace newmodel {
         int n; // number of layers
         std::vector<double> z; // node depths
         std::vector<double> dz; // layer thickness
-        std::vector<double> zCenter; // centre between nodes
         std::vector<double> vol; // volume of layer (m3)
         std::vector<double> psiw; // water potential
         std::vector<double> k; // hydrualic conductivity
