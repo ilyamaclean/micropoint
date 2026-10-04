@@ -2136,9 +2136,14 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             lambda[i] = thermalConductivityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, Mc[i], Te_new[i], atmPressure);
             CT[i] = heatCapacityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, dtheta_ice_dTc, Te_new[i], atmPressure) * state.vol[i];
         }
-        // flux coefficients
-        ff[0] = kMeanCpp("LOGARITHMIC", lambda[0], lambda[1]) / dz[0];
-        for (int i = 1; i < n; ++i) ff[i] = lambda[i] / dz[i];
+        // Conductance of the soil between each node and the one beneath it. Each
+        // node's conductivity holds from half-way to the node above to half-way
+        // to the node below, so the soil between two nodes is two half-layers in
+        // series, each with its own conductivity (Campbell 1985, Eq. 4.8, with
+        // properties held at the nodes).
+        for (int i = 0; i < n; ++i) {
+            ff[i] = 2.0 * lambda[i] * lambda[i + 1] / ((lambda[i] + lambda[i + 1]) * dz[i]);
+        }
         // assemble tri-di system using oldTe_fixed ALWAYS
         // Every node above the deepest is solved; the deepest node, at the full
         // soil depth, is held at the lower boundary temperature.
