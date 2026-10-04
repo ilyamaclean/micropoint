@@ -152,7 +152,6 @@ namespace newmodel {
         double LL; // Monin�Obukhov length (m)
         double uf; // friction velocity
         double uh; // wind speed at top of canopy
-        double a2; // Langrangian time-scale parameter
         double zm; // roughness length
         double psi_m;
         double psi_h;

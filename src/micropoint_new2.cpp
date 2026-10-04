@@ -679,7 +679,7 @@ static double dpsihCpp2(double ze)
 // phi = 1 - zeta*dpsi/dzeta. A surface layer's diffusivity is ka*u*(z-d)/phi,
 // so wherever this model joins a layer of its own to one described by the
 // integrated correction, it uses this gradient, so that diffusivity is
-// continuous at the join. Canopy mixing (canopyMixing) uses it too.
+// continuous at the join. Canopy mixing (makeColumn) uses it too.
 static double phihStar(double ze)
 {
     if (ze < 0.0) {
@@ -886,34 +886,24 @@ static double floorGustRatio(const vegpstruct& vegp, double a1)
     }
     return a1 * std::exp(-GUST_DECAY * zeta);
 }
-// How vigorously the canopy air is stirred, expressed as the time a parcel of
-// air keeps its vertical motion as a fraction of the time the friction velocity
-// takes to cross the canopy.
-//
-// It is set by the diffusivity at canopy top. There the canopy's coherent
-// eddies mix heat two to three times more effectively than surface-layer
-// similarity allows for the air just above (Raupach, Finnigan and Brunet 1996),
-// and the canopy-top diffusivity is taken as the upper end of that range times
-// the surface-layer value. The squared gust constant cancels the value the gust
-// profile reaches at canopy top. Because the surface-layer value scales with the
-// canopy's aerodynamic depth, the time scale falls as foliage thickens, as
-// observed; for the open wind-tunnel canopy behind Raupach's widely used 0.3 it
-// returns close to that value. The enhanced mixing is carried up into the air
-// above by the roughness sublayer (see soilToZ below).
-//
-// The dimensionless temperature gradient divides rather than multiplies, because
-// it measures how steep a gradient a given heat flux must sustain -- a
-// resistance, not a conductance. Convection therefore strengthens canopy mixing
-// and stable stratification suppresses it. Stability is read at canopy top,
-// since what is described is exchange inside the canopy.
-//
-// Both the multilayer solve and the big-leaf spin-up need this, under their own
-// conditions: each brings its own stability correction, so the two are not
-// expected to agree at any given moment. Only the expression is shared.
+// How much more effectively the air at canopy top mixes heat than surface-layer
+// similarity allows there. Over a closed canopy the coherent eddies shed by the
+// canopy's shear layer raise heat diffusivity two to three times (Raupach,
+// Finnigan and Brunet 1996), and the upper end of that range is taken. No such
+// shear layer forms over open ground, where eddies are attached to the soil, so
+// the enhancement fades to none as the canopy opens.
 constexpr double CANOPY_TOP_ENHANCEMENT = 3.0;
-static double canopyMixing(double d, double hgt, double a1, double phi_h)
+static double canopyEnhancement(double h, double pai)
 {
-    return CANOPY_TOP_ENHANCEMENT * (ka * (1.0 - d / hgt)) / (a1 * a1 * phi_h);
+    return 1.0 + (CANOPY_TOP_ENHANCEMENT - 1.0) * canopyClosure(h, pai);
+}
+// Height above the displacement plane at which stability acts on the air at
+// canopy top: the canopy's eddies there are larger than their height above the
+// displacement plane would allow in a surface layer, and buoyancy acts on an
+// eddy according to its size (see stretchedHeight below).
+static double canopyTopStabilityHeight(double h, double d, double enhancement)
+{
+    return 0.5 * (1.0 + enhancement) * (h - d);
 }
 // Friction velocity (uf) and Monin-Obukhov length (LL) above the canopy,
 // solved jointly since each depends on the other (uf sets LL via the
@@ -992,14 +982,12 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    phi_h = phihStar((hgt - d) / LL);
-    double a2 = canopyMixing(d, hgt, a1, phi_h);
+    phi_h = phihStar(canopyTopStabilityHeight(hgt, d, canopyEnhancement(hgt, pai)) / LL);
     windmodel out;
     out.uz = uz;
     out.LL = LL;
     out.uf = uf;
     out.uh = uh;
-    out.a2 = a2;
     out.zm = zm;
     out.psi_m = psi_m;
     out.psi_h = psi_h;
@@ -1339,36 +1327,38 @@ static double rhcanopy(double a2, double uf, double h, double z, double a0, doub
     return inth * mu;
 }
 // ~~~~~~~~~~~~~~ Diffusivity from the soil surface to the reference height ~~~~~~~~~~~~~~~ //
-// Heat and vapour travel from the soil to the reference height through four
-// layers, each with a resistance in closed form, joined where their
-// diffusivities are equal so that the profile has no steps:
+// Heat and vapour travel from the soil to the reference height through one
+// continuous profile of eddy diffusivity, and every resistance in the model is
+// the integral of its inverse between two heights, in closed form:
 //
-//   - a surface layer over the soil, where eddies are no larger than their
-//     distance from the ground. It is the bare-ground surface layer, driven by
-//     the gusts that reach the floor rather than by the friction velocity above
-//     the canopy, since the turbulence there is delivered from canopy top;
-//   - the canopy's own mixing, above the point where that limit stops binding;
-//   - a roughness sublayer above canopy top, where the canopy's coherent eddies
-//     keep the air more strongly mixed than the surface layer above would be.
-//     Its diffusivity is carried up from its canopy-top value until the surface
-//     layer's own, growing with height, catches up (Raupach 1992);
-//   - the surface layer, to the reference height.
+//   - inside the canopy, mixing by the canopy's own gusts: the square of their
+//     strength, which rises from the floor to canopy top, times the time a
+//     parcel keeps its vertical motion;
+//   - above the canopy, a surface layer in which the air mixes as if it were
+//     further from the surface than it is. The canopy's coherent eddies are
+//     larger than a surface layer's would be at that height, which enhances
+//     mixing at canopy top; the enhancement dies away upward with no definite
+//     top, leaving the ordinary surface layer;
+//   - near the soil, wherever it is the tighter limit, a surface layer in which
+//     eddies are no larger than their distance from the ground. It is the
+//     bare-ground surface layer, driven by the gusts that reach the floor rather
+//     than by the friction velocity above the canopy, since the turbulence there
+//     is delivered from canopy top. Under a dense canopy it is a thin layer at
+//     the soil; under a sparse one it reaches canopy top or beyond.
 //
-// With no foliage the first layer reaches canopy top, the canopy and sublayer
-// vanish, and what remains is the bare-ground surface layer from soil to
-// reference height -- the same description bare ground uses, so the two meet.
+// With no foliage the ground's layer is all there is and the enhancement is
+// none, so what remains is the bare-ground surface layer from soil to reference
+// height -- the same description bare ground uses, so the two meet.
 constexpr double ZH_GROUND = 0.2 * Z0_GROUND;   // soil roughness length for heat
 struct aerocolumn {
-    double h, d, uf, LL, a0, a1, a2;
+    double h, d, uf, LL, a0, a1;
+    double a2;    // time a parcel keeps its vertical motion, as a fraction of h/uf
+    double b;     // how far the air above the canopy is stretched (see stretchedHeight)
     double ug;    // velocity scale of the soil surface layer: floor gust strength as a friction velocity
     double Kc0;   // canopy diffusivity at the floor
-    double zw;    // hand-over from the soil surface layer to canopy mixing
+    double zw;    // height at which the ground stops limiting eddy size
     double Rc0;   // canopy integral to the soil's roughness height
-    double Ktop;  // diffusivity just below canopy top
-    double zs;    // top of the roughness sublayer
-    double Ks;    // surface-layer diffusivity at the top of the sublayer
     double Rh;    // resistance from the soil to canopy top
-    double Rzs;   // resistance from the soil to the top of the sublayer
 };
 // Resistance of the soil surface layer between the soil's roughness height and
 // z, and its rate of increase with height, from the integrated stability
@@ -1386,82 +1376,91 @@ static double canopyK(const aerocolumn& c, double z)
     const double sw = c.uf * (0.5 * (c.a1 + c.a0) - 0.5 * (c.a1 - c.a0) * std::cos(pi * z / c.h));
     return sw * sw * c.a2 * c.h / c.uf;
 }
+// Above the canopy the air mixes as a surface layer does, but at a stretched
+// height: the height above the displacement plane at which a surface layer would
+// hold eddies as large as the canopy's. Just above the canopy it exceeds the
+// true height, by enough to give the canopy-top enhancement; far above, the two
+// are the same. Diffusivity, stability and resistance all follow from treating
+// the stretched height as the height in surface-layer similarity, which is what
+// keeps the resistance in closed form under any stability.
+static double stretchedHeight(const aerocolumn& c, double z)
+{
+    const double zp = z - c.d;
+    return 0.5 * (zp + std::sqrt(zp * zp + c.b * c.b));
+}
+static double airK(const aerocolumn& c, double z)
+{
+    const double zp = z - c.d;
+    return ka * c.uf * std::sqrt(zp * zp + c.b * c.b) / phihStar(stretchedHeight(c, z) / c.LL);
+}
+static double airR(const aerocolumn& c, double z1, double z2)
+{
+    const double s1 = stretchedHeight(c, z1), s2 = stretchedHeight(c, z2);
+    return (std::log(s2 / s1) - dpsihCpp2(s2 / c.LL) + dpsihCpp2(s1 / c.LL)) / (ka * c.uf);
+}
 // The ground limits eddy size up to the height where the surface layer's
 // diffusivity reaches the canopy's own floor value. The surface layer's
 // diffusivity increases strictly with height, so there is one such height or
 // none: none if the canopy is already less diffusive at the soil's roughness
-// height (very short, dense vegetation), and canopy top if it is not reached
-// within the canopy (sparse vegetation).
+// height (very short, dense vegetation). Under sparse vegetation it lies above
+// canopy top, and the ground's layer continues into the air above.
 static double groundHandOver(double h, double ug, double L, double Kc0)
 {
     const double target = 1.0 / Kc0;
     if (soilLayerSlope(ZH_GROUND * 1.0001, ug, L) <= target) return ZH_GROUND;
-    if (soilLayerSlope(h, ug, L) >= target) return h;
-    double lo = ZH_GROUND, hi = h;
-    for (int k = 0; k < 60; ++k) {
+    double hi = h;
+    while (soilLayerSlope(hi, ug, L) > target && hi < 1e4 * h) hi *= 2.0;
+    double lo = ZH_GROUND;
+    for (int k = 0; k < 80; ++k) {
         const double mid = std::sqrt(lo * hi);
         if (soilLayerSlope(mid, ug, L) > target) lo = mid; else hi = mid;
     }
     return std::sqrt(lo * hi);
 }
-static double sublayerR(const aerocolumn& c, double z)
-{
-    const double dz = std::min(z, c.zs) - c.h;
-    if (dz <= 0.0) return 0.0;
-    const double slope = (c.Ks - c.Ktop) / (c.zs - c.h);
-    if (std::abs(slope) * (c.zs - c.h) < 1e-9 * c.Ktop) return dz / c.Ktop;
-    return std::log((c.Ktop + slope * dz) / c.Ktop) / slope;
-}
 // Resistance from the soil surface to height z.
 static double soilToZ(const aerocolumn& c, double z)
 {
-    if (z <= c.h) {
-        const double zc = std::max(z, ZH_GROUND);
-        double r = rhcanopy(c.a2, c.uf, c.h, zc, c.a0, c.a1) - c.Rc0;
-        const double zz = std::min(zc, c.zw);
-        // The surface layer is added where the ground is the tighter limit, less
-        // the canopy's own contribution over the same depth so it is not counted
-        // twice; with uniform gusts (no foliage) that contribution is exactly the
-        // subtracted term and the bare-ground resistance is recovered.
-        if (zz > ZH_GROUND) r += soilLayerR(zz, c.ug, c.LL) - (zz - ZH_GROUND) / c.Kc0;
-        return r;
-    }
-    if (z <= c.zs) return c.Rh + sublayerR(c, z);
-    return c.Rzs + (std::log((z - c.d) / (c.zs - c.d)) + dpsihCpp2((c.zs - c.d) / c.LL)
-        - dpsihCpp2((z - c.d) / c.LL)) / (ka * c.uf);
+    const double zc = std::max(z, ZH_GROUND);
+    double r = (zc <= c.h) ? rhcanopy(c.a2, c.uf, c.h, zc, c.a0, c.a1) - c.Rc0
+        : rhcanopy(c.a2, c.uf, c.h, c.h, c.a0, c.a1) - c.Rc0 + airR(c, c.h, zc);
+    const double zz = std::min(zc, c.zw);
+    // The surface layer is added where the ground is the tighter limit, less
+    // the canopy's own contribution over the same depth so it is not counted
+    // twice; with uniform gusts (no foliage) that contribution is exactly the
+    // subtracted term and the bare-ground resistance is recovered.
+    if (zz > ZH_GROUND) r += soilLayerR(zz, c.ug, c.LL) - (zz - ZH_GROUND) / c.Kc0;
+    return r;
 }
-// Diffusivity at height z within the canopy, for the dispersion solve.
+// Diffusivity at height z.
 static double columnK(const aerocolumn& c, double z)
 {
-    double inv = 1.0 / canopyK(c, z);
+    double inv = 1.0 / ((z <= c.h) ? canopyK(c, z) : airK(c, z));
     if (z < c.zw) inv += std::max(0.0, soilLayerSlope(z, c.ug, c.LL) - 1.0 / c.Kc0);
     return 1.0 / inv;
 }
-// Builds the column for the current friction velocity and stability. a2 is the
-// canopy mixing under current stability, a2n its neutral value.
-static aerocolumn makeColumn(double h, double d, double uf, double LL, double a2, double a2n,
-    double a0, double a1)
+// Builds the column for the current friction velocity and stability, for a
+// canopy whose top mixes heat `enhancement` times as well as a surface layer
+// would there.
+static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0, double a1,
+    double enhancement)
 {
     aerocolumn c{};
-    c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1; c.a2 = a2;
+    c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1;
+    const double dt = h - d;
+    c.b = dt * std::sqrt(std::max(enhancement * enhancement - 1.0, 0.0));
+    // The canopy's mixing takes its canopy-top value from the air just above,
+    // so the profile is continuous there under any stability. Expressed as a
+    // time scale, the squared gust constant cancels the value the gust profile
+    // reaches at canopy top. The dimensionless temperature gradient divides,
+    // because it measures how steep a gradient a given heat flux must sustain:
+    // convection strengthens canopy mixing and stable stratification suppresses it.
+    c.a2 = ka * enhancement * (dt / h)
+        / (a1 * a1 * phihStar(canopyTopStabilityHeight(h, d, enhancement) / LL));
     c.ug = (a0 / a1) * uf;
-    c.Kc0 = a0 * a0 * uf * a2 * h;
+    c.Kc0 = a0 * a0 * uf * c.a2 * h;
     c.zw = groundHandOver(h, c.ug, LL, c.Kc0);
-    c.Rc0 = rhcanopy(a2, uf, h, ZH_GROUND, a0, a1);
-    c.Ktop = columnK(c, h * (1.0 - 1e-12));
-    // The sublayer's depth is a property of the canopy's geometry, as for
-    // momentum: it is where the neutral surface layer reaches the neutral
-    // canopy-top diffusivity. Stability then enters only through the values at
-    // its two ends, which keeps the profile continuous under any stability.
-    aerocolumn n = c;
-    n.LL = 1e99; n.a2 = a2n;
-    n.Kc0 = a0 * a0 * uf * a2n * h;
-    n.zw = groundHandOver(h, c.ug, 1e99, n.Kc0);
-    const double Ktopn = columnK(n, h * (1.0 - 1e-12));
-    c.zs = std::max(h, d + Ktopn / (ka * uf));
-    c.Ks = ka * uf * (c.zs - d) / phihStar((c.zs - d) / LL);
+    c.Rc0 = rhcanopy(c.a2, uf, h, ZH_GROUND, a0, a1);
     c.Rh = soilToZ(c, h);
-    c.Rzs = c.Rh + sublayerR(c, c.zs);
     return c;
 }
 // Closes the energy and water balance of every canopy layer for the current
@@ -2563,8 +2562,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // friction velocity: canopy mixing, limited near the ground by the soil
     // surface layer. Resistances between heights are then exact integrals of it.
     const double dcan = zeroplanedisCpp2(vegp.hgt, vegp.pai);
-    const aerocolumn col = makeColumn(vegp.hgt, dcan, uf_mix, windvars.LL, windvars.a2,
-        canopyMixing(dcan, vegp.hgt, a1, 1.0), a0, a1);
+    const aerocolumn col = makeColumn(vegp.hgt, dcan, uf_mix, windvars.LL, a0, a1,
+        canopyEnhancement(vegp.hgt, vegp.pai));
     // Physically plausible temperature/vapour-pressure range for this
     // step: between ground and canopy-top values, widened to also cover
     // every leaf's own temperature/saturation vapour pressure. Solved-for
@@ -2913,7 +2912,6 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // canopy's foliage (floorGustRatio).
     const double a0v = (a0 > 0.0) ? a0 : floorGustRatio(vegpc, a1);
     const double dcan = zeroplanedisCpp2(vegpc.hgt, vegpc.pai);
-    const double a2neutral = canopyMixing(dcan, vegpc.hgt, a1, 1.0);
     // Water held on the foliage at the start of the hour. Each pass intercepts
     // this hour's rain afresh from that state, so the film cannot fill across
     // the passes and the rain reaching the ground stays what the canopy let through.
@@ -2948,7 +2946,8 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // resistances to the reference height are the ones the canopy air is
         // solved with; otherwise, in near-calm hours, the sources found against
         // one column would be carried through another many times more resistive.
-        const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, wind.a2, a2neutral, a0v, a1);
+        const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, a0v, a1,
+            canopyEnhancement(vegpc.hgt, vegpc.pai));
         double rHa = soilToZ(col, zref); // soil surface to zref
         double rhg = col.Rh;             // soil surface to canopy top
         double rhz = rHa - rhg;          // canopy top to zref
@@ -3052,22 +3051,22 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************************** Above canopy ************************************************************** //
 // Above the canopy, temperature and humidity follow the same resistance the fluxes use: through
-// the roughness sublayer, then the surface layer. Wind follows the momentum profile.
+// the air the canopy's eddies keep well mixed, into the surface layer. Wind follows the momentum
+// profile.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // Fraction of the canopy-top-to-reference resistance that lies below height za.
 // The flux is the same at every height above the canopy, so temperature and
 // vapour pressure lie this fraction of the way from their canopy-top values to
 // their reference values. Every resistance scales with one over the friction
 // velocity, so the fraction does not depend on it. Foliage is taken as uniform,
-// which matters only for sparse canopies, whose sublayer is thin.
+// which matters only for sparse canopies, where the ground's limit on eddy
+// size can reach above canopy top.
 static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL)
 {
     const double a1 = 1.25;
     const double d = zeroplanedisCpp2(hgt, pai);
-    const double a2 = canopyMixing(d, hgt, a1, phihStar((hgt - d) / LL));
-    const double a2n = canopyMixing(d, hgt, a1, 1.0);
     const double a0 = a1 * std::exp(-GUST_DECAY * LEAF_DRAG * pai / (1.0 + SHELTER * pai));
-    const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a2, a2n, a0, a1);
+    const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a0, a1, canopyEnhancement(hgt, pai));
     return (soilToZ(col, za) - col.Rh) / (soilToZ(col, zref) - col.Rh);
 }
 // Air temperature at height za above the canopy, between canopy-top air (th)
@@ -3453,9 +3452,8 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         // literal because this routine has no parameter for it and cannot be
         // reached with any value but the default.
         const double a1s = 1.25;
-        const double phih = phihStar((vegp.hgt - d) / LL);
-        const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, canopyMixing(d, vegp.hgt, a1s, phih),
-            canopyMixing(d, vegp.hgt, a1s, 1.0), floorGustRatio(vegp, a1s), a1s);
+        const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, floorGustRatio(vegp, a1s), a1s,
+            canopyEnhancement(vegp.hgt, vegp.pai));
         double rGz = soilToZ(col, zref); // resistance from ground to zref
         double RabsG_lw = (tr * climdata.Rlw + (1.0 - tr) * sb * radem(tcanopy)) * soilp.groundem;
         double RabsG = RabsG_sw + RabsG_lw;
