@@ -259,6 +259,45 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
   clim2$pres <- hgtvars$new_pressure
   return(clim2)
 }
+#' Lowest height at which weather forcing can be referred to a canopy
+#'
+#' The model needs its weather forcing to describe air above the layer in which
+#' the canopy's own eddies distort the wind profile. This returns the lowest
+#' such height for a given canopy.
+#'
+#' @param vegp A list of vegetation parameters as returned by [createvegp()],
+#' or `NA` for bare ground.
+#'
+#' @details
+#' The height is `d + c (h - d)`, where `h` is canopy height, `d` the zero-plane
+#' displacement height and `c` the factor by which heat diffusivity at canopy
+#' top exceeds its surface-layer value: three for a closed canopy, falling to
+#' one as the canopy opens. It ranges from about 1.3 to 1.9 canopy heights for
+#' closed canopies and is the ground itself for bare ground. [RunMicro()],
+#' [RunModelFull()], [return_profile()] and [InitailizeWater()] translate
+#' forcing supplied below this height up to it with [weatherhgt_adjust()].
+#'
+#' @return The height (m) above ground.
+#' @export
+reference_height <- function(vegp) {
+  if (class(vegp) == "logical") return(0)
+  referenceheightCpp(vegp$h, vegp$pai)
+}
+#' Translates forcing measured too close to a canopy up to the height the model needs
+#'
+#' Returns the forcing and the height it then refers to. Forcing already at or
+#' above the required height is returned unchanged.
+#' @noRd
+forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA) {
+  zreq <- reference_height(vegp)
+  if (zref >= zreq - 1e-6) return(list(climdata = climdata, zref = zref))
+  message(sprintf("Weather at %.4g m is too close to a canopy of this height and density; translated to %.4g m.",
+                  zref, zreq))
+  # forcing already checked by the caller
+  climdata <- suppressWarnings(weatherhgt_adjust(climdata, zref, zreq, lat, long,
+                                                 CO2ppm = CO2ppm, boundaryT = boundaryT))
+  list(climdata = climdata, zref = zreq)
+}
 #' Reduces a canopy too short to resolve to bare ground
 #'
 #' @param vegp Vegetation parameter list as returned by [createvegp()], or `NA`.
@@ -341,6 +380,8 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
     }
     if (length(Lfrac) == 1) Lfrac <- rep(Lfrac, 10)
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    climdata <- fr$climdata; zref <- fr$zref
     blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
                        lat, long, boundaryT, maxiter, C3)
   }
@@ -397,12 +438,13 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' calculated; otherwise a bare-ground profile is returned.
 #'
 #' Standard meteorological observations are often measured about 2 m above the
-#' ground. If vegetation height exceeds this measurement height, the forcing
-#' data lie within the canopy rather than above it. Because the microclimate
-#' model requires above-canopy forcing, the weather data are first adjusted to
-#' a height above the canopy before the profile is calculated. If using the function
-#' repeatedly to generate height profiles for different hours, it is much quicker
-#' to pre height-adjust `climdata` using [weatherhgt_adjust()].
+#' ground. The model needs forcing that describes air above the layer in which
+#' the canopy's own eddies distort the wind profile, at or above the height
+#' given by [reference_height()]. Forcing supplied below that height is first
+#' translated up to it, and the profile is then returned up to that height; the
+#' height used is returned as `zref`. If using the function repeatedly to
+#' generate height profiles for different hours, it is much quicker to
+#' translate `climdata` once beforehand using [weatherhgt_adjust()].
 #'
 #' If `plotout = TRUE`, the selected profile is plotted. For `"temp"`, soil,
 #' air, and leaf temperature profiles are plotted where available. For
@@ -482,14 +524,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = 20),
                       method = "natural")$y
     Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
-    # Check whether height adjustment is required
-    if (vegp$h > (zref - 1)) {
-      zref2 <- vegp$h + 2
-      climdata2 <- suppressWarnings(weatherhgt_adjust(climdata, zref, zref2, lat, long, SoilTempIni, ThetaIni, CO2ppm, boundaryT))  # forcing already checked above
-    } else {
-      zref2 <- zref
-      climdata2 <- climdata
-    }
+    # Forcing measured too close to the canopy is translated up to the height the model needs
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    climdata2 <- fr$climdata; zref2 <- fr$zref
     mout <- profileR(hr - 1, obstime, climdata2, soilc, vegp, paii20, paii,
                      Lfrac20, Lfrac, zref2, CO2ppm, lat, long, SoilTempIni, ThetaIni,
                      maxiter, tolerance, -1, 1.25, C3)
@@ -509,6 +546,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     mout$za <- za
     mout$tair_above <- tabove
     mout$rh_above <- rhabove
+    # the height the forcing was referred to, and the wind there, for the hour returned
+    mout$zref <- zref2
+    mout$uref <- climdata2$windspeed[hr]
   }
   if (plotout) {
     tp <- paste0("Hour: ", hr)
@@ -613,7 +653,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' Standard meteorological observations are typically made about 2 m above the
 #' ground. If vegetation is taller than the measurement height, these data lie
 #' within the canopy rather than above it. The microclimate model requires
-#' above-canopy meteorological forcing, so when vegetation is present the model
+#' forcing at or above the height given by [reference_height()]; forcing
+#' supplied below it is translated up to that height with
+#' [weatherhgt_adjust()] before the run. When vegetation is present the model
 #' uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
 #' conditions at the requested height `reqhgt`.
 #'
@@ -683,6 +725,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
                      ThetaIni, zm, maxiter, tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    climdata <- fr$climdata; zref <- fr$zref
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, maxiter, tolerance, -1, 1.25, C3)
   }
@@ -731,9 +775,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #'
 #' @details
-#' The meteorological forcing data must represent above-canopy conditions.
-#' If the supplied forcing height `zref` is below the canopy, the model applies
-#' the required height adjustment internally before running the simulation.
+#' The meteorological forcing data must describe air at or above the height
+#' given by [reference_height()]. Forcing supplied below that height is
+#' translated up to it with [weatherhgt_adjust()] before the simulation, and
+#' the heights returned then extend to that height.
 #'
 #' If `vegp` is `NA`, the model runs in bare-ground mode. Otherwise the full
 #' canopy model is used with vegetation structure defined by `vegp`, `paii`,
@@ -808,6 +853,8 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                              SoilTempIni, ThetaIni, maxiter, tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    climdata <- fr$climdata; zref <- fr$zref
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, maxiter, tolerance,
                          -1, 1.25, C3)

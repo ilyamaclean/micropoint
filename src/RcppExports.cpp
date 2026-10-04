@@ -46,6 +46,18 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// referenceheightCpp
+double referenceheightCpp(double h, double pai);
+RcppExport SEXP _micropoint_referenceheightCpp(SEXP hSEXP, SEXP paiSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< double >::type h(hSEXP);
+    Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
+    rcpp_result_gen = Rcpp::wrap(referenceheightCpp(h, pai));
+    return rcpp_result_gen;
+END_RCPP
+}
 // satvapCpp2
 double satvapCpp2(double tc);
 RcppExport SEXP _micropoint_satvapCpp2(SEXP tcSEXP) {
@@ -470,6 +482,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
     {"_micropoint_roughlengthCpp2", (DL_FUNC) &_micropoint_roughlengthCpp2, 3},
     {"_micropoint_dpsimCpp2", (DL_FUNC) &_micropoint_dpsimCpp2, 1},
+    {"_micropoint_referenceheightCpp", (DL_FUNC) &_micropoint_referenceheightCpp, 2},
     {"_micropoint_satvapCpp2", (DL_FUNC) &_micropoint_satvapCpp2, 1},
     {"_micropoint_geometricCpp", (DL_FUNC) &_micropoint_geometricCpp, 2},
     {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 7},

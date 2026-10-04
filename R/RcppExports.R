@@ -13,6 +13,10 @@ dpsimCpp2 <- function(ze) {
     .Call(`_micropoint_dpsimCpp2`, ze)
 }
 
+referenceheightCpp <- function(h, pai) {
+    .Call(`_micropoint_referenceheightCpp`, h, pai)
+}
+
 satvapCpp2 <- function(tc) {
     .Call(`_micropoint_satvapCpp2`, tc)
 }

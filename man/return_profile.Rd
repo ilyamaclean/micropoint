@@ -124,12 +124,13 @@ profile for that hour. If `vegp` is provided, a vegetated profile is
 calculated; otherwise a bare-ground profile is returned.
 
 Standard meteorological observations are often measured about 2 m above the
-ground. If vegetation height exceeds this measurement height, the forcing
-data lie within the canopy rather than above it. Because the microclimate
-model requires above-canopy forcing, the weather data are first adjusted to
-a height above the canopy before the profile is calculated. If using the function
-repeatedly to generate height profiles for different hours, it is much quicker
-to pre height-adjust `climdata` using [weatherhgt_adjust()].
+ground. The model needs forcing that describes air above the layer in which
+the canopy's own eddies distort the wind profile, at or above the height
+given by [reference_height()]. Forcing supplied below that height is first
+translated up to it, and the profile is then returned up to that height; the
+height used is returned as `zref`. If using the function repeatedly to
+generate height profiles for different hours, it is much quicker to
+translate `climdata` once beforehand using [weatherhgt_adjust()].
 
 If `plotout = TRUE`, the selected profile is plotted. For `"temp"`, soil,
 air, and leaf temperature profiles are plotted where available. For

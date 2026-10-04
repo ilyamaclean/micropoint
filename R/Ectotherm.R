@@ -188,8 +188,16 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     # Friction velocity from the reference wind with the stability correction
     # between the roughness height and the reference height, then the wind at
     # each height above the canopy from the same profile.
+    # The profile may have been run with its forcing translated to a greater
+    # height than supplied; the wind and the height it refers to are then the
+    # ones the profile carries.
+    uref <- climdata$windspeed[hr]
+    if (!is.null(moutprofile$zref)) {
+      zref <- moutprofile$zref
+      uref <- moutprofile$uref
+    }
     psimref <- dpsimCpp2(zm / moutprofile$LL) - dpsimCpp2((zref - d) / moutprofile$LL)
-    uf <- (0.41 * climdata$windspeed[hr]) / (log((zref - d)/zm) + psimref)
+    uf <- (0.41 * uref) / (log((zref - d)/zm) + psimref)
     psim <- 0
     for (i in 1:length(za)) psim[i] <- dpsimCpp2(zm / moutprofile$LL) - dpsimCpp2((za[i] - d) / moutprofile$LL)
     uza <- (uf / 0.41) * (log((moutprofile$za - d) / zm) + psim)

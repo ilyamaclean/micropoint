@@ -110,9 +110,10 @@ simulated microclimate profiles for all heights above ground and all soil
 nodes below ground.
 }
 \details{
-The meteorological forcing data must represent above-canopy conditions.
-If the supplied forcing height `zref` is below the canopy, the model applies
-the required height adjustment internally before running the simulation.
+The meteorological forcing data must describe air at or above the height
+given by [reference_height()]. Forcing supplied below that height is
+translated up to it with [weatherhgt_adjust()] before the simulation, and
+the heights returned then extend to that height.
 
 If `vegp` is `NA`, the model runs in bare-ground mode. Otherwise the full
 canopy model is used with vegetation structure defined by `vegp`, `paii`,

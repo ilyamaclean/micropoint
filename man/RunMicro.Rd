@@ -113,7 +113,9 @@ the simulated microclimate at the requested height `reqhgt`.
 Standard meteorological observations are typically made about 2 m above the
 ground. If vegetation is taller than the measurement height, these data lie
 within the canopy rather than above it. The microclimate model requires
-above-canopy meteorological forcing, so when vegetation is present the model
+forcing at or above the height given by [reference_height()]; forcing
+supplied below it is translated up to that height with
+[weatherhgt_adjust()] before the run. When vegetation is present the model
 uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
 conditions at the requested height `reqhgt`.
 

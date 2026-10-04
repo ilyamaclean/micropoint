@@ -897,6 +897,20 @@ static double canopyEnhancement(double h, double pai)
 {
     return 1.0 + (CANOPY_TOP_ENHANCEMENT - 1.0) * canopyClosure(h, pai);
 }
+// Lowest height at which weather forcing can be referred to this canopy. The
+// model finds friction velocity from the wind there by the logarithmic law, and
+// reaches canopy top from there through the diffusivity column, so the height
+// must lie above the layer in which the canopy's eddies distort the wind
+// profile. It is taken as the height at which a surface layer's diffusivity
+// would equal the canopy-top value, which is always above that layer. Over bare
+// ground it is the ground itself.
+// [[Rcpp::export]]
+double referenceheightCpp(double h, double pai)
+{
+    if (h <= 0.0) return 0.0;
+    const double d = zeroplanedisCpp2(h, pai);
+    return d + canopyEnhancement(h, pai) * (h - d);
+}
 // Height above the displacement plane at which stability acts on the air at
 // canopy top: the canopy's eddies there are larger than their height above the
 // displacement plane would allow in a surface layer, and buoyancy acts on an
