@@ -4147,7 +4147,15 @@ static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<dou
     state.z = z; // node depths
     state.dz = dz; // layer thickness
     state.zCenter = zCenter; // centre between nodes
-    state.vol = dz; // volume of layer
+    // Each node stores the heat of the soil it exchanges with its neighbours
+    // for: from half-way to the node above to half-way to the node below, and
+    // for the surface node the upper half of the top layer (Campbell 1985,
+    // Eq. 4.7). The deepest node is the fixed lower boundary and stores nothing
+    // that is solved for.
+    std::vector<double> vol(n + 1);
+    vol[0] = 0.5 * (z[1] - z[0]);
+    for (int i = 1; i <= n; ++i) vol[i] = 0.5 * (z[i + 1] - z[i - 1]);
+    state.vol = vol;
     state.wc = wc; // volumetric water fraction of layer
     state.Te = Te; // temperature of layer
     state.oldTe = Te; // old temperature of layer
