@@ -5,8 +5,8 @@ zeroplanedisCpp2 <- function(h, pai) {
     .Call(`_micropoint_zeroplanedisCpp2`, h, pai)
 }
 
-roughlengthCpp2 <- function(h, pai, d, z0 = 0.004) {
-    .Call(`_micropoint_roughlengthCpp2`, h, pai, d, z0)
+roughlengthCpp2 <- function(h, pai, d, z0 = 0.004, fade = 1.0) {
+    .Call(`_micropoint_roughlengthCpp2`, h, pai, d, z0, fade)
 }
 
 dpsimCpp2 <- function(ze) {
@@ -25,12 +25,12 @@ geometricCpp <- function(n, totalDepth) {
     .Call(`_micropoint_geometricCpp`, n, totalDepth)
 }
 
-Tabove <- function(za, zref, th, tref, hgt, pai, LL = 1e99, z0 = 0.004) {
-    .Call(`_micropoint_Tabove`, za, zref, th, tref, hgt, pai, LL, z0)
+Tabove <- function(za, zref, th, tref, hgt, pai, LL = 1e99, z0 = 0.004, fade = 1.0) {
+    .Call(`_micropoint_Tabove`, za, zref, th, tref, hgt, pai, LL, z0, fade)
 }
 
-RHabove <- function(za, zref, rh, th, tref, tz, relhum, hgt, pai, LL = 1e99, z0 = 0.004) {
-    .Call(`_micropoint_RHabove`, za, zref, rh, th, tref, tz, relhum, hgt, pai, LL, z0)
+RHabove <- function(za, zref, rh, th, tref, tz, relhum, hgt, pai, LL = 1e99, z0 = 0.004, fade = 1.0) {
+    .Call(`_micropoint_RHabove`, za, zref, rh, th, tref, tz, relhum, hgt, pai, LL, z0, fade)
 }
 
 Uabove <- function(za, zref, uh, uref, hgt, pai, LL) {

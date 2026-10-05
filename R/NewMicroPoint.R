@@ -541,8 +541,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     tabove <- 0
     rhabove <- 0
     for (i in 1:length(za)) {
-      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai, mout$LL, zm)
-      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai, mout$LL, zm)
+      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai, mout$LL, zm, mout$fade)
+      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai, mout$LL, zm, mout$fade)
     }
     mout$za <- za
     mout$tair_above <- tabove

@@ -161,6 +161,7 @@ namespace newmodel {
         // roughness and stability, so it converts a wind speed into the
         // friction velocity that wind produces over this particular canopy.
         double ufratio;
+        double fade; // weight of canopy-scale turbulence: 1 fully turbulent, 0 absent
     };
     struct rainmodel {
         std::vector<double> kd; // extinction coefficient
@@ -257,6 +258,7 @@ namespace newmodel {
         double psim; // psi_m
         double psih; // psi_h
         double phih; // phi_h
+        double fade; // weight of canopy-scale turbulence this step
         double LL; // // Monin�Obukhov length (m)
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run
