@@ -3035,9 +3035,10 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     int nrIterations = 0;
     size_t na = onestepin.tair.size();
     double tground = onestepin.soilheatvars.Te[0];
-    double Th = onestepin.tair[na - 1];
-    double rcanh = onestepin.rh[na - 1];
-    double eh = satvapCpp2(Th) * (rcanh / 100.0);
+    // Canopy-top air is the upper boundary of the canopy air, carried from hour
+    // to hour as a state of its own.
+    double Th = onestepin.tcanopy;
+    double eh = satvapCpp2(Th) * (onestepin.rhcanopy / 100.0);
     double psir = 0.0; // root-zone mean water potential
     size_t nb = onestepin.soilwatervars.rootfrac.size();
     for (size_t i = 0; i < nb; ++i) psir += onestepin.soilwatervars.rootfrac[i] * onestepin.soilwatervars.psiw[i];
@@ -3072,6 +3073,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, H_iter, climdata.tref, climdata.pk, maxIter, a1,
             onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
         onestepin.uz = wind.uz;
+        onestepin.ucanopy = wind.uh;
         onestepin.psih = wind.psi_h;
         onestepin.psim = wind.psi_m;
         onestepin.phih = wind.phi_h;
@@ -4351,6 +4353,7 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.phih = 1.0;
     onestepin.fade = 1.0;
     onestepin.tcanopy = temp0;
+    onestepin.ucanopy = 1.0;
     onestepin.rhcanopy = rh0;
     onestepin.LL = 999.99;
     onestepin.iters = 0;
@@ -4390,6 +4393,7 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["rh"] = Rcpp::wrap(onestepin.rh);
     out["tcanopy"] = onestepin.tcanopy;
     out["rhcanopy"] = onestepin.rhcanopy;
+    out["ucanopy"] = onestepin.ucanopy;
     out["uz"] = Rcpp::wrap(onestepin.uz);
     out["rLB"] = Rcpp::wrap(onestepin.rLB);
     out["swaterdepth"] = Rcpp::wrap(onestepin.swaterdepth);
@@ -4860,16 +4864,15 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
             Rdirdown[hr] = onestepin.Rdirdown[sel];
             Rswup[hr] = onestepin.Rswup[sel];
             Rlwup[hr] = onestepin.Rlwup[sel];
-            if (reqhgt > vegpc.hgt) {
+            if (reqhgt >= vegpc.hgt) {
                 Rdifdown[hr] = Rdif[hr];
                 Rlwdown[hr] = Rlw[hr];
-                double Th = onestepin.tair[na - 1];
-                double rh = onestepin.rh[na - 1];
-                double uh = onestepin.uz[na - 1];
-                tair[hr] = Tabove(reqhgt, zref, Th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+                const double Th = onestepin.tcanopy;
+                tair[hr] = Tabove(reqhgt, zref, Th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL, soilpc.z0, onestepin.fade);
                 tleaf[hr] = -999.99;
-                rz[hr] = RHabove(reqhgt, zref, rh, Th, temp[hr], tair[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
-                uz[hr] = Uabove(reqhgt, zref, uh, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+                rz[hr] = RHabove(reqhgt, zref, onestepin.rhcanopy, Th, temp[hr], tair[hr], relhum[hr], vegpc.hgt, vegpc.pai,
+                    onestepin.LL, soilpc.z0, onestepin.fade);
+                uz[hr] = Uabove(reqhgt, zref, onestepin.ucanopy, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
             }
             else {
                 Rdifdown[hr] = onestepin.Rdifdown[sel];
@@ -4973,10 +4976,10 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         climin.winddir = wdir[hr]; climin.precip = precip[hr];
         onestepin = OneStepBelow(onestepin, obsdata, climin, vegpc, soilpc, z, tspveg, tspvegPAR, tspdif,
             tspdifPAR, wgts, wc, CO2ppm, latr, lonr, zin, 100, 1e-2);
-        double th = onestepin.tair[na - 1];
-        double rh = onestepin.rh[na - 1];
-        temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
-        relhum_new[hr] = RHabove(zout, zin, rh, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+        const double th = onestepin.tcanopy;
+        temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL, soilpc.z0, onestepin.fade);
+        relhum_new[hr] = RHabove(zout, zin, onestepin.rhcanopy, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai,
+            onestepin.LL, soilpc.z0, onestepin.fade);
         // Friction velocity from the wind at zin and the stability correction
         // over the same span, then the wind at zout from the same profile.
         double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d, soilpc.z0);

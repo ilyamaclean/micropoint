@@ -544,8 +544,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     na <- round((2 / vegp$h) * length(paii), 0)
     za <- seq(vegp$h, zref2, length.out = na)
     # get canopy top values
-    Th <- mout$tair[length(mout$tair)]
-    Rh <- mout$rh[length(mout$rh)]
+    Th <- mout$tcanopy
+    Rh <- mout$rhcanopy
     tabove <- 0
     rhabove <- 0
     for (i in 1:length(za)) {
