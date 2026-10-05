@@ -2819,6 +2819,62 @@ static inline void aitkin_weightdif(
     }
     st.omega = omega;
 }
+// The air the ground exchanges heat and vapour with, and the resistance to it.
+//
+// The ground touches only the air just above it, and exchanges with that air
+// across the resistance between them. Its heat and vapour then rise through the
+// canopy as one flux, beneath every foliage layer, to canopy top and on to the
+// reference height. Each foliage layer, for its part, raises all the air beneath
+// it by its own source strength times the resistance from the layer up to the
+// reference height. So the air just above the ground is the reference air,
+// raised by every foliage layer in that way, and raised again by the ground's
+// own flux times the resistance from there to the reference height.
+//
+// The last of those depends on the flux being sought. Carrying it across to the
+// other side of the balance adds the resistance above the lowest air to the
+// resistance below it, and the air just above the ground drops out: the ground's
+// flux is its difference from the reference air raised by the foliage alone,
+// across the whole resistance from the soil to the reference height. That is the
+// form returned here. It is the local exchange written with the local air
+// eliminated, not an exchange with the reference air, and it needs no value of
+// the canopy air from a previous pass.
+//
+// The same raise taken only as far as canopy top (Ttop, etop) is what the
+// canopy-top balance needs, and the summed sources are the foliage's share of
+// the fluxes at the reference height.
+struct groundair {
+    double T;        // temperature of the air the ground exchanges with (deg C)
+    double relhum;   // its relative humidity (%)
+    double R;        // resistance from the soil surface to it (s/m)
+    double Ttop;     // the foliage's raise of the air at the ground above canopy-top air (K)
+    double etop;     // the same for vapour pressure (kPa)
+    double Hfoliage; // sensible heat released by all foliage (W/m2 of ground)
+    double Lfoliage; // latent heat released by all foliage (W/m2 of ground)
+};
+static groundair airSeenByGround(const climstruct& climdata, const vegpstruct& vegp,
+    const std::vector<double>& Hz, const std::vector<double>& Lz,
+    const std::vector<double>& rz_zref, double rHa, double rhz)
+{
+    groundair out{};
+    double Trise = 0.0, erise = 0.0, Tsrc = 0.0, esrc = 0.0;
+    const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
+    const double lar = (climdata.tref >= 0.0) ? (45068.7 - 42.8428 * climdata.tref)
+        : (51078.69 - 4.338 * climdata.tref - 0.06367 * climdata.tref * climdata.tref);
+    for (size_t i = 0; i < rz_zref.size(); ++i) {
+        const double SH = vegp.paii[i] * Hz[i], SL = Lz[i];
+        out.Hfoliage += SH; out.Lfoliage += SL;
+        Trise += SH * rz_zref[i]; erise += SL * rz_zref[i];
+        Tsrc += SH * (rz_zref[i] - rhz); esrc += SL * (rz_zref[i] - rhz);
+    }
+    Trise /= (phr * cpr); erise *= climdata.pk / (phr * lar);
+    Tsrc /= (phr * cpr); esrc *= climdata.pk / (phr * lar);
+    out.T = climdata.tref + Trise;
+    out.relhum = 100.0 * (satvapCpp2(climdata.tref) * climdata.relhum / 100.0 + erise) / satvapCpp2(out.T);
+    out.R = rHa;
+    out.Ttop = Tsrc;
+    out.etop = esrc;
+    return out;
+}
 // Temperature and vapour pressure of the air at canopy top. That air lies
 // between the reference air above and the ground below and receives the heat
 // and vapour the foliage releases; its state is the one at which what arrives
@@ -2994,34 +3050,13 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         }
         plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, dTs, 3600.0, C3); // updates onestepin in place
         aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, st_leaf);
-        // The air the ground exchanges with. Heat and vapour from the ground pass
-        // beneath every foliage source on their way to the reference height,
-        // and each source's far field raises the air below it by its strength
-        // times the resistance from it to the reference height. The ground's
-        // fluxes are driven by its difference from the reference air raised by
-        // all of them, across the whole column. The same rise, taken to canopy
-        // top, is what the canopy-top balance needs (Tsrc, esrc), and the
-        // latent-heat and sensible-heat sums are what the reference height sees.
-        double Hcanopy = 0.0, Lcanopy = 0.0, Trise = 0.0, erise = 0.0, Tsrc = 0.0, esrc = 0.0;
-        {
-            const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
-            const double lar = (climdata.tref >= 0.0) ? (45068.7 - 42.8428 * climdata.tref)
-                : (51078.69 - 4.338 * climdata.tref - 0.06367 * climdata.tref * climdata.tref);
-            for (size_t i = 0; i < na; ++i) {
-                const double SH = vegpc.paii[i] * onestepin.Hz[i], SL = onestepin.Lz[i];
-                Hcanopy += SH; Lcanopy += SL;
-                Trise += SH * rz_zref[i]; erise += SL * rz_zref[i];
-                Tsrc += SH * (rz_zref[i] - rhz); esrc += SL * (rz_zref[i] - rhz);
-            }
-            Trise /= (phr * cpr); erise *= climdata.pk / (phr * lar);
-            Tsrc /= (phr * cpr); esrc *= climdata.pk / (phr * lar);
-        }
-        const double Tref_g = climdata.tref + Trise;
-        const double relhum_g = 100.0 * (satvapCpp2(climdata.tref) * climdata.relhum / 100.0 + erise) / satvapCpp2(Tref_g);
+        // The air the ground exchanges with this pass, given the foliage's
+        // sources as the leaf model has just left them.
+        const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
         double Rabs = swrad.RswGabs + lwrad.RlwGabs;
-        soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, Tref_g, relhum_g, climdata.pk, rHa, 3600, 1.0, maxIter);
+        soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600, 1.0, maxIter);
         climforwaterstruct cfw = {};
-        cfw.Rabs = Rabs; cfw.Tair = Tref_g; cfw.relhum = relhum_g; cfw.pk = climdata.pk; cfw.rHa = rHa;
+        cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
         cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
@@ -3031,8 +3066,8 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         tground = soilheat.Te[0];
         double soilrh = soilrelhumCpp(soilpc, tground, soilwater.swo.theta[0]);
         soilheat.wc = soilwater.swo.theta;
-        double G_raw = soilsurfaceEB(soilpc, Rabs, Tref_g, soilheat.Te[0], climdata.pk,
-            relhum_g, rHa, soilwater.swo.theta[0]);
+        double G_raw = soilsurfaceEB(soilpc, Rabs, ga.T, soilheat.Te[0], climdata.pk,
+            ga.relhum, ga.R, soilwater.swo.theta[0]);
         G_iter = aitken1d(G_iter, G_raw, st_G);
         soilheat.Gflux = G_iter;
         onestepin.soilheatvars = soilheat;
@@ -3044,14 +3079,14 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // reference height and drive the stability of the air above.
         {
             const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
-            onestepin.H = Hcanopy + (phr * cpr / rHa) * (tground - Tref_g);
+            onestepin.H = ga.Hfoliage + (phr * cpr / ga.R) * (tground - ga.T);
         }
         H_iter = aitken1d(H_iter, onestepin.H, st_H);
-        onestepin.L = Lcanopy + groundLatentFlux(soilpc, tground, Tref_g, relhum_g,
-            climdata.pk, rHa, soilwater.swo.theta[0]);
+        onestepin.L = ga.Lfoliage + groundLatentFlux(soilpc, tground, ga.T, ga.relhum,
+            climdata.pk, ga.R, soilwater.swo.theta[0]);
         if (zref > vegpc.hgt) {
             cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, Th, eh, tground, soilrh,
-                rhg, rhz, Tsrc, esrc, maxIter, tolerance);
+                rhg, rhz, ga.Ttop, ga.etop, maxIter, tolerance);
             Th = Theh.Th;
             eh = Theh.eh;
         }
