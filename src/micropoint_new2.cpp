@@ -1715,6 +1715,25 @@ static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
     double Ba = Rnet - H - L;
     return Ba;
 }
+// Calculate Kmean
+// Returns the requested mean of adjacent-layer conductivities for transport across a soil interface.
+// Different averaging rules can be selected without changing the heat/water solvers.
+static double kMeanCpp(std::string meanType, double k1, double k2) {
+    if (meanType == "GEOMETRIC") {
+        return std::sqrt(k1 * k2);
+    }
+    else if (meanType == "LOGARITHMIC") {
+        if (k1 == k2) {
+            return k1;
+        }
+        else {
+            return (k1 - k2) / std::log(k1 / k2);
+        }
+    }
+    else {
+        stop("Unknown mean type. Use 'GEOMETRIC' or 'LOGARITHMIC'.");
+    }
+}
 // Calculates soil thermal conductivity (W/m/K)
 // Calculates bulk soil thermal conductivity from mineral composition, porosity and water/ice content.
 // This makes heat transport respond to both soil texture and the evolving moisture/freezing state.
@@ -2117,14 +2136,9 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             lambda[i] = thermalConductivityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, Mc[i], Te_new[i], atmPressure);
             CT[i] = heatCapacityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, dtheta_ice_dTc, Te_new[i], atmPressure) * state.vol[i];
         }
-        // Conductance of the soil between each node and the one beneath it. Each
-        // node's conductivity holds from half-way to the node above to half-way
-        // to the node below, so the soil between two nodes is two half-layers in
-        // series, each with its own conductivity (Campbell 1985, Eq. 4.8, with
-        // properties held at the nodes).
-        for (int i = 0; i < n; ++i) {
-            ff[i] = 2.0 * lambda[i] * lambda[i + 1] / ((lambda[i] + lambda[i + 1]) * dz[i]);
-        }
+        // flux coefficients
+        ff[0] = kMeanCpp("LOGARITHMIC", lambda[0], lambda[1]) / dz[0];
+        for (int i = 1; i < n; ++i) ff[i] = lambda[i] / dz[i];
         // assemble tri-di system using oldTe_fixed ALWAYS
         // Every node above the deepest is solved; the deepest node, at the full
         // soil depth, is held at the lower boundary temperature.
