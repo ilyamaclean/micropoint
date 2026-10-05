@@ -1381,6 +1381,20 @@ static double rhcanopy(double a2, double uf, double h, double z, double a0, doub
 // With no foliage the ground's layer is all there is and the enhancement is
 // none, so what remains is the bare-ground surface layer from soil to reference
 // height -- the same description bare ground uses, so the two meet.
+// Height above the soil at which the soil surface layer begins, for heat and
+// vapour. A rough surface exchanges heat less readily than momentum, expressed
+// by a roughness length for heat a fifth of the one for momentum. In light wind
+// the thin layer of air against the surface, across which heat crosses by
+// molecular diffusion alone, grows thicker than the soil's roughness elements
+// and governs instead: the surface then behaves as a smooth one, whose
+// roughness length for heat is the molecular diffusivity over the velocity
+// scale of the turbulence above it. The larger of the two applies, which keeps
+// the resistance next to the soil bounded as the wind drops.
+constexpr double AIR_HEAT_DIFFUSIVITY = 2.1e-5;   // m2/s, near 20 deg C
+static double heatRoughness(double z0, double ufloor)
+{
+    return std::max(0.2 * z0, AIR_HEAT_DIFFUSIVITY / (ka * std::max(ufloor, 1e-6)));
+}
 struct aerocolumn {
     double h, d, uf, LL, a0, a1;
     double zh;    // the soil's roughness height for heat: where the soil surface layer begins
@@ -1478,9 +1492,9 @@ static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0
 {
     aerocolumn c{};
     c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1;
-    // A surface exchanges heat less readily than momentum, expressed by a
-    // roughness length for heat a fifth of the one for momentum.
-    c.zh = 0.2 * z0;
+    // The soil surface layer is driven by the gusts that reach the floor.
+    c.ug = (a0 / a1) * uf;
+    c.zh = heatRoughness(z0, c.ug);
     const double dt = h - d;
     c.b = dt * std::sqrt(std::max(enhancement * enhancement - 1.0, 0.0));
     // The canopy's mixing takes its canopy-top value from the air just above,
@@ -1491,7 +1505,6 @@ static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0
     // convection strengthens canopy mixing and stable stratification suppresses it.
     c.a2 = ka * enhancement * (dt / h)
         / (a1 * a1 * phihStar(canopyTopStabilityHeight(h, d, enhancement) / LL));
-    c.ug = (a0 / a1) * uf;
     c.Kc0 = a0 * a0 * uf * c.a2 * h;
     c.zw = groundHandOver(h, c.ug, LL, c.Kc0, c.zh);
     c.Rc0 = rhcanopy(c.a2, uf, h, c.zh, a0, a1);
@@ -3218,7 +3231,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     // are over vegetation, including the convective velocity that keeps exchange
     // going in calm, sunny conditions (Beljaars 1994), so that vegetation thinned
     // to nothing and bare ground give the same answer.
-    const double zh = 0.2 * zm;
+    double zh = 0.2 * zm;
     auto driveWind = [&](double Hnow) {
         double Ueff = climdata.uref;
         if (Hnow > 0.0) {
@@ -3234,6 +3247,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     int nrIterations = 0;
     soilmod soilheat;
     soilwaterout soilwater;
+    zh = heatRoughness(zm, uf);
     double rHa = (std::log(zref / zh) + psi_h) / (ka * uf);
     // G: surface energy balance residual, Aitken-damped across outer passes.
     Aitken1DState st_G;
@@ -3253,6 +3267,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
             psi_h = 0.0;
         }
         uf = (ka * driveWind(H)) / (std::log(zref / zm) + psi_m);
+        zh = heatRoughness(zm, uf);
         rHa = (std::log(zref / zh) + psi_h) / (ka * uf);
         soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 1.0, maxIter);
         climforwaterstruct cfw = {};
@@ -3624,7 +3639,7 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
             Ueff = std::sqrt(climdata.uref * climdata.uref + wstar * wstar);
         }
         uf = (ka * Ueff) / (std::log(zref / zm) + psim);
-        double zh = 0.2 * zm;
+        double zh = heatRoughness(zm, uf);
         double rHa = (std::log(zref / zh) + psih) / (ka * uf);
         soilheat.wc = soilwater.swo.theta;
         soilheat = SoilHeatCpp(soilheat, soilp, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 1.0, maxiter);
