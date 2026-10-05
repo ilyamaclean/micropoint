@@ -2560,10 +2560,18 @@ static inline double nearFieldLayerMean(double halfthick)
 //
 // The term makes the accuracy of the sum improve with the square of the layer
 // count rather than in proportion to it, so a coarsely resolved canopy is not
-// penalised for its resolution. It is halved where the sum runs one way only, as
-// it does at canopy top.
+// penalised for its resolution. It is halved for the topmost node, which has
+// layers on one side only; the lowest node has the image of its own layer below
+// the ground as its other neighbour, and keeps the whole term.
+//
+// Canopy top is an observation height at the edge of the top layer, not at a
+// layer's centre. The top layer is then taken exactly, as its one-sided mean,
+// and the layers below it are sampled from half a layer further off than a
+// neighbour would be, where the kernel curves less; the same sum of sampling
+// losses, taken from an edge, gives the smaller fraction used there.
 constexpr double LN_PI = 1.1447298858494002;
 constexpr double NF_NEIGHBOUR = -KN_C1 * (LN_PI - 1.0);
+constexpr double NF_EDGE = -KN_C1 * (1.5 * 0.6931471805599453 - 1.0);
 // Solves the dense linear system A x = b (A row-major, n by n) by Gaussian
 // elimination with partial pivoting.
 static std::vector<double> solveDense(std::vector<double> A, std::vector<double> b, size_t n)
@@ -2681,10 +2689,9 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         ST[i] = vegp.paii[i] * onestepin.Hz[i];
         SL[i] = onestepin.Lz[i];
     }
-    // Near-field weight of each layer's source at canopy top, used as the
-    // upper boundary condition below (subtracted back out of each layer's own
-    // near-field term, since that term already includes the canopy-top
-    // contribution).
+    // Near-field weight of each layer's source at canopy top, the upper boundary
+    // of the canopy air. The solve works with each node's departure from
+    // canopy-top air, so this is taken from every layer's weight at each node.
     std::vector<double> cTop(nn);
     for (size_t j = 0; j < (nn - 1); ++j) {
         // Each source reaches the observation height by two paths: directly,
@@ -2694,17 +2701,15 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         double zeta2 = (vegp.hgt + z[j]) * inowTL[j];
         cTop[j] = (nearFieldKernel(zeta1) + nearFieldKernel(zeta2)) / ow[j];
     }
-    // The topmost layer is the one holding the observation height, so the sum
-    // above cannot sample it and its heat is added here instead, as the layer's
-    // exact mean. Only the lower half of that layer carries foliage - nothing
-    // grows above canopy top - so it contributes half of what an interior layer
-    // would. Its ground reflection is picked up in the same term.
+    // The topmost layer ends at the observation height, where the kernel is
+    // infinite, so the sum above cannot sample it and its heat enters as the
+    // kernel's exact mean across the layer, seen from its upper edge, with its
+    // reflection in the ground.
     {
         const size_t t = nn - 1;
-        double halfthick = 0.5 * dz * inowTL[t];
-        cTop[t] = (0.5 * nearFieldLayerMean(halfthick)
-            + nearFieldKernel(2.0 * z[t] * inowTL[t])
-            + 0.5 * NF_NEIGHBOUR) / ow[t];
+        cTop[t] = (nearFieldLayerMean(dz * inowTL[t])
+            + nearFieldKernel((vegp.hgt + z[t]) * inowTL[t])
+            + NF_EDGE) / ow[t];
     }
     // Far-field concentration at canopy top: the above-canopy air
     // temperature/vapour pressure expressed in the same flux-like units
@@ -2729,11 +2734,12 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // are Raupach's (1989, Eq. 19a) integral of the flux, which at each height
     // includes every source below it, for a ground of given temperature.
     //
-    // Near field: the localised kernel's response to every other layer's source.
-    // The layer holding the observation height is excluded from the midpoint
+    // Near field: the localised kernel's response to every other layer's source,
+    // each sampled at its centre. A node's own layer is excluded from that
     // sampling, since a source at zero separation carries infinite kernel
-    // weight; its heat is real and finite, and enters as the layer's exact mean
-    // weight, together with its reflection off the ground.
+    // weight; its heat is real and finite, and enters as the kernel's exact mean
+    // across the layer about its centre, together with its reflection off the
+    // ground.
     std::vector<double> W(nn * nn);
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
@@ -2746,8 +2752,9 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
             }
             else {
                 double halfthick = 0.5 * dz * inowTL[i];
+                const double neighbours = (i + 1 == nn) ? 0.5 * NF_NEIGHBOUR : NF_NEIGHBOUR;
                 nf = (nearFieldLayerMean(halfthick) + nearFieldKernel(2.0 * z[i] * inowTL[i])
-                    + NF_NEIGHBOUR) / ow[i];
+                    + neighbours) / ow[i];
             }
             // (a node within the soil's own roughness has no resistance beneath
             // it and takes the soil's values whatever its weights are)

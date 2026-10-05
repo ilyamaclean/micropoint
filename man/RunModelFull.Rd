@@ -76,6 +76,13 @@ for all time steps and all canopy heights (above ground) or soil nodes
 (below ground). Rows correspond to time steps and columns correspond to
 canopy heights or soil nodes.
 
+For vegetated runs the canopy is divided into as many layers of equal depth
+as `paii` has elements, and each column gives the mean conditions of one
+layer, counted from the ground and referred to the middle of the layer: with
+`n` layers under a canopy of height `h`, column `i` is at `(i - 0.5) h / n`.
+Canopy top is the upper edge of the highest layer, not one of the columns;
+the air there is returned separately.
+
 For **bare-ground runs** (`vegp = NA`) the returned elements are:
 \describe{
   \item{tair}{Air temperature profile (°C).}
@@ -102,6 +109,10 @@ For **vegetated runs** the returned elements are:
   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
   \item{runoff}{Rain reaching the ground that the saturated soil surface
     could not take, each hour (mm). A vector, one value per time step.}
+  \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
+    per time step.}
+  \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
+    per time step.}
 }
 }
 \description{

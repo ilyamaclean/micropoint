@@ -117,7 +117,10 @@ forcing at or above the height given by [reference_height()]; forcing
 supplied below it is translated up to that height with
 [weatherhgt_adjust()] before the run. When vegetation is present the model
 uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
-conditions at the requested height `reqhgt`.
+conditions at the requested height `reqhgt`. Within a canopy these are the
+mean conditions of the canopy layer whose middle is nearest that height; at
+canopy height or above they follow the profile above the canopy, which
+starts from the air at canopy top.
 
 If `vegp` is `NA`, bare-ground conditions are assumed and the bare-ground
 model is used. If `reqhgt <= 0`, output is treated as below-ground and soil

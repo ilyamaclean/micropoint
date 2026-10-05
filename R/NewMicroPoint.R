@@ -666,7 +666,10 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' supplied below it is translated up to that height with
 #' [weatherhgt_adjust()] before the run. When vegetation is present the model
 #' uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
-#' conditions at the requested height `reqhgt`.
+#' conditions at the requested height `reqhgt`. Within a canopy these are the
+#' mean conditions of the canopy layer whose middle is nearest that height; at
+#' canopy height or above they follow the profile above the canopy, which
+#' starts from the air at canopy top.
 #'
 #' If `vegp` is `NA`, bare-ground conditions are assumed and the bare-ground
 #' model is used. If `reqhgt <= 0`, output is treated as below-ground and soil
@@ -802,6 +805,13 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' (below ground). Rows correspond to time steps and columns correspond to
 #' canopy heights or soil nodes.
 #'
+#' For vegetated runs the canopy is divided into as many layers of equal depth
+#' as `paii` has elements, and each column gives the mean conditions of one
+#' layer, counted from the ground and referred to the middle of the layer: with
+#' `n` layers under a canopy of height `h`, column `i` is at `(i - 0.5) h / n`.
+#' Canopy top is the upper edge of the highest layer, not one of the columns;
+#' the air there is returned separately.
+#'
 #' For **bare-ground runs** (`vegp = NA`) the returned elements are:
 #' \describe{
 #'   \item{tair}{Air temperature profile (°C).}
@@ -828,6 +838,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
 #'   \item{runoff}{Rain reaching the ground that the saturated soil surface
 #'     could not take, each hour (mm). A vector, one value per time step.}
+#'   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
+#'     per time step.}
+#'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
+#'     per time step.}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp
