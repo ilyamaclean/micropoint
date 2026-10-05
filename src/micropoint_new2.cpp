@@ -315,8 +315,8 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
     // Whole-canopy absorption: what enters at the top and does not reach the ground.
     out.RswCabs = netdown(0.0, false) - netdown(pai, false);
 
-    // Each layer occupies the plant area between its top (the node height) and
-    // its bottom; pia is cumulative plant area to the bottom of the layer.
+    // Each layer is a slab of foliage; pia is cumulative plant area to its bottom.
+    // The streams reported for a layer are those entering it from above.
     for (int i = 0; i < n; ++i) {
         const double pbot = pia[i];
         const double ptop = std::max(pbot - paii[i], 0.0);
@@ -3173,6 +3173,8 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     }
     onestepin.iters = nrIterations;
     onestepin.error = tdif;
+    onestepin.tcanopy = Th;
+    onestepin.rhcanopy = std::min(100.0, 100.0 * eh / satvapCpp2(Th));
     return onestepin;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -4297,6 +4299,17 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     out.rootfrac = root_distribute(out.z, root50, root95);
     return out;
 }
+// Heights of the canopy nodes. The canopy is cut into slabs of equal depth, each
+// holding its share of the foliage, and everything the model carries for a slab
+// -- the temperature of its leaves, the air they exchange with, the wind past
+// them -- is a mean over the slab, referred to its centre. Canopy top is not a
+// node: it is the upper boundary of the canopy air, with a state of its own.
+static std::vector<double> canopyNodeHeights(size_t n, double hgt)
+{
+    std::vector<double> z(n);
+    for (size_t i = 0; i < n; ++i) z[i] = (static_cast<double>(i) + 0.5) / static_cast<double>(n) * hgt;
+    return z;
+}
 // Initial onestep state: every canopy layer set to the same starting
 // temperature/humidity/wind (temp0/rh0/Rlw0), refined once the model
 // actually starts iterating.
@@ -4336,6 +4349,9 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.psim = 0.0;
     onestepin.psih = 0.0;
     onestepin.phih = 1.0;
+    onestepin.fade = 1.0;
+    onestepin.tcanopy = temp0;
+    onestepin.rhcanopy = rh0;
     onestepin.LL = 999.99;
     onestepin.iters = 0;
     onestepin.witers = 0;
@@ -4372,6 +4388,8 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["tair"] = Rcpp::wrap(onestepin.tair);
     out["tleaf"] = Rcpp::wrap(onestepin.tleaf);
     out["rh"] = Rcpp::wrap(onestepin.rh);
+    out["tcanopy"] = onestepin.tcanopy;
+    out["rhcanopy"] = onestepin.rhcanopy;
     out["uz"] = Rcpp::wrap(onestepin.uz);
     out["rLB"] = Rcpp::wrap(onestepin.rLB);
     out["swaterdepth"] = Rcpp::wrap(onestepin.swaterdepth);
@@ -4548,8 +4566,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     LWweights wgts = lwradweights(vegpc.paii);
     std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t na = paii20.size();
-    std::vector<double> z(na);
-    for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
+    const std::vector<double> z = canopyNodeHeights(na, vegpc.hgt);
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
     soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
@@ -4584,8 +4601,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     climin.Rsw = Rsw[hr]; climin.Rdif = Rdif[hr]; climin.Rlw = Rlw[hr]; climin.uref = wspeed[hr];
     climin.winddir = wdir[hr]; climin.precip = precip[hr];
     na = paii.size();
-    std::vector<double> z2(na);
-    for (size_t i = 0; i < na; ++i) z2[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
+    const std::vector<double> z2 = canopyNodeHeights(na, vegpc.hgt);
     onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[hr], relhum[hr], Rlw[hr], na);
     onestepin = OneStepBelow(onestepin, obsdata, climin, vegpc, soilpc, z2, tspveg, tspvegPAR, tspdif,
         tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
@@ -4777,9 +4793,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t n = temp.size();
     size_t na = paii.size();
-    std::vector<double> z(na);
-    for (size_t i = 0; i < na; ++i)
-        z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
+    const std::vector<double> z = canopyNodeHeights(na, vegpc.hgt);
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
     soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
@@ -4933,8 +4947,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
     soilpstruct soilpc = tosoilpstruct(soilc);
     size_t n = temp.size();
     size_t na = vegpc.paii.size();
-    std::vector<double> z(na);
-    for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
+    const std::vector<double> z = canopyNodeHeights(na, vegpc.hgt);
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
     soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     tsvegstruct  tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
@@ -5107,8 +5120,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t n = temp.size();
     size_t na = paii.size();
-    std::vector<double> z(na);
-    for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
+    const std::vector<double> z = canopyNodeHeights(na, vegpc.hgt);
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
     soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
@@ -5123,6 +5135,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     NumericMatrix rh(n, na);
     NumericMatrix uz(n, na);
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
+    std::vector<double> tcanopy(n), rhcanopy(n); // air at canopy top, the upper boundary of the canopy air
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
     NumericMatrix tsoil(n, nb);
@@ -5141,6 +5154,8 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
             tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
         // Extract values
         runoff[hr] = onestepin.runoff;
+        tcanopy[hr] = onestepin.tcanopy;
+        rhcanopy[hr] = onestepin.rhcanopy;
         FillMyMatrix(Rdirdown, onestepin.Rdirdown, hr);
         FillMyMatrix(Rdifdown, onestepin.Rdifdown, hr);
         FillMyMatrix(Rswup, onestepin.Rswup, hr);
@@ -5168,6 +5183,9 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         Named("tleaf") = Rcpp::wrap(tleaf),
         Named("relhum") = Rcpp::wrap(rh),
         Named("windspeed") = Rcpp::wrap(uz),
+        // Air at canopy top
+        Named("tcanopy") = Rcpp::wrap(tcanopy),
+        Named("rhcanopy") = Rcpp::wrap(rhcanopy),
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
         Named("theta") = Rcpp::wrap(theta),

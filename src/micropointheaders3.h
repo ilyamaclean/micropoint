@@ -259,6 +259,8 @@ namespace newmodel {
         double psih; // psi_h
         double phih; // phi_h
         double fade; // weight of canopy-scale turbulence this step
+        double tcanopy; // air temperature at canopy top (deg C), the upper boundary of the canopy air
+        double rhcanopy; // relative humidity at canopy top (%)
         double LL; // // Monin�Obukhov length (m)
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run
