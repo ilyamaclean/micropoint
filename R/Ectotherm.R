@@ -184,7 +184,7 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     n2 <- length(za)
     n <- length(moutprofile$Rswup)
     d <- zeroplanedisCpp2(vegp$h, vegp$pai)
-    zm <- roughlengthCpp2(vegp$h, vegp$pai, d)
+    zm <- roughlengthCpp2(vegp$h, vegp$pai, d, if (is.null(soilc$zm)) 0.004 else soilc$zm)
     # Friction velocity from the reference wind with the stability correction
     # between the roughness height and the reference height, then the wind at
     # each height above the canopy from the same profile.

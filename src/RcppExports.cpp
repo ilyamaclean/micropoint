@@ -23,15 +23,16 @@ BEGIN_RCPP
 END_RCPP
 }
 // roughlengthCpp2
-double roughlengthCpp2(double h, double pai, double d);
-RcppExport SEXP _micropoint_roughlengthCpp2(SEXP hSEXP, SEXP paiSEXP, SEXP dSEXP) {
+double roughlengthCpp2(double h, double pai, double d, double z0);
+RcppExport SEXP _micropoint_roughlengthCpp2(SEXP hSEXP, SEXP paiSEXP, SEXP dSEXP, SEXP z0SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< double >::type h(hSEXP);
     Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
     Rcpp::traits::input_parameter< double >::type d(dSEXP);
-    rcpp_result_gen = Rcpp::wrap(roughlengthCpp2(h, pai, d));
+    Rcpp::traits::input_parameter< double >::type z0(z0SEXP);
+    rcpp_result_gen = Rcpp::wrap(roughlengthCpp2(h, pai, d, z0));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -47,14 +48,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // referenceheightCpp
-double referenceheightCpp(double h, double pai);
-RcppExport SEXP _micropoint_referenceheightCpp(SEXP hSEXP, SEXP paiSEXP) {
+double referenceheightCpp(double h, double pai, double z0);
+RcppExport SEXP _micropoint_referenceheightCpp(SEXP hSEXP, SEXP paiSEXP, SEXP z0SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< double >::type h(hSEXP);
     Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
-    rcpp_result_gen = Rcpp::wrap(referenceheightCpp(h, pai));
+    Rcpp::traits::input_parameter< double >::type z0(z0SEXP);
+    rcpp_result_gen = Rcpp::wrap(referenceheightCpp(h, pai, z0));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -82,8 +84,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // Tabove
-double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL);
-RcppExport SEXP _micropoint_Tabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP) {
+double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL, double z0);
+RcppExport SEXP _micropoint_Tabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP, SEXP z0SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -94,13 +96,14 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
     Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
     Rcpp::traits::input_parameter< double >::type LL(LLSEXP);
-    rcpp_result_gen = Rcpp::wrap(Tabove(za, zref, th, tref, hgt, pai, LL));
+    Rcpp::traits::input_parameter< double >::type z0(z0SEXP);
+    rcpp_result_gen = Rcpp::wrap(Tabove(za, zref, th, tref, hgt, pai, LL, z0));
     return rcpp_result_gen;
 END_RCPP
 }
 // RHabove
-double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai, double LL);
-RcppExport SEXP _micropoint_RHabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP rhSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP tzSEXP, SEXP relhumSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP) {
+double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai, double LL, double z0);
+RcppExport SEXP _micropoint_RHabove(SEXP zaSEXP, SEXP zrefSEXP, SEXP rhSEXP, SEXP thSEXP, SEXP trefSEXP, SEXP tzSEXP, SEXP relhumSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP, SEXP z0SEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -114,7 +117,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
     Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
     Rcpp::traits::input_parameter< double >::type LL(LLSEXP);
-    rcpp_result_gen = Rcpp::wrap(RHabove(za, zref, rh, th, tref, tz, relhum, hgt, pai, LL));
+    Rcpp::traits::input_parameter< double >::type z0(z0SEXP);
+    rcpp_result_gen = Rcpp::wrap(RHabove(za, zref, rh, th, tref, tz, relhum, hgt, pai, LL, z0));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -480,13 +484,13 @@ END_RCPP
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
-    {"_micropoint_roughlengthCpp2", (DL_FUNC) &_micropoint_roughlengthCpp2, 3},
+    {"_micropoint_roughlengthCpp2", (DL_FUNC) &_micropoint_roughlengthCpp2, 4},
     {"_micropoint_dpsimCpp2", (DL_FUNC) &_micropoint_dpsimCpp2, 1},
-    {"_micropoint_referenceheightCpp", (DL_FUNC) &_micropoint_referenceheightCpp, 2},
+    {"_micropoint_referenceheightCpp", (DL_FUNC) &_micropoint_referenceheightCpp, 3},
     {"_micropoint_satvapCpp2", (DL_FUNC) &_micropoint_satvapCpp2, 1},
     {"_micropoint_geometricCpp", (DL_FUNC) &_micropoint_geometricCpp, 2},
-    {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 7},
-    {"_micropoint_RHabove", (DL_FUNC) &_micropoint_RHabove, 10},
+    {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 8},
+    {"_micropoint_RHabove", (DL_FUNC) &_micropoint_RHabove, 11},
     {"_micropoint_Uabove", (DL_FUNC) &_micropoint_Uabove, 7},
     {"_micropoint_PenmanMonteith_animal", (DL_FUNC) &_micropoint_PenmanMonteith_animal, 15},
     {"_micropoint_Ectotherm", (DL_FUNC) &_micropoint_Ectotherm, 8},

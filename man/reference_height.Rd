@@ -4,11 +4,13 @@
 \alias{reference_height}
 \title{Lowest height at which weather forcing can be referred to a canopy}
 \usage{
-reference_height(vegp)
+reference_height(vegp, zm = 0.004)
 }
 \arguments{
 \item{vegp}{A list of vegetation parameters as returned by [createvegp()],
 or `NA` for bare ground.}
+
+\item{zm}{Numeric. Roughness length (m) of the soil surface.}
 }
 \value{
 The height (m) above ground.

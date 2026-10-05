@@ -518,8 +518,10 @@ double zeroplanedisCpp2(double h, double pai)
     double d = (1.0 - (1.0 - exp(-std::sqrt(7.5 * pai))) / std::sqrt(7.5 * pai)) * h;
     return d;
 }
-// Roughness length of bare soil, and the lower bound on any vegetated surface,
-// since no canopy presents the wind a smoother surface than the ground it stands on.
+// Roughness length of bare soil where none is given, and the lower bound on any
+// vegetated surface, since no canopy presents the wind a smoother surface than
+// the ground it stands on. The soil's own value is supplied with the soil
+// parameters and carried to every place the ground's roughness matters.
 constexpr double Z0_GROUND = 0.004;
 // Drag partition between the foliage and the ground beneath it, after Raupach
 // (1994) Eq. 7 with his C_R = 0.3. Denser foliage takes a larger share of the
@@ -535,14 +537,14 @@ constexpr double Z0_GROUND = 0.004;
 // exactly as rough as the soil it grows on, whatever its height.
 constexpr double DRAG_ELEMENT = 0.3;
 constexpr double UF_UH_MAX = 0.3;
-static double groundVelocityRatio(double h)
+static double groundVelocityRatio(double h, double z0)
 {
-    const double hh = std::max(h, 1.001 * Z0_GROUND);
-    return std::min(ka / std::log(hh / Z0_GROUND), UF_UH_MAX);
+    const double hh = std::max(h, 1.001 * z0);
+    return std::min(ka / std::log(hh / z0), UF_UH_MAX);
 }
-static double frictionVelocityRatio(double h, double pai)
+static double frictionVelocityRatio(double h, double pai, double z0)
 {
-    const double b0 = groundVelocityRatio(h);
+    const double b0 = groundVelocityRatio(h, z0);
     double be = std::sqrt(b0 * b0 + DRAG_ELEMENT * pai / 2.0);
     if (be > UF_UH_MAX) be = UF_UH_MAX;
     return be;
@@ -550,11 +552,11 @@ static double frictionVelocityRatio(double h, double pai)
 // How far the canopy has closed aerodynamically: nought over bare ground, one
 // once the foliage takes all the drag it can. The canopy's coherent eddies, and
 // the roughness sublayer they create above it, strengthen in step with it.
-static double canopyClosure(double h, double pai)
+static double canopyClosure(double h, double pai, double z0)
 {
-    const double b0 = groundVelocityRatio(h);
+    const double b0 = groundVelocityRatio(h, z0);
     if (b0 >= UF_UH_MAX) return 1.0;
-    const double f = (frictionVelocityRatio(h, pai) - b0) / (UF_UH_MAX - b0);
+    const double f = (frictionVelocityRatio(h, pai, z0) - b0) / (UF_UH_MAX - b0);
     return std::min(std::max(f, 0.0), 1.0);
 }
 // Convergence of the mixing depth against the wind profile that determines it.
@@ -570,9 +572,9 @@ constexpr double WIND_RELAX = 0.6;
 // departure at the canopy top as ln(c_w) - 1 + 1/c_w, where c_w is the depth of
 // the sublayer in units of the canopy's own aerodynamic depth: 2 over a closed
 // canopy, falling to 1 (no sublayer) as the canopy opens to bare ground.
-static double sublayerInfluence(double h, double pai)
+static double sublayerInfluence(double h, double pai, double z0)
 {
-    const double cw = 1.0 + canopyClosure(h, pai);
+    const double cw = 1.0 + canopyClosure(h, pai, z0);
     return std::log(cw) - 1.0 + 1.0 / cw;
 }
 // Vegetation no taller than the soil beneath it is rough presents no canopy
@@ -587,10 +589,10 @@ constexpr double LNTERM_MIN = 0.05;
 // geometry alone and neither varies with atmospheric stability, so no diabatic
 // correction is passed in here.
 // [[Rcpp::export]]
-double roughlengthCpp2(double h, double pai, double d)
+double roughlengthCpp2(double h, double pai, double d, double z0 = 0.004)
 {
-    double Be = frictionVelocityRatio(h, pai);
-    double zm = (h - d) * std::exp(-ka / Be + sublayerInfluence(h, pai));
+    double Be = frictionVelocityRatio(h, pai, z0);
+    double zm = (h - d) * std::exp(-ka / Be + sublayerInfluence(h, pai, z0));
     // safety check to stop the roughness-sublayer correction reversing profile
     if (zm > (0.9 * (h - d))) zm = 0.9 * (h - d);
     // No canopy presents the wind a smoother surface than the ground it stands
@@ -599,7 +601,7 @@ double roughlengthCpp2(double h, double pai, double d)
     // it and the cap above cannot both hold; it is applied second so it wins,
     // since a surface whose soil is rougher than its plants are tall is bare
     // ground. Canopies that short are turned away before reaching here.
-    if (zm < Z0_GROUND) zm = Z0_GROUND;
+    if (zm < z0) zm = z0;
     return zm;
 }
 // ** Calculate molar density of air ** //
@@ -791,11 +793,11 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
 // top. Only the shape of the canopy sets it, so it is fixed for a given stand
 // and the weather scales it afterwards -- which is why it is worked out once
 // rather than every hour.
-static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
+static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
     int n = static_cast<int>(vegp.paii.size());
     if (n < 10) Rcpp::stop("Wind profile requires at least 10 layers");
     const double dz = vegp.hgt / n;
-    const double beta = frictionVelocityRatio(vegp.hgt, vegp.pai);
+    const double beta = frictionVelocityRatio(vegp.hgt, vegp.pai, z0);
 
     // Wind is bled out of the canopy by drag on the foliage it passes, and the
     // depth over which that happens is set by the size of the eddies doing the
@@ -853,12 +855,12 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp) {
     // itself, and the foliage description holds all the way down.
     int nground = n / 10;
     const double zLowest = 0.5 * dz;
-    if (nground >= 1 && zLowest > Z0_GROUND) {
+    if (nground >= 1 && zLowest > z0) {
         const double zAnchor = (nground + 0.5) * dz;
-        const double lnAnchor = std::log(zAnchor / Z0_GROUND);
+        const double lnAnchor = std::log(zAnchor / z0);
         const double uAnchor = ui[nground];
         for (int i = 0; i < nground; ++i) {
-            ui[i] = uAnchor * std::log((i + 0.5) * dz / Z0_GROUND) / lnAnchor;
+            ui[i] = uAnchor * std::log((i + 0.5) * dz / z0) / lnAnchor;
         }
     }
     return ui;
@@ -893,9 +895,9 @@ static double floorGustRatio(const vegpstruct& vegp, double a1)
 // shear layer forms over open ground, where eddies are attached to the soil, so
 // the enhancement fades to none as the canopy opens.
 constexpr double CANOPY_TOP_ENHANCEMENT = 3.0;
-static double canopyEnhancement(double h, double pai)
+static double canopyEnhancement(double h, double pai, double z0)
 {
-    return 1.0 + (CANOPY_TOP_ENHANCEMENT - 1.0) * canopyClosure(h, pai);
+    return 1.0 + (CANOPY_TOP_ENHANCEMENT - 1.0) * canopyClosure(h, pai, z0);
 }
 // Lowest height at which weather forcing can be referred to this canopy. The
 // model finds friction velocity from the wind there by the logarithmic law, and
@@ -905,11 +907,11 @@ static double canopyEnhancement(double h, double pai)
 // would equal the canopy-top value, which is always above that layer. Over bare
 // ground it is the ground itself.
 // [[Rcpp::export]]
-double referenceheightCpp(double h, double pai)
+double referenceheightCpp(double h, double pai, double z0 = 0.004)
 {
     if (h <= 0.0) return 0.0;
     const double d = zeroplanedisCpp2(h, pai);
-    return d + canopyEnhancement(h, pai) * (h - d);
+    return d + canopyEnhancement(h, pai, z0) * (h - d);
 }
 // Height above the displacement plane at which stability acts on the air at
 // canopy top: the canopy's eddies there are larger than their height above the
@@ -926,11 +928,11 @@ static double canopyTopStabilityHeight(double h, double d, double enhancement)
 // path from it to canopy top is a surface layer's. The roughness length here
 // carries no roughness-sublayer term, because the air the sublayer occupies lies
 // above canopy top and is accounted for there by the diffusivity column.
-static double bigLeafToCanopyTop(double h, double pai, double d, double uf, double LL)
+static double bigLeafToCanopyTop(double h, double pai, double d, double uf, double LL, double z0)
 {
     const double dt = h - d;
-    double zm0 = dt * std::exp(-ka / frictionVelocityRatio(h, pai));
-    zm0 = std::max(std::min(zm0, 0.9 * dt), Z0_GROUND);
+    double zm0 = dt * std::exp(-ka / frictionVelocityRatio(h, pai, z0));
+    zm0 = std::max(std::min(zm0, 0.9 * dt), z0);
     const double zh0 = 0.2 * zm0;
     const double r = (std::log(dt / zh0) + dpsihCpp2(zh0 / LL) - dpsihCpp2(dt / LL)) / (ka * uf);
     return std::max(r, 0.0);
@@ -943,7 +945,7 @@ static double bigLeafToCanopyTop(double h, double pai, double d, double uf, doub
 static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double hgt, double pai,
     double zref, double H = 0.0, double tc = 15, double pk = 101.3, int maxiter = 100,
     double a1 = 1.25, double psi_h = 0.0, double psi_m = 0.0, double phi_h = 1.0,
-    double zi = 1000.0, double beta = 1.0)
+    double zi = 1000.0, double beta = 1.0, double z0 = Z0_GROUND)
 {
     if (zref < hgt) {
         Rcpp::stop("Height of wind speed measurement must be above canopy");
@@ -952,7 +954,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double cp = cpairCpp(tc);
     double ph = phairCpp(tc, pk);
     double d = zeroplanedisCpp2(hgt, pai);
-    double zm = roughlengthCpp2(hgt, pai, d);
+    double zm = roughlengthCpp2(hgt, pai, d, z0);
     double zh = 0.2 * zm;
     // Under free convection (H > 0), shear alone can't sustain the implied
     // friction velocity: combine uref with a Beljaars (1994) free-convective
@@ -979,7 +981,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double uf_iter = uf;
     if (H != 0.0) {
         while (dif > 0.00000001) {
-            zm = roughlengthCpp2(hgt, pai, d);
+            zm = roughlengthCpp2(hgt, pai, d, z0);
             zh = 0.2 * zm;
             LL = (ph * cp * std::pow(uf_iter, 3.0) * Tk) / (-ka * g * H);
             LL = clipMOlength(LL, zref, d, zm);
@@ -1006,13 +1008,13 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     // surface-layer profile gives. Reading it from such a profile understates the
     // wind driving leaf exchange, and overstates in the same proportion the drag
     // the canopy exerts on the air above.
-    double lnterm = std::log((hgt - d) / zm) + sublayerInfluence(hgt, pai) + psi_m;
+    double lnterm = std::log((hgt - d) / zm) + sublayerInfluence(hgt, pai, z0) + psi_m;
     if (lnterm < LNTERM_MIN) lnterm = LNTERM_MIN;
     double uh = (uf / ka) * lnterm;
     int n = static_cast<int>(wc.size());
     std::vector<double> uz(n);
     for (int i = 0; i < n; ++i) uz[i] = wc[i] * uh;
-    phi_h = phihStar(canopyTopStabilityHeight(hgt, d, canopyEnhancement(hgt, pai)) / LL);
+    phi_h = phihStar(canopyTopStabilityHeight(hgt, d, canopyEnhancement(hgt, pai, z0)) / LL);
     windmodel out;
     out.uz = uz;
     out.LL = LL;
@@ -1379,9 +1381,9 @@ static double rhcanopy(double a2, double uf, double h, double z, double a0, doub
 // With no foliage the ground's layer is all there is and the enhancement is
 // none, so what remains is the bare-ground surface layer from soil to reference
 // height -- the same description bare ground uses, so the two meet.
-constexpr double ZH_GROUND = 0.2 * Z0_GROUND;   // soil roughness length for heat
 struct aerocolumn {
     double h, d, uf, LL, a0, a1;
+    double zh;    // the soil's roughness height for heat: where the soil surface layer begins
     double a2;    // time a parcel keeps its vertical motion, as a fraction of h/uf
     double b;     // how far the air above the canopy is stretched (see stretchedHeight)
     double ug;    // velocity scale of the soil surface layer: floor gust strength as a friction velocity
@@ -1393,9 +1395,9 @@ struct aerocolumn {
 // Resistance of the soil surface layer between the soil's roughness height and
 // z, and its rate of increase with height, from the integrated stability
 // correction and the gradient it implies.
-static double soilLayerR(double z, double ug, double L)
+static double soilLayerR(double z, double ug, double L, double zh)
 {
-    return (std::log(z / ZH_GROUND) + dpsihCpp2(ZH_GROUND / L) - dpsihCpp2(z / L)) / (ka * ug);
+    return (std::log(z / zh) + dpsihCpp2(zh / L) - dpsihCpp2(z / L)) / (ka * ug);
 }
 static double soilLayerSlope(double z, double ug, double L)
 {
@@ -1434,13 +1436,13 @@ static double airR(const aerocolumn& c, double z1, double z2)
 // none: none if the canopy is already less diffusive at the soil's roughness
 // height (very short, dense vegetation). Under sparse vegetation it lies above
 // canopy top, and the ground's layer continues into the air above.
-static double groundHandOver(double h, double ug, double L, double Kc0)
+static double groundHandOver(double h, double ug, double L, double Kc0, double zh)
 {
     const double target = 1.0 / Kc0;
-    if (soilLayerSlope(ZH_GROUND * 1.0001, ug, L) <= target) return ZH_GROUND;
+    if (soilLayerSlope(zh * 1.0001, ug, L) <= target) return zh;
     double hi = h;
     while (soilLayerSlope(hi, ug, L) > target && hi < 1e4 * h) hi *= 2.0;
-    double lo = ZH_GROUND;
+    double lo = zh;
     for (int k = 0; k < 80; ++k) {
         const double mid = std::sqrt(lo * hi);
         if (soilLayerSlope(mid, ug, L) > target) lo = mid; else hi = mid;
@@ -1450,7 +1452,7 @@ static double groundHandOver(double h, double ug, double L, double Kc0)
 // Resistance from the soil surface to height z.
 static double soilToZ(const aerocolumn& c, double z)
 {
-    const double zc = std::max(z, ZH_GROUND);
+    const double zc = std::max(z, c.zh);
     double r = (zc <= c.h) ? rhcanopy(c.a2, c.uf, c.h, zc, c.a0, c.a1) - c.Rc0
         : rhcanopy(c.a2, c.uf, c.h, c.h, c.a0, c.a1) - c.Rc0 + airR(c, c.h, zc);
     const double zz = std::min(zc, c.zw);
@@ -1458,7 +1460,7 @@ static double soilToZ(const aerocolumn& c, double z)
     // the canopy's own contribution over the same depth so it is not counted
     // twice; with uniform gusts (no foliage) that contribution is exactly the
     // subtracted term and the bare-ground resistance is recovered.
-    if (zz > ZH_GROUND) r += soilLayerR(zz, c.ug, c.LL) - (zz - ZH_GROUND) / c.Kc0;
+    if (zz > c.zh) r += soilLayerR(zz, c.ug, c.LL, c.zh) - (zz - c.zh) / c.Kc0;
     return r;
 }
 // Diffusivity at height z.
@@ -1472,10 +1474,13 @@ static double columnK(const aerocolumn& c, double z)
 // canopy whose top mixes heat `enhancement` times as well as a surface layer
 // would there.
 static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0, double a1,
-    double enhancement)
+    double enhancement, double z0)
 {
     aerocolumn c{};
     c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1;
+    // A surface exchanges heat less readily than momentum, expressed by a
+    // roughness length for heat a fifth of the one for momentum.
+    c.zh = 0.2 * z0;
     const double dt = h - d;
     c.b = dt * std::sqrt(std::max(enhancement * enhancement - 1.0, 0.0));
     // The canopy's mixing takes its canopy-top value from the air just above,
@@ -1488,8 +1493,8 @@ static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0
         / (a1 * a1 * phihStar(canopyTopStabilityHeight(h, d, enhancement) / LL));
     c.ug = (a0 / a1) * uf;
     c.Kc0 = a0 * a0 * uf * c.a2 * h;
-    c.zw = groundHandOver(h, c.ug, LL, c.Kc0);
-    c.Rc0 = rhcanopy(c.a2, uf, h, ZH_GROUND, a0, a1);
+    c.zw = groundHandOver(h, c.ug, LL, c.Kc0, c.zh);
+    c.Rc0 = rhcanopy(c.a2, uf, h, c.zh, a0, a1);
     c.Rh = soilToZ(c, h);
     return c;
 }
@@ -2560,7 +2565,7 @@ static double mixingFrictionVelocity(const windmodel& windvars)
 static void LangrangianOne(onestep& onestepin, double pk, double tground, double soilrelhum,
     double th, double eh, const vegpstruct& vegp,
     const std::vector<double>& z, const windmodel& windvars,
-    double a0, double a1, double rTop)
+    double a0, double a1, double rTop, double z0)
 {
     auto& tair = onestepin.tair;
     const auto& tleaf = onestepin.tleaf;
@@ -2593,7 +2598,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // surface layer. Resistances between heights are then exact integrals of it.
     const double dcan = zeroplanedisCpp2(vegp.hgt, vegp.pai);
     const aerocolumn col = makeColumn(vegp.hgt, dcan, uf_mix, windvars.LL, a0, a1,
-        canopyEnhancement(vegp.hgt, vegp.pai));
+        canopyEnhancement(vegp.hgt, vegp.pai, z0), z0);
     // Physically plausible temperature/vapour-pressure range for this
     // step: between ground and canopy-top values, widened to also cover
     // every leaf's own temperature/saturation vapour pressure. Solved-for
@@ -3017,7 +3022,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.Rlwdown = lwrad.Rlwdown;
         onestepin.Rlwup = lwrad.Rlwup;
         windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, H_iter, climdata.tref, climdata.pk, maxIter, a1,
-            onestepin.psih, onestepin.psim, onestepin.phih);
+            onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
         onestepin.uz = wind.uz;
         onestepin.psih = wind.psi_h;
         onestepin.psim = wind.psi_m;
@@ -3041,7 +3046,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         // solved with; otherwise, in near-calm hours, the sources found against
         // one column would be carried through another many times more resistive.
         const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, a0v, a1,
-            canopyEnhancement(vegpc.hgt, vegpc.pai));
+            canopyEnhancement(vegpc.hgt, vegpc.pai, soilpc.z0), soilpc.z0);
         double rHa = soilToZ(col, zref); // soil surface to zref
         double rhg = col.Rh;             // soil surface to canopy top
         double rhz = rHa - rhg;          // canopy top to zref
@@ -3097,7 +3102,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         std::vector<double> tair = onestepin.tair;
         std::vector<double> rh = onestepin.rh;
         LangrangianOne(onestepin, climdata.pk, tground, soilrh, Th, eh, vegpc, z, wind, a0v, a1,
-            (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0); // updates onestepin.tair/rh in place
+            (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
         // Convergence is judged on canopy air alone, for speed: foliage and the
         // ground surface may still be settling by a few tenths of a degree
         // once the air has stopped moving. It is judged on how far this pass's
@@ -3134,29 +3139,29 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 // velocity, so the fraction does not depend on it. Foliage is taken as uniform,
 // which matters only for sparse canopies, where the ground's limit on eddy
 // size can reach above canopy top.
-static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL)
+static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL, double z0)
 {
     const double a1 = 1.25;
     const double d = zeroplanedisCpp2(hgt, pai);
     const double a0 = a1 * std::exp(-GUST_DECAY * LEAF_DRAG * pai / (1.0 + SHELTER * pai));
-    const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a0, a1, canopyEnhancement(hgt, pai));
+    const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a0, a1, canopyEnhancement(hgt, pai, z0), z0);
     return (soilToZ(col, za) - col.Rh) / (soilToZ(col, zref) - col.Rh);
 }
 // Air temperature at height za above the canopy, between canopy-top air (th)
 // and the reference temperature (tref). LL defaults to neutral.
 // [[Rcpp::export]]
-double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL = 1e99)
+double Tabove(double za, double zref, double th, double tref, double hgt, double pai, double LL = 1e99, double z0 = 0.004)
 {
-    return th + (tref - th) * aboveCanopyFraction(za, zref, hgt, pai, LL);
+    return th + (tref - th) * aboveCanopyFraction(za, zref, hgt, pai, LL, z0);
 }
 // Relative humidity at height za above the canopy. Vapour pressure follows the
 // same resistance as temperature, and is converted back at the temperature there.
 // [[Rcpp::export]]
-double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai, double LL = 1e99)
+double RHabove(double za, double zref, double rh, double th, double tref, double tz, double relhum, double hgt, double pai, double LL = 1e99, double z0 = 0.004)
 {
     const double eh = satvapCpp2(th) * (rh / 100.0);
     const double eref = satvapCpp2(tref) * (relhum / 100.0);
-    const double ez = eh + (eref - eh) * aboveCanopyFraction(za, zref, hgt, pai, LL);
+    const double ez = eh + (eref - eh) * aboveCanopyFraction(za, zref, hgt, pai, LL, z0);
     double rz = (ez / satvapCpp2(tz)) * 100.0;
     if (rz > 100.0) rz = 100.0;
     return rz;
@@ -3502,7 +3507,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     // At least two passes, so that stability is evaluated at least once from
     // this hour's own sensible heat flux before the solution is accepted.
     while ((itr < 2 || error > 1e-2) && itr < maxiter) {
-        double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d);
+        double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d, soilp.z0);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
         // The air above the canopy is the diffusivity column of the multilayer
         // model, so that the soil state the spin-up hands on was formed under
@@ -3515,9 +3520,9 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         // reached with any value but the default.
         const double a1s = 1.25;
         const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, floorGustRatio(vegp, a1s), a1s,
-            canopyEnhancement(vegp.hgt, vegp.pai));
+            canopyEnhancement(vegp.hgt, vegp.pai, soilp.z0), soilp.z0);
         const double rGz = soilToZ(col, zref);
-        const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL) + rGz - col.Rh;
+        const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL, soilp.z0) + rGz - col.Rh;
         // Bulk surface stomatal resistance. psiw here needs to be
         // the root-zone mean water potential (rootfrac-weighted across all
         // soil layers), matching OneStepBelow's treatment -- not just the
@@ -4163,6 +4168,8 @@ static soilpstruct tosoilpstruct(List soilp) {
     out.thetaS = Rcpp::as<std::vector<double>>(soilp["Smax"]);
     out.Ksat = Rcpp::as<std::vector<double>>(soilp["Ksat"]);
     out.FreeDrain = Rcpp::as<bool>(soilp["FreeDrain"]);
+    // The soil's roughness length for momentum, where the caller gives one.
+    out.z0 = soilp.containsElementNamed("zm") ? Rcpp::as<double>(soilp["zm"]) : Z0_GROUND;
     // Ensure psi_e is negative (air entry potential)
     for (double& v : out.psie) v = -std::abs(v);
     // The water solve's lower bound: oven dryness, in every layer. The residual
@@ -4486,7 +4493,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
-    std::vector<double> wc = windprofileCpp(vegpc);
+    std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t na = paii20.size();
     std::vector<double> z(na);
     for (size_t i = 0; i < na; ++i) z[i] = (static_cast<double>(i + 1) / static_cast<double>(na)) * vegpc.hgt;
@@ -4515,7 +4522,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     // ** --------------------------------- Run full profile for hour  --------------------------------- ** //
     vegpc = tovegpstruct(vegp, paii, Lfrac);
     wgts = lwradweights(vegpc.paii);
-    wc = windprofileCpp(vegpc);
+    wc = windprofileCpp(vegpc, soilpc.z0);
     size_t hr = hourtoplot;
     obsstruct obsdata;
     climstruct climin;
@@ -4714,7 +4721,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
-    std::vector<double> wc = windprofileCpp(vegpc);
+    std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t n = temp.size();
     size_t na = paii.size();
     std::vector<double> z(na);
@@ -4882,7 +4889,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
-    std::vector<double> wc = windprofileCpp(vegpc);
+    std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
     std::vector<double> temp_new(n);
     std::vector<double> relhum_new(n);
@@ -4906,7 +4913,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         relhum_new[hr] = RHabove(zout, zin, rh, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
         // Friction velocity from the wind at zin and the stability correction
         // over the same span, then the wind at zout from the same profile.
-        double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d);
+        double zm = roughlengthCpp2(vegpc.hgt, vegpc.pai, d, soilpc.z0);
         double psi_in = dpsimCpp2(zm / onestepin.LL) - dpsimCpp2((zin - d) / onestepin.LL);
         double uf = (ka * wspeed[hr]) / (std::log((zin - d) / zm) + psi_in);
         double psi_m = dpsimCpp2(zm / onestepin.LL) - dpsimCpp2((zout - d) / onestepin.LL);
@@ -5044,7 +5051,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
-    std::vector<double> wc = windprofileCpp(vegpc);
+    std::vector<double> wc = windprofileCpp(vegpc, soilpc.z0);
     size_t n = temp.size();
     size_t na = paii.size();
     std::vector<double> z(na);

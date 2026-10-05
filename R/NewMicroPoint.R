@@ -265,6 +265,7 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
 #'
 #' @param vegp A list of vegetation parameters as returned by [createvegp()],
 #' or `NA` for bare ground.
+#' @param zm Numeric. Roughness length (m) of the soil surface.
 #'
 #' @details
 #' The height is `d + c (h - d)`, where `h` is canopy height, `d` the zero-plane
@@ -277,17 +278,17 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
 #'
 #' @return The height (m) above ground.
 #' @export
-reference_height <- function(vegp) {
+reference_height <- function(vegp, zm = 0.004) {
   if (class(vegp) == "logical") return(0)
-  referenceheightCpp(vegp$h, vegp$pai)
+  referenceheightCpp(vegp$h, vegp$pai, zm)
 }
 #' Translates forcing measured too close to a canopy up to the height the model needs
 #'
 #' Returns the forcing and the height it then refers to. Forcing already at or
 #' above the required height is returned unchanged.
 #' @noRd
-forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA) {
-  zreq <- reference_height(vegp)
+forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004) {
+  zreq <- reference_height(vegp, zm)
   if (zref >= zreq - 1e-6) return(list(climdata = climdata, zref = zref))
   message(sprintf("Weather at %.4g m is too close to a canopy of this height and density; translated to %.4g m.",
                   zref, zreq))
@@ -358,6 +359,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
                             Lfrac = NA) {
   chk <- runchecks(climdata, vegp, soilc, lat, long, Lfrac = Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  soilc$zm <- zmr   # the soil's roughness length travels with the soil parameters
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -378,7 +380,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
     }
     if (length(Lfrac) == 1) Lfrac <- rep(Lfrac, 10)
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zmr)
     climdata <- fr$climdata; zref <- fr$zref
     blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
                        lat, long, boundaryT, maxiter, C3)
@@ -488,6 +490,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                            maxiter = 100, tolerance = 1e-2, C3 = TRUE, plotout = TRUE, varn = "temp") {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -523,7 +526,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                       method = "natural")$y
     Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
     # Forcing measured too close to the canopy is translated up to the height the model needs
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
     climdata2 <- fr$climdata; zref2 <- fr$zref
     mout <- profileR(hr - 1, obstime, climdata2, soilc, vegp, paii20, paii,
                      Lfrac20, Lfrac, zref2, CO2ppm, lat, long, SoilTempIni, ThetaIni,
@@ -538,8 +541,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     tabove <- 0
     rhabove <- 0
     for (i in 1:length(za)) {
-      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai, mout$LL)
-      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai, mout$LL)
+      tabove[i] <- Tabove(za[i], zref2, Th, climdata2$temp[hr], vegp$h, vegp$pai, mout$LL, zm)
+      rhabove[i] <- RHabove(za[i], zref2, Rh, Th, climdata2$temp[hr], tabove[i], climdata2$relhum[hr], vegp$h, vegp$pai, mout$LL, zm)
     }
     mout$za <- za
     mout$tair_above <- tabove
@@ -700,6 +703,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
                      maxiter = 100, tolerance = 1e-2, C3 = TRUE) {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -723,7 +727,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
                      ThetaIni, zm, maxiter, tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
     climdata <- fr$climdata; zref <- fr$zref
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, maxiter, tolerance, -1, 1.25, C3)
@@ -826,6 +830,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                        zm = 0.004, maxiter = 100, tolerance = 1e-2, C3 = TRUE) {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
   # Derive boundary temperature if not supplied
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
@@ -851,7 +856,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                              SoilTempIni, ThetaIni, maxiter, tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
     climdata <- fr$climdata; zref <- fr$zref
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, maxiter, tolerance,

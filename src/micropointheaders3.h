@@ -45,6 +45,7 @@ namespace newmodel {
         double groundem; // Ground surface emissivity (unitless)
         int nLayers; // number of layers
         bool FreeDrain; // whether deep layer is free draining or not
+        double z0; // roughness length of the soil surface for momentum (m)
         std::vector<double> Vq; // Volumetric quartz fraction (m^3/m^3
         std::vector<double> Vm; // Volumetric mineral fraction (m^3/m^3)
         std::vector<double> Vo; // Volumetric organic fraction (m^3/m^3)
