@@ -2666,12 +2666,17 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // Response of the scalar at each node to each layer's source, W[i][j]:
     // Raupach's near-field/far-field superposition about the canopy-top value.
     //
-    // Far field: a source below a node is carried up through it, adding its
-    // strength times the resistance from the node to canopy top. A source above
-    // a node carries nothing down, and the air beneath it stands at the level
-    // the source sets where it is released: its strength times the resistance
-    // from there to canopy top. Together these are Raupach's (1989, Eq. 19a)
-    // integral of the flux, which at each height includes every source below it.
+    // Far field: a source above a node carries nothing down through it, and the
+    // air beneath the source stands at the level the source sets where it is
+    // released: its strength times the resistance from there to canopy top. A
+    // source below a node is carried up through it, adding its strength times
+    // the resistance from the node to canopy top -- less the share of its heat
+    // that goes down instead, into the ground, which is held at its own
+    // temperature while the air is solved. That share is the resistance above
+    // the source over the whole resistance between the ground and the node, so
+    // what passes up is the fraction lying below the source. Together these
+    // are Raupach's (1989, Eq. 19a) integral of the flux, which at each height
+    // includes every source below it, for a ground of given temperature.
     //
     // Near field: the localised kernel's response to every other layer's source.
     // The layer holding the observation height is excluded from the midpoint
@@ -2693,7 +2698,10 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
                 nf = (nearFieldLayerMean(halfthick) + nearFieldKernel(2.0 * z[i] * inowTL[i])
                     + NF_NEIGHBOUR) / ow[i];
             }
-            const double ff = (j <= i) ? Rup : (col.Rh - Rz[j]);
+            // (a node within the soil's own roughness has no resistance beneath
+            // it and takes the soil's values whatever its weights are)
+            const double below = (Rz[i] > 0.0) ? Rz[j] / Rz[i] : 1.0;
+            const double ff = (j <= i) ? Rup * below : (col.Rh - Rz[j]);
             W[i * nn + j] = nf - cTop[j] + ff;
         }
     }
