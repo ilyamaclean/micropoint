@@ -247,6 +247,8 @@ namespace newmodel {
         std::vector<double> gs;  // Stomatal conductance
         std::vector<double> dSTdT; // response of each layer's sensible heat source to its own air temperature (W m-2 K-1)
         std::vector<double> dSLde; // response of each layer's latent heat source to its own air vapour pressure (W m-2 kPa-1)
+        std::vector<double> tfar, tnear; // foliage's far-field and near-field parts of each node's air temperature (K)
+        std::vector<double> efar, enear; // the same for vapour pressure (kPa)
         double precipground; // Precipitation eaching the ground
         soilmod soilheatvars; // soil heat model input / output
         soilwatermod soilwatervars; // soil water model input / output;

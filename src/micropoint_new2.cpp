@@ -2740,7 +2740,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // weight; its heat is real and finite, and enters as the kernel's exact mean
     // across the layer about its centre, together with its reflection off the
     // ground.
-    std::vector<double> W(nn * nn);
+    std::vector<double> W(nn * nn), Wnear(nn * nn);
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
         for (size_t j = 0; j < nn; ++j) {
@@ -2762,7 +2762,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
             const double ff = (j <= i) ? Rup * below : (col.Rh - Rz[j]);
             // The near field is the imprint of the canopy's own eddies, and is
             // present only as far as the canopy sheds them.
-            W[i * nn + j] = windvars.fade * (nf - cTop[j]) + ff;
+            Wnear[i * nn + j] = windvars.fade * (nf - cTop[j]);
+            W[i * nn + j] = Wnear[i * nn + j] + ff;
         }
     }
     // Air temperature and vapour pressure at every node, found together with
@@ -2809,6 +2810,31 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     }
     const std::vector<double> tnew = solveDense(AT, bT, nn);
     const std::vector<double> enew = solveDense(AL, bL, nn);
+    // How much of each node's departure from canopy-top air the foliage accounts
+    // for, split into the part ordinary diffusion of its heat and vapour through
+    // the canopy gives (far field) and the extra imprint of nearby foliage whose
+    // release the eddies have not yet mixed (near field). The sources are those
+    // at the air just solved. Reported for inspection; nothing uses them.
+    onestepin.tfar.assign(nn, 0.0); onestepin.tnear.assign(nn, 0.0);
+    onestepin.efar.assign(nn, 0.0); onestepin.enear.assign(nn, 0.0);
+    for (size_t i = 0; i < nn; ++i) {
+        const double Rup = col.Rh - Rz[i];
+        const double ph = phairCpp(tair[i], pk);
+        const double cp = cpairCpp(tair[i]);
+        const double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
+            : (45068.7 - 42.8428 * tleaf[i]);
+        double tn = 0.0, tf = 0.0, en = 0.0, ef = 0.0;
+        for (size_t j = 0; j < nn; ++j) {
+            const double sTj = ST[j] + onestepin.dSTdT[j] * (tnew[j] - tair[j]);
+            const double sLj = SL[j] + onestepin.dSLde[j] * (enew[j] - satvapCpp2(tair[j]) * rh[j] / 100.0);
+            const double wn = Wnear[i * nn + j], wf = W[i * nn + j] - wn;
+            tn += wn * sTj; tf += wf * sTj; en += wn * sLj; ef += wf * sLj;
+        }
+        onestepin.tnear[i] = Rz[i] * tn / (ph * cp * col.Rh);
+        onestepin.tfar[i] = Rz[i] * tf / (ph * cp * col.Rh);
+        onestepin.enear[i] = pk * Rz[i] * en / (ph * (la_i * Rz[i] + la * Rup));
+        onestepin.efar[i] = pk * Rz[i] * ef / (ph * (la_i * Rz[i] + la * Rup));
+    }
     for (size_t i = 0; i < nn; ++i) {
         tair[i] = std::min(std::max(tnew[i], tmn), tmx);
         const double ean = std::min(std::max(enew[i], emn), emx);
@@ -4349,6 +4375,7 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.gs = v0;
     onestepin.dSTdT = v0;
     onestepin.dSLde = v0;
+    onestepin.tfar = v0; onestepin.tnear = v0; onestepin.efar = v0; onestepin.enear = v0;
     onestepin.precipground = 0.0;
     onestepin.H = 0.0;
     onestepin.L = 0.0;
@@ -4405,6 +4432,10 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["rLB"] = Rcpp::wrap(onestepin.rLB);
     out["swaterdepth"] = Rcpp::wrap(onestepin.swaterdepth);
     out["Hz"] = Rcpp::wrap(onestepin.Hz);
+    out["tfar"] = Rcpp::wrap(onestepin.tfar);
+    out["tnear"] = Rcpp::wrap(onestepin.tnear);
+    out["efar"] = Rcpp::wrap(onestepin.efar);
+    out["enear"] = Rcpp::wrap(onestepin.enear);
     out["Lz"] = Rcpp::wrap(onestepin.Lz);
     out["gs"] = Rcpp::wrap(onestepin.gs);
     // Additional variables
