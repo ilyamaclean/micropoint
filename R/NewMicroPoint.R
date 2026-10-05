@@ -300,17 +300,25 @@ forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, b
 #' Reduces a canopy too short to resolve to bare ground
 #'
 #' @param vegp Vegetation parameter list as returned by [createvegp()], or `NA`.
-#' @return `vegp` unchanged, or `NA` if the canopy is shorter than 1 cm.
+#' @param zm Roughness length of the soil surface (m).
+#' @return `vegp` unchanged, or `NA` if the canopy is no taller than the soil
+#'   is rough.
 #' @details
-#' Below a canopy height of 1 cm the depth of air between the ground and the top
-#' of the vegetation is no greater than the roughness of the soil itself, so
-#' there is no distinct aerodynamic surface for the canopy equations to describe.
-#' Such a surface is treated as bare ground.
+#' Vegetation that stands no higher than the roughness elements of the soil
+#' itself presents the wind no surface distinct from the soil, and leaves no
+#' depth of air between the ground and its top for the canopy equations to
+#' describe. Such a surface is treated as bare ground. The limit is a multiple
+#' of the soil roughness length, so a rougher soil raises it. It is a safety
+#' stop, not a transition: the canopy's own effect on the air has already faded
+#' to nothing by the time vegetation is this short, so the result is continuous
+#' across it.
 #' @noRd
-asbareifshort <- function(vegp) {
+SHORT_CANOPY_MULTIPLE <- 2
+asbareifshort <- function(vegp, zm = 0.004) {
   if (class(vegp) == "logical") return(vegp)
-  if (vegp$h < 0.01) {
-    warning("Canopy height is below 1 cm, which is shorter than the soil is rough. ",
+  if (vegp$h < SHORT_CANOPY_MULTIPLE * zm) {
+    warning("Canopy height is below ", SHORT_CANOPY_MULTIPLE, " times the soil roughness length (",
+            signif(SHORT_CANOPY_MULTIPLE * zm * 1000, 3), " mm), so the vegetation is no taller than the soil is rough. ",
             "Running as bare ground.
 ", call. = FALSE)
     return(NA)
@@ -323,8 +331,8 @@ asbareifshort <- function(vegp) {
 #'   as in the inbuilt dataset `climdata`.
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
 #'   If `NA`, bare-ground conditions are assumed, as are canopies shorter than
-#'   1 cm, which are too short for the vegetation to present the wind a surface
-#'   distinct from the soil.
+#'   2 times the soil roughness length, which are too short for the vegetation
+#'   to present the wind a surface distinct from the soil.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
 #' @param Lfrac Fraction of plant area that is living vegetation, given either as
 #'   a single value or as a vector giving the fraction in each canopy layer.
@@ -370,7 +378,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp)
+  vegp <- asbareifshort(vegp, zmr)
   if (class(vegp) == "logical") {
     blm <- BigLeafBareCpp(obstime, climdata, soilc, zref, zmr, lat, long,
                           boundaryT, maxiter)
@@ -399,7 +407,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' as in the inbuilt dataset `climdata`.
 #' @param hr Integer. Hour to return, indexed from 1 to `nrow(climdata)`.
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
 #' which are too short for the vegetation to present the wind a surface distinct
 #' from the soil.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
@@ -508,7 +516,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp)
+  vegp <- asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- seq(0, zref, length.out = 1000)
     mout <- profilebareR(hr - 1, obstime, climdata, soilc, z, zref, lat, long, SoilTempIni, ThetaIni,
@@ -623,7 +631,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' values are above ground, `0` is the soil surface, and negative values are
 #' below ground.
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
 #' which are too short for the vegetation to present the wind a surface distinct
 #' from the soil.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
@@ -721,7 +729,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp)
+  vegp <- asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {
     mout <- RunBareR(reqhgt, obstime, climdata, soilc, zref, lat, long, SoilTempIni,
                      ThetaIni, zm, maxiter, tolerance)
@@ -749,7 +757,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' conventions as the inbuilt dataset `climdata`.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
 #' which are too short for the vegetation to present the wind a surface distinct
 #' from the soil.
 #' @param paii Numeric vector of plant area index values for each canopy layer,
@@ -849,7 +857,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp)
+  vegp <- asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- (c(1:20)/ 20) * zref
     mout <- RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, long,

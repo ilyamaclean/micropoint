@@ -33,7 +33,7 @@ as in the inbuilt dataset `climdata`.}
 \item{hr}{Integer. Hour to return, indexed from 1 to `nrow(climdata)`.}
 
 \item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
 which are too short for the vegetation to present the wind a surface distinct
 from the soil.}
 

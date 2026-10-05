@@ -30,7 +30,7 @@ conventions as the inbuilt dataset `climdata`.}
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
 \item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than 1 cm,
+If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
 which are too short for the vegetation to present the wind a surface distinct
 from the soil.}
 
