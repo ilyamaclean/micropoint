@@ -53,19 +53,19 @@ reverseCumsum <- function(paii) {
     .Call(`_micropoint_reverseCumsum`, paii)
 }
 
-profilebareR <- function(hourtoplot, obstime, climdata, soilc, z, zref, lat, lon, SoilTempIni, SoilThetaIni, zm = 0.004, maxNrIterations = 100L, tolerance = 1e-3) {
+profilebareR <- function(hourtoplot, obstime, climdata, soilc, z, zref, lat, lon, SoilTempIni, SoilThetaIni, zm = 0.004, maxNrIterations = 100L, tolerance = 0.1) {
     .Call(`_micropoint_profilebareR`, hourtoplot, obstime, climdata, soilc, z, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance)
 }
 
-profileR <- function(hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+profileR <- function(hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 0.1, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_profileR`, hourtoplot, obstime, climdata, soilc, vegp, paii20, paii, Lfrac20, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
-RunBareR <- function(reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempIni, SoilThetaIni, zm = 0.004, maxNrIterations = 100L, tolerance = 1e-3) {
+RunBareR <- function(reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempIni, SoilThetaIni, zm = 0.004, maxNrIterations = 100L, tolerance = 0.1) {
     .Call(`_micropoint_RunBareR`, reqhgt, obstime, climdata, soilc, zref, lat, lon, SoilTempIni, SoilThetaIni, zm, maxNrIterations, tolerance)
 }
 
-RunModelR <- function(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+RunModelR <- function(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 0.1, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_RunModelR`, reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
@@ -73,11 +73,11 @@ WeatherhgtCpp2 <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zou
     .Call(`_micropoint_WeatherhgtCpp2`, obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, lon, SoilTempIni, SoilThetaIni, CO2ppm)
 }
 
-RunBelowFullBare <- function(obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3) {
+RunBelowFullBare <- function(obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 0.1) {
     .Call(`_micropoint_RunBelowFullBare`, obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance)
 }
 
-RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 0.1, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_RunBelowFull`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
@@ -105,7 +105,7 @@ BigLeafBareCpp <- function(obstime, climdata, soilc, zref, zmr, lat, lon, bounda
     .Call(`_micropoint_BigLeafBareCpp`, obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter, C3)
 }
 
-DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations = 100L, tolerance = 0.1, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_DiagSetupCpp`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations, tolerance, a0, a1, C3)
 }
 

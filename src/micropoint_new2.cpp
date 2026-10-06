@@ -42,14 +42,16 @@ constexpr double PSI_WILTING_POINT = -1500.0;
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
 // SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
 inline double aitken1d(double oldv, double newv, Aitken1DState& st);
-// How closely the coupled hour is solved: the iteration stops when a pass moves
-// the air (the canopy air, or the ground surface where there is no canopy) by
-// less than this (K). The accelerated iteration reaches it in about one pass
-// more than it would need for a tolerance ten times looser, and at this value
-// air and leaves lie within about a hundredth of a degree of the state no pass
-// would move. The run functions take the same value as their default
-// (exported signatures must spell it as a number).
-constexpr double OUTER_TOLERANCE = 1e-3;
+// How closely the coupled hour is solved by default: the iteration stops when
+// a pass moves the air (the canopy air, or the ground surface where there is
+// no canopy) by less than this (K). Weather and vegetation inputs are rarely
+// known well enough to fix a temperature to better than a degree or two, so a
+// tenth of a degree is close enough for most uses and is the quickest; the
+// state is then typically within 0.05 to 0.15 K of the one no pass would move,
+// and in a few hours of a year a degree or more from it. The run functions
+// take a tolerance from the user and fall back on this value (exported
+// signatures must spell it as a number).
+constexpr double OUTER_TOLERANCE = 0.1;
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
 // This section establishes solar geometry only.  It converts date/time and location into
@@ -4608,7 +4610,7 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
 // [[Rcpp::export]]
 List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z,
     double zref, double lat, double lon, std::vector<double> SoilTempIni,
-    std::vector<double> SoilThetaIni, double zm = 0.004, int maxNrIterations = 100, double tolerance = 1e-3)
+    std::vector<double> SoilThetaIni, double zm = 0.004, int maxNrIterations = 100, double tolerance = 0.1)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -4725,7 +4727,7 @@ List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List
 List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, List vegp,
     std::vector<double> paii20, std::vector<double> paii, std::vector<double> Lfrac20, std::vector<double> Lfrac, 
     double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
-    int maxNrIterations = 100, double tolerance = 1e-3, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
+    int maxNrIterations = 100, double tolerance = 0.1, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     // ** ------------------ Run model up to hour with 20 layers ------------------------- ** //
     std::vector<int> year = obstime["year"];
@@ -4799,7 +4801,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
 // [[Rcpp::export]]
 DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List soilc, double zref,
     double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
-    double zm = 0.004, int maxNrIterations = 100, double  tolerance = 1e-3)
+    double zm = 0.004, int maxNrIterations = 100, double  tolerance = 0.1)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -4954,7 +4956,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
 Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca,
     double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni,
-    int maxNrIterations = 100, double tolerance = 1e-3, double a0 = -1.0,
+    int maxNrIterations = 100, double tolerance = 0.1, double a0 = -1.0,
     double a1 = 1.25, bool C3 = true)
 {
     std::vector<int> year = obstime["year"];
@@ -5205,7 +5207,7 @@ void FillMyMatrix(NumericMatrix& mat, std::vector<double>& v, size_t hr)
 // [[Rcpp::export]]
 List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z,
     double zref, double zm, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
-    int maxNrIterations = 100, double  tolerance = 1e-3)
+    int maxNrIterations = 100, double  tolerance = 0.1)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5285,7 +5287,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
 List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii,
     std::vector<double> Lfrac, double zref, double Ca, double lat, double lon,
     std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations = 100,
-    double  tolerance = 1e-3, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
+    double  tolerance = 0.1, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5752,7 +5754,7 @@ static outercarry diagStartCarry(const diagcontext& ctx, const onestep& s)
 SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca,
     double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int hourIndex,
-    int maxNrIterations = 100, double tolerance = 1e-3, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
+    int maxNrIterations = 100, double tolerance = 0.1, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];

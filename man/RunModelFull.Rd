@@ -19,7 +19,7 @@ RunModelFull(
   boundaryT = NA,
   zm = 0.004,
   maxiter = 100,
-  tolerance = 0.001,
+  tolerance = 0.1,
   C3 = TRUE
 )
 }
@@ -66,7 +66,9 @@ to initialise the soil temperature profile. If `NA`, it is estimated from
 
 \item{maxiter}{Integer. Maximum number of iterations allowed for convergence.}
 
-\item{tolerance}{Numeric. Convergence tolerance.}
+\item{tolerance}{Numeric. How closely each hour is solved: the iteration stops when a pass
+moves air temperature by less than this (K). The default suits most uses; a smaller value
+gives a closer solution for a little more run time.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 }

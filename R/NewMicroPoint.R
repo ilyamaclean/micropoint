@@ -432,7 +432,9 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @param zm Numeric. Roughness length for bare-ground calculations.
 #' @param maxiter Integer. Maximum number of iterations used to achieve
 #'   convergence.
-#' @param tolerance Numeric. Convergence tolerance.
+#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
+#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
+#'   gives a closer solution for a little more run time.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param plotout Logical. If `TRUE`, plot the requested profile.
 #' @param varn Character. Variable to plot. One of `"temp"`, `"relhum"`,
@@ -496,7 +498,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @export
 return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                            SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                           maxiter = 100, tolerance = 1e-3, C3 = TRUE, plotout = TRUE, varn = "temp") {
+                           maxiter = 100, tolerance = 0.1, C3 = TRUE, plotout = TRUE, varn = "temp") {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
@@ -657,7 +659,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @param zm Numeric. Roughness length for bare-ground calculations.
 #' @param maxiter Integer. Maximum number of iterations used to achieve
 #' convergence.
-#' @param tolerance Numeric. Convergence tolerance.
+#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
+#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
+#'   gives a closer solution for a little more run time.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #'
 #' @details
@@ -720,7 +724,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @export
 RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                      SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                     maxiter = 100, tolerance = 1e-3, C3 = TRUE) {
+                     maxiter = 100, tolerance = 0.1, C3 = TRUE) {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
@@ -793,7 +797,9 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' `climdata$temp`, which requires approximately a full year of data.
 #' @param zm Numeric. Roughness length used for bare-ground calculations.
 #' @param maxiter Integer. Maximum number of iterations allowed for convergence.
-#' @param tolerance Numeric. Convergence tolerance.
+#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
+#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
+#'   gives a closer solution for a little more run time.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #'
 #' @details
@@ -860,7 +866,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @export
 RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2,
                        SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA,
-                       zm = 0.004, maxiter = 100, tolerance = 1e-3, C3 = TRUE) {
+                       zm = 0.004, maxiter = 100, tolerance = 0.1, C3 = TRUE) {
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
