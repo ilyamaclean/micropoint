@@ -45,9 +45,6 @@ inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 // TRIAL (Stage 9a): a wind (m/s) whose friction velocity is the least the Obukhov length is formed from.
 // Zero, the default, leaves the model as it is.
 static double g_trialStabilityWind = 0.0;
-// TRIAL (Stage 9a): take the latent heat of freezing over the hour's whole temperature change in a soil layer,
-// in place of its rate at the temperature the layer ends at.
-static bool g_trialFreezeSecant = false;
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
 // This section establishes solar geometry only.  It converts date/time and location into
@@ -2228,11 +2225,6 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
                 double theta_u_hi = unfrozenTheta(soilp, wc[i], Te_new[i] + dTprobe, i);
                 dtheta_ice_dTc = std::abs((theta_u_hi - theta_u_lo) / (2.0 * dTprobe));
             }
-            if (g_trialFreezeSecant) {
-                auto iceAt = [&](double Tc) { return (Tc < 0.0) ? std::max(0.0, wc[i] - unfrozenTheta(soilp, wc[i], Tc, i)) : 0.0; };
-                const double dTstep = Te_new[i] - oldTe_fixed[i];
-                if (std::abs(dTstep) > 0.02) dtheta_ice_dTc = std::abs(iceAt(Te_new[i]) - iceAt(oldTe_fixed[i])) / std::abs(dTstep);
-            }
             lambda[i] = thermalConductivityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, Mc[i], Te_new[i], atmPressure);
             CT[i] = heatCapacityCpp(Vq[i], Vm[i], Vo[i], wc[i], Vw_ice, dtheta_ice_dTc, Te_new[i], atmPressure) * state.vol[i];
         }
@@ -2910,68 +2902,6 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         if (rh[i] < 0.0) rh[i] = 0.0;
     }
 }
-// Applies adaptive Aitken under-relaxation to a vertical profile during nonlinear coupling.
-// This damps oscillatory updates while allowing well-behaved parts of the profile to converge rapidly.
-static inline void aitkin_weightdif(
-    const std::vector<double>& oldv,   // unchanged
-    std::vector<double>& newv,         // updated in place
-    const std::vector<double>& z,
-    double hgt,
-    WAitkenState& st,
-    double omega_min = 0.02,
-    double omega_max = 0.90,
-    double w_bot = 0.50,   // share of each step taken at the ground,
-    double w_top = 0.80    // rising to this at canopy top
-)
-{
-    const size_t n = oldv.size();
-    if (st.r_prev.size() != n) {
-        st.r_prev.assign(n, 0.0);
-        st.have_prev = false;
-        st.omega = std::max(omega_min, std::min(st.omega, omega_max));
-    }
-    const double dw = (w_top - w_bot);
-    // ---- First iteration ----
-    if (!st.have_prev) {
-        double omega = std::max(omega_min, std::min(st.omega, omega_max));
-        for (size_t i = 0; i < n; ++i) {
-            double r = newv[i] - oldv[i];
-            st.r_prev[i] = r;
-            double s = z[i] / hgt;
-            double wz = w_bot + dw * (s * s);
-            newv[i] = oldv[i] + (omega * wz) * r;
-        }
-        st.omega = omega;
-        st.have_prev = true;
-        return;
-    }
-    // ---- Learn omega (weighted Aitken emphasising bottom) ----
-    constexpr double beta = 10.0;
-    double num = 0.0;
-    double den = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        double r = newv[i] - oldv[i];
-        double dr = r - st.r_prev[i];
-        double s = z[i] / hgt;
-        double t = 1.0 - s;
-        double g = 1.0 + beta * (t * t);  // bottom emphasis
-        num += g * st.r_prev[i] * dr;
-        den += g * dr * dr;
-    }
-    double omega = st.omega;
-    if (den > 0.0)
-        omega = -st.omega * (num / den);
-    omega = std::max(omega_min, std::min(omega, omega_max));
-    // ---- Apply update to newv ----
-    for (size_t i = 0; i < n; ++i) {
-        double r = newv[i] - oldv[i];
-        st.r_prev[i] = r;
-        double s = z[i] / hgt;
-        double wz = w_bot + dw * (s * s);
-        newv[i] = oldv[i] + (omega * wz) * r;
-    }
-    st.omega = omega;
-}
 // The air the ground exchanges heat and vapour with, and the resistance to it.
 //
 // The ground touches only the air just above it, and exchanges with that air
@@ -3103,30 +3033,14 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
 // These are the core timestep couplers.  A timestep is not a simple sequence: radiation, leaves,
 // canopy air, ground, soil and above-canopy stability are iterated until their shared fluxes and boundary conditions agree.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Which relaxations the outer iteration applies, and how far a relaxed step may
-// go. The defaults are the model's; the others exist so that the iteration can
-// be examined and alternatives tried without touching what a pass computes.
-struct outeropts {
-    bool relaxLeaf = true, relaxAir = true, relaxRh = true, relaxH = true, relaxG = true;
-    double stepBottom = 0.50, stepTop = 0.80, stepMax = 0.90; // share of a step taken at the ground and at canopy top, and its ceiling
-    double fixedH = -1.0;      // if positive, sensible heat is relaxed by this fixed share instead of adaptively
-    bool holdLeafAir = false;  // keep the leaf-to-air difference that seeds leaf convection as given
-    bool followLeafAir = false; // let that difference follow the leaves and air through every pass, not only the first three
-    int anderson = 0;           // TRIAL: if positive, passes are unrelaxed and combined by Anderson acceleration over this many past passes
-};
-// TRIAL (Stage 9a): the settings the hourly step uses. The defaults are the model's.
-static outeropts g_trialOpts;
-// What the outer iteration carries from one pass to the next beside the hourly
-// state itself: the ground and canopy-top air, the fluxes being relaxed, and
-// each relaxation's memory. Each pass also leaves here what it found before any
-// relaxation was applied.
+// What the hour's iteration carries from one pass to the next beside the hourly
+// state itself: the ground and canopy-top air, and the heat leaving the surface
+// and entering the soil, which the next pass's wind and soil solves start from.
 struct outercarry {
-    double tground = 0.0, Th = 0.0, eh = 0.0, psir = 0.0, H_iter = 0.0, G_iter = 0.0, tdif = 1e99;
-    std::vector<double> dTs;                       // leaf-to-air temperature difference seeding leaf convection
-    std::vector<double> rawTair, rawRh, rawTleaf;  // this pass's unrelaxed solution
-    double rawH = 0.0, rawG = 0.0, uf = 0.0;
-    WAitkenState st_tair, st_rh, st_leaf;
-    Aitken1DState st_H, st_G;
+    double tground = 0.0, Th = 0.0, eh = 0.0, psir = 0.0, H_iter = 0.0, G_iter = 0.0;
+    double tdif = 1e99;        // how far the last pass moved the canopy air (K)
+    double uf = 0.0;           // friction velocity the last pass found
+    std::vector<double> dTs;   // leaf-to-air temperature difference seeding leaf convection
     int pass = 0;
 };
 // One pass of the coupled hour. Everything in the canopy depends on everything
@@ -3135,8 +3049,9 @@ struct outercarry {
 // the air above it, and the air on all of them. A pass takes the state the last
 // one left, works through each part in turn with the others as they then stand,
 // and leaves a new state; the hour is solved when a pass no longer moves the
-// canopy air. Radiation from the sun is fixed for the hour and passed in.
-static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, const climstruct& climdata,
+// canopy air. Nothing is relaxed here: what a pass finds is what it leaves.
+// Radiation from the sun is fixed for the hour and passed in.
+static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climdata,
     vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
     double Ca, double zref, int maxIter, double tolerance, double a0v, double a1, double dcan, bool C3)
@@ -3165,10 +3080,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, con
     envdata.psi_r = c.psir;
     envdata.Ca = Ca;
     envdata.precip = climdata.precip;
-    if ((c.pass < 3 || o.followLeafAir) && !o.holdLeafAir) {
-        for (size_t i = 0; i < na; ++i) c.dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
-    }
-    std::vector<double> tleaf = onestepin.tleaf;
+    for (size_t i = 0; i < na; ++i) c.dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
     // Resistances from the soil and from each layer to the reference height,
     // all from one diffusivity column (soilToZ).
     // The column is built at the same friction velocity the dispersion solve
@@ -3185,8 +3097,6 @@ static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, con
         rz_zref[i] = rHa - soilToZ(col, z[i]);
     }
     plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, c.dTs, 3600.0, C3); // updates onestepin in place
-    c.rawTleaf = onestepin.tleaf;
-    if (o.relaxLeaf) aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, c.st_leaf, 0.02, o.stepMax, o.stepBottom, o.stepTop);
     // The air the ground exchanges with this pass, given the foliage's
     // sources as the leaf model has just left them.
     const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
@@ -3205,8 +3115,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, con
     soilheat.wc = soilwater.swo.theta;
     double G_raw = soilsurfaceEB(soilpc, Rabs, ga.T, soilheat.Te[0], climdata.pk,
         ga.relhum, ga.R, soilwater.swo.theta[0]);
-    c.rawG = G_raw;
-    c.G_iter = o.relaxG ? aitken1d(c.G_iter, G_raw, c.st_G) : G_raw;
+    c.G_iter = G_raw;
     soilheat.Gflux = c.G_iter;
     onestepin.soilheatvars = soilheat;
     onestepin.soilwatervars = soilwater.swo;
@@ -3219,10 +3128,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, con
         const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
         onestepin.H = ga.Hfoliage + (phr * cpr / ga.R) * (c.tground - ga.T);
     }
-    c.rawH = onestepin.H;
-    if (!o.relaxH) c.H_iter = onestepin.H;
-    else if (o.fixedH > 0.0) c.H_iter += o.fixedH * (onestepin.H - c.H_iter);
-    else c.H_iter = aitken1d(c.H_iter, onestepin.H, c.st_H);
+    c.H_iter = onestepin.H;
     onestepin.L = ga.Lfoliage + groundLatentFlux(soilpc, c.tground, ga.T, ga.relhum,
         climdata.pk, ga.R, soilwater.swo.theta[0]);
     if (zref > vegpc.hgt) {
@@ -3236,115 +3142,140 @@ static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, con
         c.eh = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     }
     std::vector<double> tair = onestepin.tair;
-    std::vector<double> rh = onestepin.rh;
     LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
         (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
-    // Convergence is judged on canopy air alone, for speed: foliage and the
-    // ground surface may still be settling by a few tenths of a degree
-    // once the air has stopped moving. It is judged on how far this pass's
-    // solution lies from the air the pass started from, before relaxation:
-    // the relaxed step can be a small fraction of that distance, and would
-    // report convergence while the air is still far from its solution.
+    // Convergence is judged on canopy air: how far this pass's solution lies
+    // from the air the pass started from.
     c.tdif = 0.0;
     for (size_t i = 0; i < na; ++i) {
         double dif = std::abs(tair[i] - onestepin.tair[i]);
         if (dif > c.tdif) c.tdif = dif;
     }
-    c.rawTair = onestepin.tair;
-    c.rawRh = onestepin.rh;
-    if (o.relaxAir) aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, c.st_tair, 0.02, o.stepMax, o.stepBottom, o.stepTop);
-    if (o.relaxRh) aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, c.st_rh, 0.02, o.stepMax, o.stepBottom, o.stepTop);
     c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
     onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
     ++c.pass;
 }
-// TRIAL (Stage 9a). The iterated state as one vector and back; defined with the diagnostic entry points.
-static std::vector<double> diagPack(const std::vector<double>& tair, const std::vector<double>& rh,
-    const std::vector<double>& tleaf, double tground, double Th, double eh, double H, double G);
-static void diagInject(const std::vector<double>& x, onestep& s, outercarry& c);
-// Memory of Anderson acceleration: the last few states, in comparable units, and how far a pass moved each.
-struct andersonmem {
+// The state the hour's iteration works on, as one vector: air temperature,
+// vapour pressure and leaf temperature at each node, then ground temperature,
+// canopy-top air temperature and vapour pressure, and the sensible and ground
+// heat fluxes. Vapour pressure is used, not relative humidity, so that the
+// vapour in the air does not change when its temperature is changed.
+static std::vector<double> packState(const onestep& s, const outercarry& c)
+{
+    const size_t n = s.tair.size();
+    std::vector<double> x(3 * n + 5);
+    for (size_t i = 0; i < n; ++i) {
+        x[i] = s.tair[i];
+        x[n + i] = satvapCpp2(s.tair[i]) * s.rh[i] / 100.0;
+        x[2 * n + i] = s.tleaf[i];
+    }
+    x[3 * n] = c.tground; x[3 * n + 1] = c.Th; x[3 * n + 2] = c.eh; x[3 * n + 3] = c.H_iter; x[3 * n + 4] = c.G_iter;
+    return x;
+}
+static void injectState(const std::vector<double>& x, onestep& s, outercarry& c)
+{
+    const size_t n = s.tair.size();
+    for (size_t i = 0; i < n; ++i) {
+        s.tair[i] = x[i];
+        s.rh[i] = std::min(100.0, std::max(0.0, 100.0 * x[n + i] / satvapCpp2(x[i])));
+        s.tleaf[i] = x[2 * n + i];
+    }
+    c.tground = x[3 * n]; c.Th = x[3 * n + 1]; c.eh = x[3 * n + 2]; c.H_iter = x[3 * n + 3]; c.G_iter = x[3 * n + 4];
+}
+// Passes remembered by the hour's iteration.
+constexpr int OUTER_MEMORY = 5;
+// The last few states the iteration visited, in comparable units, with how far
+// a pass moved each; and what the latest pass itself produced.
+struct outermemory {
     std::vector<std::vector<double>> X, F;
-    double lastNorm = 1e99;
+    std::vector<double> passResult;
+    double lastMove = 1e99;
+    int depth = OUTER_MEMORY;   // zero repeats plain passes
 };
-// One step of the hour's iteration. As the model is, that is a pass with its
-// relaxations. With Anderson acceleration it is an unrelaxed pass followed by a
-// choice of the next state: the combination of the last few states whose
-// passes, taken together, would have moved it least. Where the passes behave
-// linearly that combination is close to the state no pass moves at all.
-static void outerStep(onestep& s, outercarry& c, const outeropts& o, andersonmem& mem, const climstruct& climdata,
+// One step of the hour's iteration: a pass, then a choice of where the next
+// pass starts.
+//
+// Repeating passes does converge in most hours, but slowly, because each part
+// is solved with the others as the last pass left them and the corrections
+// arrive one pass late: warmer leaves evaporate more, the moister air then
+// suppresses it, and the two take turns. In some hours it does not converge at
+// all, where a change in the heat leaving the surface alters the mixing of the
+// air enough to reverse it.
+//
+// So the next pass does not start from where the last one ended. Each pass
+// shows how far it moved the state it was given. Over the last few passes
+// those moves, taken as a set, show how the canopy responds as a whole, and
+// from them is found the combination of recent states that the passes would
+// together have moved least: the best estimate, from what has been seen, of
+// the state a pass leaves unchanged (Anderson 1965). Where passes behave
+// smoothly that estimate improves by an order of magnitude or more each time.
+//
+// Two safeguards. If a pass moves the state three times further than the one
+// before, the estimate has gone astray, usually because the canopy has crossed
+// a point where its behaviour changes abruptly, and the memory is cleared. If
+// the combination is not finite the plain pass is taken.
+static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstruct& climdata,
     vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
     double Ca, double zref, int maxIter, double tolerance, double a0v, double a1, double dcan, bool C3)
 {
-    if (o.anderson <= 0) {
-        outerPass(s, c, o, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
-        return;
-    }
-    outeropts plain = o;
-    plain.relaxLeaf = false; plain.relaxAir = false; plain.relaxRh = false; plain.relaxH = false; plain.relaxG = false;
-    plain.followLeafAir = true;
     const size_t n = s.tair.size(), m = 3 * n + 5;
-    std::vector<double> sc(m, 1.0);                       // one kelvin's worth of each variable
-    for (size_t i = 0; i < n; ++i) sc[n + i] = 0.1;
-    sc[3 * n + 2] = 0.1; sc[3 * n + 3] = 50.0; sc[3 * n + 4] = 50.0;
-    std::vector<double> x = diagPack(s.tair, s.rh, s.tleaf, c.tground, c.Th, c.eh, c.H_iter, c.G_iter);
-    outerPass(s, c, plain, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
-    if (c.tdif <= tolerance && c.pass >= 3) return;      // the pass's own result stands
-    const std::vector<double> g = diagPack(c.rawTair, c.rawRh, c.rawTleaf, c.tground, c.Th, c.eh, c.rawH, c.rawG);
+    const std::vector<double> x = packState(s, c);
+    outerPass(s, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
+    mem.passResult = packState(s, c);
+    if ((c.tdif <= tolerance && c.pass >= 3) || mem.depth <= 0) return;   // the pass's own result stands
+    // One kelvin's worth of each variable, so that none dominates the fit for
+    // its units alone.
+    std::vector<double> sc(m, 1.0);
+    for (size_t i = 0; i < n; ++i) sc[n + i] = 0.1;         // kPa
+    sc[3 * n + 2] = 0.1; sc[3 * n + 3] = 50.0; sc[3 * n + 4] = 50.0;   // kPa, W m-2, W m-2
     std::vector<double> xs(m), f(m);
-    double norm = 0.0;
-    for (size_t i = 0; i < m; ++i) { xs[i] = x[i] / sc[i]; f[i] = (g[i] - x[i]) / sc[i]; norm = std::max(norm, std::abs(f[i])); }
-    // a pass that moved the state much further than the last did means the combination went astray: start afresh
-    if (norm > 3.0 * mem.lastNorm) { mem.X.clear(); mem.F.clear(); }
-    mem.lastNorm = norm;
-    mem.X.push_back(xs); mem.F.push_back(f);
-    if (mem.X.size() > static_cast<size_t>(o.anderson) + 1) { mem.X.erase(mem.X.begin()); mem.F.erase(mem.F.begin()); }
-    const size_t k = mem.X.size() - 1;                    // number of differences available
-    std::vector<double> xn(m);
-    for (size_t i = 0; i < m; ++i) xn[i] = xs[i] + f[i];  // the plain pass
-    if (k >= 1) {
-        // least squares for the weights: minimise |f - dF gamma|
-        std::vector<double> A(k * k, 0.0), b(k, 0.0);
-        for (size_t p = 0; p < k; ++p) {
-            for (size_t q = 0; q < k; ++q) {
-                double acc = 0.0;
-                for (size_t i = 0; i < m; ++i) acc += (mem.F[p + 1][i] - mem.F[p][i]) * (mem.F[q + 1][i] - mem.F[q][i]);
-                A[p * k + q] = acc;
-            }
-            double acc = 0.0;
-            for (size_t i = 0; i < m; ++i) acc += (mem.F[p + 1][i] - mem.F[p][i]) * f[i];
-            b[p] = acc;
-        }
-        double tr = 0.0;
-        for (size_t p = 0; p < k; ++p) tr += A[p * k + p];
-        for (size_t p = 0; p < k; ++p) A[p * k + p] += 1e-10 * tr + 1e-300;
-        const std::vector<double> gam = solveDense(A, b, k);
-        bool ok = true;
-        for (size_t p = 0; p < k; ++p) if (!std::isfinite(gam[p])) ok = false;
-        if (ok) {
-            for (size_t i = 0; i < m; ++i) {
-                double corr = 0.0;
-                for (size_t p = 0; p < k; ++p)
-                    corr += gam[p] * ((mem.X[p + 1][i] - mem.X[p][i]) + (mem.F[p + 1][i] - mem.F[p][i]));
-                xn[i] -= corr;
-            }
-        }
+    double move = 0.0;
+    for (size_t i = 0; i < m; ++i) {
+        xs[i] = x[i] / sc[i];
+        f[i] = (mem.passResult[i] - x[i]) / sc[i];
+        move = std::max(move, std::abs(f[i]));
     }
+    if (move > 3.0 * mem.lastMove) { mem.X.clear(); mem.F.clear(); }
+    mem.lastMove = move;
+    mem.X.push_back(xs); mem.F.push_back(f);
+    if (mem.X.size() > static_cast<size_t>(mem.depth) + 1) { mem.X.erase(mem.X.begin()); mem.F.erase(mem.F.begin()); }
+    const size_t k = mem.X.size() - 1;                      // differences between remembered passes
+    if (k == 0) return;                                     // nothing to combine yet: the plain pass stands
+    // Weights that make the combined move as small as possible, by least squares.
+    std::vector<double> A(k * k, 0.0), b(k, 0.0);
+    for (size_t p = 0; p < k; ++p) {
+        for (size_t q = 0; q < k; ++q) {
+            double acc = 0.0;
+            for (size_t i = 0; i < m; ++i) acc += (mem.F[p + 1][i] - mem.F[p][i]) * (mem.F[q + 1][i] - mem.F[q][i]);
+            A[p * k + q] = acc;
+        }
+        double acc = 0.0;
+        for (size_t i = 0; i < m; ++i) acc += (mem.F[p + 1][i] - mem.F[p][i]) * f[i];
+        b[p] = acc;
+    }
+    double tr = 0.0;
+    for (size_t p = 0; p < k; ++p) tr += A[p * k + p];
+    for (size_t p = 0; p < k; ++p) A[p * k + p] += 1e-10 * tr + 1e-300;   // keeps the fit defined when two moves coincide
+    const std::vector<double> gam = solveDense(A, b, k);
+    std::vector<double> xn(m);
     bool finite = true;
-    for (size_t i = 0; i < m; ++i) { xn[i] *= sc[i]; if (!std::isfinite(xn[i])) finite = false; }
-    if (finite) diagInject(xn, s, c);
+    for (size_t i = 0; i < m; ++i) {
+        double v = xs[i] + f[i];
+        for (size_t p = 0; p < k; ++p)
+            v -= gam[p] * ((mem.X[p + 1][i] - mem.X[p][i]) + (mem.F[p + 1][i] - mem.F[p][i]));
+        xn[i] = v * sc[i];
+        if (!std::isfinite(xn[i])) finite = false;
+    }
+    if (finite) injectState(xn, s, c);
 }
 // One vegetated timestep, fully coupled: radiation (fixed for the step) is
 // computed once; wind, rain interception, the plant energy balance, the
 // soil heat/water solves and the Lagrangian dispersion model are then
-// iterated together until air temperature stops changing between passes
-// (each depends on the others' previous-pass output -- e.g. wind depends
-// on H, which depends on the plant model, which depends on wind's
-// resistances). At least 3 passes always run, since dTs (leaf-air
-// temperature difference, used to seed the plant model's convection
-// terms) is only updated over the first 3 and held fixed after, for
-// stability.
+// iterated together until a pass no longer moves the canopy air (each depends
+// on the others -- e.g. wind depends on the heat leaving the surface, which
+// depends on the leaves, which depend on the wind's resistances). At least
+// three passes always run.
 // Solves one complete timestep of the multilayer vegetated microclimate model.
 // Radiation, canopy energy/water balance, turbulent profiles, soil heat/water and above-canopy stability are iterated because each supplies boundary conditions or fluxes to the others; convergence produces the timestep state passed forward in time.
 static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const climstruct& climdata, vegpstruct& vegpc, const soilpstruct& soilpc,
@@ -3365,7 +3296,6 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     onestepin.Rswup = swrad.Rswup;
     size_t na = onestepin.tair.size();
     outercarry c;
-    const outeropts o = g_trialOpts;
     c.tground = onestepin.soilheatvars.Te[0];
     // Canopy-top air is the upper boundary of the canopy air, carried from hour
     // to hour as a state of its own.
@@ -3373,10 +3303,9 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     c.eh = satvapCpp2(c.Th) * (onestepin.rhcanopy / 100.0);
     // root-zone water potential, J/kg -> MPa
     c.psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac) / 1000.0;
-    c.dTs.assign(na, 0.0); // leaf-air temperature difference, held fixed after iteration 3 (see function doc comment)
+    c.dTs.assign(na, 0.0);
     // Sensible heat feeds the wind model and the ground heat flux the soil
-    // surface balance; both are relaxed between passes, starting from the
-    // values the last hour left.
+    // surface balance; both start from the values the last hour left.
     c.H_iter = onestepin.H;
     c.G_iter = onestepin.soilheatvars.Gflux;
     // Floor gust strength: a fixed value if one is given, otherwise from the
@@ -3387,9 +3316,9 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // this hour's rain afresh from that state, so the film cannot fill across
     // the passes and the rain reaching the ground stays what the canopy let through.
     const std::vector<double> swater0 = onestepin.swaterdepth;
-    andersonmem mem;
+    outermemory mem;
     while ((c.pass < 3 || c.tdif > tolerance) && c.pass < maxIter) {
-        outerStep(onestepin, c, o, mem, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance,
+        outerStep(onestepin, c, mem, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance,
             a0v, a1, dcan, C3);
     }
     onestepin.iters = c.pass;
@@ -5773,8 +5702,8 @@ List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::Lis
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ************************************** Examining the hour's iteration ********************************************** //
-// Entry points for studying how the coupled hour is solved: they run one chosen hour pass by pass from the state
-// the model itself reached at its start, record what each pass does, and apply a single unrelaxed pass to any state.
+// Internal entry points for studying how the coupled hour is solved: they run one chosen hour pass by pass from the
+// state the model itself reached at its start, record what each pass does, and apply a single pass to any state.
 // They compute nothing the model does not; they expose its iteration.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 struct diagcontext {
@@ -5787,54 +5716,10 @@ struct diagcontext {
     std::vector<double> z, wc, swater0;
     LWweights wgts;
     radmodel swrad;
-    double Ca = 0.0, zref = 0.0, a0v = 0.0, a1 = 1.25, dcan = 0.0, trialStabilityWind = 0.0;
-    bool trialFreezeSecant = false;
+    double Ca = 0.0, zref = 0.0, a0v = 0.0, a1 = 1.25, dcan = 0.0;
     int maxIter = 100;
     bool C3 = true;
 };
-// The iterated state as one vector: air temperature, vapour pressure and leaf
-// temperature at each node, then ground temperature, canopy-top air
-// temperature and vapour pressure, and the sensible and ground heat fluxes
-// carried between passes.
-static std::vector<double> diagPack(const std::vector<double>& tair, const std::vector<double>& rh,
-    const std::vector<double>& tleaf, double tground, double Th, double eh, double H, double G)
-{
-    const size_t n = tair.size();
-    std::vector<double> x(3 * n + 5);
-    for (size_t i = 0; i < n; ++i) {
-        x[i] = tair[i];
-        x[n + i] = satvapCpp2(tair[i]) * rh[i] / 100.0;
-        x[2 * n + i] = tleaf[i];
-    }
-    x[3 * n] = tground; x[3 * n + 1] = Th; x[3 * n + 2] = eh; x[3 * n + 3] = H; x[3 * n + 4] = G;
-    return x;
-}
-static void diagInject(const std::vector<double>& x, onestep& s, outercarry& c)
-{
-    const size_t n = s.tair.size();
-    for (size_t i = 0; i < n; ++i) {
-        s.tair[i] = x[i];
-        s.rh[i] = std::min(100.0, std::max(0.0, 100.0 * x[n + i] / satvapCpp2(x[i])));
-        s.tleaf[i] = x[2 * n + i];
-    }
-    c.tground = x[3 * n]; c.Th = x[3 * n + 1]; c.eh = x[3 * n + 2]; c.H_iter = x[3 * n + 3]; c.G_iter = x[3 * n + 4];
-}
-static outeropts diagOpts(Rcpp::List opts)
-{
-    outeropts o;
-    if (opts.containsElementNamed("relaxLeaf")) o.relaxLeaf = Rcpp::as<bool>(opts["relaxLeaf"]);
-    if (opts.containsElementNamed("relaxAir")) o.relaxAir = Rcpp::as<bool>(opts["relaxAir"]);
-    if (opts.containsElementNamed("relaxRh")) o.relaxRh = Rcpp::as<bool>(opts["relaxRh"]);
-    if (opts.containsElementNamed("relaxH")) o.relaxH = Rcpp::as<bool>(opts["relaxH"]);
-    if (opts.containsElementNamed("relaxG")) o.relaxG = Rcpp::as<bool>(opts["relaxG"]);
-    if (opts.containsElementNamed("stepBottom")) o.stepBottom = Rcpp::as<double>(opts["stepBottom"]);
-    if (opts.containsElementNamed("stepTop")) o.stepTop = Rcpp::as<double>(opts["stepTop"]);
-    if (opts.containsElementNamed("stepMax")) o.stepMax = Rcpp::as<double>(opts["stepMax"]);
-    if (opts.containsElementNamed("fixedH")) o.fixedH = Rcpp::as<double>(opts["fixedH"]);
-    if (opts.containsElementNamed("followLeafAir")) o.followLeafAir = Rcpp::as<bool>(opts["followLeafAir"]);
-    if (opts.containsElementNamed("anderson")) o.anderson = Rcpp::as<int>(opts["anderson"]);
-    return o;
-}
 static outercarry diagStartCarry(const diagcontext& ctx, const onestep& s)
 {
     outercarry c;
@@ -5919,80 +5804,53 @@ SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List 
     ctx->dcan = zeroplanedisCpp2(ctx->vegp.hgt, ctx->vegp.pai);
     return Rcpp::XPtr<diagcontext>(ctx, true);
 }
-// Runs the chosen hour's iteration pass by pass and records it. The state after
-// each pass and what the pass found before relaxation are returned side by
-// side, with each relaxation's factor. Optionally starts from a given state,
+// Runs the chosen hour's iteration step by step and records it: the state each
+// step leaves, what the pass within it produced, and how far the pass moved
+// the canopy air. `memory` is the number of past passes combined (the model's
+// own if negative, plain passes if zero). Optionally starts from a given state,
 // and keeps the final state as the one single passes are applied about.
 // [[Rcpp::export]]
-Rcpp::List DiagRunCpp(SEXP ctxptr, Rcpp::List opts, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase = true)
+Rcpp::List DiagRunCpp(SEXP ctxptr, int memory, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase = true)
 {
     Rcpp::XPtr<diagcontext> ctx(ctxptr);
     onestep s = ctx->start;
     outercarry c = diagStartCarry(*ctx, s);
-    const outeropts o = diagOpts(opts);
-    const double stabilityWindBefore = g_trialStabilityWind;
-    const bool freezeBefore = g_trialFreezeSecant;
-    ctx->trialStabilityWind = opts.containsElementNamed("stabilityWind") ? Rcpp::as<double>(opts["stabilityWind"]) : stabilityWindBefore;
-    ctx->trialFreezeSecant = opts.containsElementNamed("freezeSecant") ? Rcpp::as<bool>(opts["freezeSecant"]) : freezeBefore;
-    g_trialStabilityWind = ctx->trialStabilityWind;
-    g_trialFreezeSecant = ctx->trialFreezeSecant;
     const size_t n = s.tair.size(), m = 3 * n + 5;
-    if (xstart.size() == static_cast<R_xlen_t>(m)) diagInject(Rcpp::as<std::vector<double>>(xstart), s, c);
+    if (xstart.size() == static_cast<R_xlen_t>(m)) injectState(Rcpp::as<std::vector<double>>(xstart), s, c);
+    outermemory mem;
+    if (memory >= 0) mem.depth = memory;
     std::vector<std::vector<double>> X, R, D;
-    X.push_back(diagPack(s.tair, s.rh, s.tleaf, c.tground, c.Th, c.eh, c.H_iter, c.G_iter));
-    andersonmem mem;
+    X.push_back(packState(s, c));
     while ((c.pass < 3 || c.tdif > tolerance) && c.pass < maxPass) {
-        outerStep(s, c, o, mem, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
+        outerStep(s, c, mem, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
             ctx->Ca, ctx->zref, ctx->maxIter, tolerance, ctx->a0v, ctx->a1, ctx->dcan, ctx->C3);
-        X.push_back(diagPack(s.tair, s.rh, s.tleaf, c.tground, c.Th, c.eh, c.H_iter, c.G_iter));
-        R.push_back(diagPack(c.rawTair, c.rawRh, c.rawTleaf, c.tground, c.Th, c.eh, c.rawH, c.rawG));
-        D.push_back({ c.tdif, c.uf, s.LL, c.st_tair.omega, c.st_rh.omega, c.st_leaf.omega, c.st_H.omega, c.st_G.omega,
-            s.L, s.fade, static_cast<double>(s.witers) });
+        X.push_back(packState(s, c));
+        R.push_back(mem.passResult);
+        D.push_back({ c.tdif, c.uf, s.LL, s.L, s.fade, static_cast<double>(s.witers), static_cast<double>(mem.X.size()) });
     }
-    g_trialStabilityWind = stabilityWindBefore;
-    g_trialFreezeSecant = freezeBefore;
     if (setBase) { ctx->base = s; ctx->basecarry = c; ctx->hasBase = true; }
-    Rcpp::NumericMatrix Xm(X.size(), m), Rm(R.size(), m), Dm(D.size(), 11);
+    Rcpp::NumericMatrix Xm(X.size(), m), Rm(R.size(), m), Dm(D.size(), 7);
     for (size_t i = 0; i < X.size(); ++i) for (size_t j = 0; j < m; ++j) Xm(i, j) = X[i][j];
-    for (size_t i = 0; i < R.size(); ++i) { for (size_t j = 0; j < m; ++j) Rm(i, j) = R[i][j]; for (size_t j = 0; j < 11; ++j) Dm(i, j) = D[i][j]; }
-    Rcpp::colnames(Dm) = Rcpp::CharacterVector::create("tdif", "uf", "LL", "w_air", "w_rh", "w_leaf", "w_H", "w_G", "L", "fade", "witers");
+    for (size_t i = 0; i < R.size(); ++i) { for (size_t j = 0; j < m; ++j) Rm(i, j) = R[i][j]; for (size_t j = 0; j < 7; ++j) Dm(i, j) = D[i][j]; }
+    Rcpp::colnames(Dm) = Rcpp::CharacterVector::create("tdif", "uf", "LL", "L", "fade", "witers", "remembered");
     return Rcpp::List::create(Rcpp::Named("state") = Xm, Rcpp::Named("target") = Rm, Rcpp::Named("diag") = Dm,
         Rcpp::Named("passes") = c.pass, Rcpp::Named("error") = c.tdif, Rcpp::Named("n") = static_cast<int>(n),
         Rcpp::Named("z") = ctx->z, Rcpp::Named("tref") = ctx->clim.tref, Rcpp::Named("uref") = ctx->clim.uref,
         Rcpp::Named("Rsw") = ctx->clim.Rsw, Rcpp::Named("precip") = ctx->clim.precip, Rcpp::Named("relhum") = ctx->clim.relhum);
 }
-// One unrelaxed pass applied to a given state, with everything else as the
-// last recorded run left it. This is the map whose fixed point the hour's
-// iteration is looking for.
+// One pass applied to a given state, with everything else as the last recorded
+// run left it. This is the map whose fixed point the hour's iteration is
+// looking for.
 // [[Rcpp::export]]
-Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x, bool followLeafAir = false)
+Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x)
 {
     Rcpp::XPtr<diagcontext> ctx(ctxptr);
     if (!ctx->hasBase) Rcpp::stop("Run DiagRunCpp first");
     onestep s = ctx->base;
     outercarry c = ctx->basecarry;
-    diagInject(Rcpp::as<std::vector<double>>(x), s, c);
-    outeropts o;
-    o.relaxLeaf = false; o.relaxAir = false; o.relaxRh = false; o.relaxH = false; o.relaxG = false;
-    o.holdLeafAir = !followLeafAir; o.followLeafAir = followLeafAir;
+    injectState(Rcpp::as<std::vector<double>>(x), s, c);
     if (c.pass < 3) c.pass = 3;
-    const double stabilityWindBefore = g_trialStabilityWind;
-    const bool freezeBefore = g_trialFreezeSecant;
-    g_trialStabilityWind = ctx->trialStabilityWind;
-    g_trialFreezeSecant = ctx->trialFreezeSecant;
-    outerPass(s, c, o, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
+    outerPass(s, c, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
         ctx->Ca, ctx->zref, ctx->maxIter, 1e-2, ctx->a0v, ctx->a1, ctx->dcan, ctx->C3);
-    g_trialStabilityWind = stabilityWindBefore;
-    g_trialFreezeSecant = freezeBefore;
-    return Rcpp::wrap(diagPack(c.rawTair, c.rawRh, c.rawTleaf, c.tground, c.Th, c.eh, c.rawH, c.rawG));
+    return Rcpp::wrap(packState(s, c));
 }
-// Sets the trial switches for every run that follows in this session; an empty
-// list puts the model back as it is.
-// [[Rcpp::export]]
-void DiagSetTrialCpp(Rcpp::List opts)
-{
-    g_trialOpts = diagOpts(opts);
-    g_trialStabilityWind = opts.containsElementNamed("stabilityWind") ? Rcpp::as<double>(opts["stabilityWind"]) : 0.0;
-    g_trialFreezeSecant = opts.containsElementNamed("freezeSecant") ? Rcpp::as<bool>(opts["freezeSecant"]) : false;
-}
-

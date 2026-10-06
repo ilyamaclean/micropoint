@@ -217,11 +217,6 @@ namespace newmodel {
         double surplus = 0.0; // water a saturated surface could not take, which runs off (mm)
     };
     // Strucxtures used for convergence function
-    struct WAitkenState {
-        std::vector<double> r_prev;
-        double omega = 0.3;
-        bool have_prev = false;
-    };
     struct WAitkenStateScalar {
         double r_prev = 0.0;
         double omega = 0.2;   // default: quite high backweight

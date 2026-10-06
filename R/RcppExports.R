@@ -109,15 +109,11 @@ DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, 
     .Call(`_micropoint_DiagSetupCpp`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations, tolerance, a0, a1, C3)
 }
 
-DiagRunCpp <- function(ctxptr, opts, maxPass, tolerance, xstart, setBase = TRUE) {
-    .Call(`_micropoint_DiagRunCpp`, ctxptr, opts, maxPass, tolerance, xstart, setBase)
+DiagRunCpp <- function(ctxptr, memory, maxPass, tolerance, xstart, setBase = TRUE) {
+    .Call(`_micropoint_DiagRunCpp`, ctxptr, memory, maxPass, tolerance, xstart, setBase)
 }
 
-DiagMapCpp <- function(ctxptr, x, followLeafAir = FALSE) {
-    .Call(`_micropoint_DiagMapCpp`, ctxptr, x, followLeafAir)
-}
-
-DiagSetTrialCpp <- function(opts) {
-    invisible(.Call(`_micropoint_DiagSetTrialCpp`, opts))
+DiagMapCpp <- function(ctxptr, x) {
+    .Call(`_micropoint_DiagMapCpp`, ctxptr, x)
 }
 

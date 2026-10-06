@@ -513,42 +513,31 @@ BEGIN_RCPP
 END_RCPP
 }
 // DiagRunCpp
-Rcpp::List DiagRunCpp(SEXP ctxptr, Rcpp::List opts, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase);
-RcppExport SEXP _micropoint_DiagRunCpp(SEXP ctxptrSEXP, SEXP optsSEXP, SEXP maxPassSEXP, SEXP toleranceSEXP, SEXP xstartSEXP, SEXP setBaseSEXP) {
+Rcpp::List DiagRunCpp(SEXP ctxptr, int memory, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase);
+RcppExport SEXP _micropoint_DiagRunCpp(SEXP ctxptrSEXP, SEXP memorySEXP, SEXP maxPassSEXP, SEXP toleranceSEXP, SEXP xstartSEXP, SEXP setBaseSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type ctxptr(ctxptrSEXP);
-    Rcpp::traits::input_parameter< Rcpp::List >::type opts(optsSEXP);
+    Rcpp::traits::input_parameter< int >::type memory(memorySEXP);
     Rcpp::traits::input_parameter< int >::type maxPass(maxPassSEXP);
     Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type xstart(xstartSEXP);
     Rcpp::traits::input_parameter< bool >::type setBase(setBaseSEXP);
-    rcpp_result_gen = Rcpp::wrap(DiagRunCpp(ctxptr, opts, maxPass, tolerance, xstart, setBase));
+    rcpp_result_gen = Rcpp::wrap(DiagRunCpp(ctxptr, memory, maxPass, tolerance, xstart, setBase));
     return rcpp_result_gen;
 END_RCPP
 }
 // DiagMapCpp
-Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x, bool followLeafAir);
-RcppExport SEXP _micropoint_DiagMapCpp(SEXP ctxptrSEXP, SEXP xSEXP, SEXP followLeafAirSEXP) {
+Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x);
+RcppExport SEXP _micropoint_DiagMapCpp(SEXP ctxptrSEXP, SEXP xSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< SEXP >::type ctxptr(ctxptrSEXP);
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type x(xSEXP);
-    Rcpp::traits::input_parameter< bool >::type followLeafAir(followLeafAirSEXP);
-    rcpp_result_gen = Rcpp::wrap(DiagMapCpp(ctxptr, x, followLeafAir));
+    rcpp_result_gen = Rcpp::wrap(DiagMapCpp(ctxptr, x));
     return rcpp_result_gen;
-END_RCPP
-}
-// DiagSetTrialCpp
-void DiagSetTrialCpp(Rcpp::List opts);
-RcppExport SEXP _micropoint_DiagSetTrialCpp(SEXP optsSEXP) {
-BEGIN_RCPP
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< Rcpp::List >::type opts(optsSEXP);
-    DiagSetTrialCpp(opts);
-    return R_NilValue;
 END_RCPP
 }
 
@@ -581,8 +570,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_BigLeafBareCpp", (DL_FUNC) &_micropoint_BigLeafBareCpp, 10},
     {"_micropoint_DiagSetupCpp", (DL_FUNC) &_micropoint_DiagSetupCpp, 18},
     {"_micropoint_DiagRunCpp", (DL_FUNC) &_micropoint_DiagRunCpp, 6},
-    {"_micropoint_DiagMapCpp", (DL_FUNC) &_micropoint_DiagMapCpp, 3},
-    {"_micropoint_DiagSetTrialCpp", (DL_FUNC) &_micropoint_DiagSetTrialCpp, 1},
+    {"_micropoint_DiagMapCpp", (DL_FUNC) &_micropoint_DiagMapCpp, 2},
     {NULL, NULL, 0}
 };
 
