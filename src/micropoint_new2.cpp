@@ -1327,11 +1327,15 @@ static double PenmanMonteithCpp2(double Rabs, double Ta, double pk, double rh, d
     }
     return (Ts);
 }
-// Calculate rain transmission
-// Calculates how much rainfall penetrates to each canopy depth.
-// Wind tilts the rain trajectory, so the same canopy extinction geometry used for radiation is applied along the rain path.
+// How much rain passes each canopy depth. Wind tilts the path of falling drops,
+// so they cross more foliage than drops falling straight down, and the
+// extinction geometry used for the sun's beam is applied along that path. The
+// canopy is taken as level for this: a canopy follows the slope it grows on,
+// but its foliage does not present itself to slanting rain as the ground
+// presents itself to a slanting beam, and neither the direction of the wind
+// relative to the slope nor the slope itself enters.
 static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector<double>& pia,
-    double uh, double rain, double wdir, double x, double sloper, double aspectr)
+    double uh, double rain, double x)
 {
     // calculate rain downward velocity
     double vr = 3.78 * std::pow(rain, 0.067);
@@ -1345,14 +1349,7 @@ static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector
         // calculate rain angle from vertical (in radians)
         double rainZ = std::atan(uzm / vr);
         // calculate rain extinction coefficient
-        double si;
-        if (sloper == 0.0) {
-            si = std::cos(rainZ);
-        }
-        else {
-            si = std::cos(rainZ) * std::cos(sloper) + std::sin(rainZ) *
-                std::sin(sloper) * std::cos(wdir - aspectr);
-        }
+        const double si = std::cos(rainZ);
         kstruct kp = cankCpp(rainZ, x, si);
         kd[i] = kp.kd;
         // Calculate tranmission
@@ -3166,7 +3163,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         onestepin.phih = wind.phi_h;
         onestepin.fade = wind.fade;
         onestepin.LL = wind.LL;
-        rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, climdata.winddir, vegpc.x, soilpc.slope, soilpc.aspect);
+        rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, vegpc.x);
         envstruct envdata{};
         envdata.pk = climdata.pk;
         envdata.psi_r = psir;
