@@ -2858,12 +2858,14 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     const double dcan = zeroplanedisCpp2(vegp.hgt, vegp.pai);
     const aerocolumn col = makeColumn(vegp.hgt, dcan, uf_mix, windvars.LL, a0, a1,
         canopyEnhancement(vegp.hgt, vegp.pai, z0, windvars.fade), z0);
-    // Physically plausible temperature/vapour-pressure range for this
-    // step: between ground and canopy-top values, widened to also cover
-    // every leaf's own temperature/saturation vapour pressure. Solved-for
-    // values are clamped to this range below as a safety net.
-    double tmn = std::min(tground, th) - 2.0, tmx = std::max(tground, th) + 2.0;
-    for (size_t i = 0; i < nn; ++i) { tmn = std::min(tmn, tleaf[i]); tmx = std::max(tmx, tleaf[i]); }
+    // The range the vapour pressure of canopy air can occupy. Vapour enters
+    // or leaves the air only at the ground, at the leaves and at canopy top,
+    // and at each it moves towards what that surface holds: the vapour
+    // pressure of the soil's pore air, saturation at a leaf's temperature, the
+    // air above. Air between them cannot be moister than the moistest of
+    // these or drier than the driest. The solve below is not bound to respect
+    // that, and in some hours steps a little outside the range; the result is
+    // held to it.
     double esg = satvapCpp2(tground) * soilrelhum;  // ground vapour pressure
     double emn = std::min(eh, esg);
     double emx = std::max(eh, esg);
@@ -3041,7 +3043,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         onestepin.efar[i] = pk * Rz[i] * ef / (ph * (la_i * Rz[i] + la * Rup));
     }
     for (size_t i = 0; i < nn; ++i) {
-        tair[i] = std::min(std::max(tnew[i], tmn), tmx);
+        tair[i] = tnew[i];
         const double ean = std::min(std::max(enew[i], emn), emx);
         rh[i] = (ean / satvapCpp2(tair[i])) * 100.0;
         if (rh[i] > 100.0) rh[i] = 100.0;
@@ -3118,8 +3120,11 @@ static groundair airSeenByGround(const climstruct& climdata, const vegpstruct& v
 static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     std::vector<double>& Hz, std::vector<double>& Lz, double zref,
     double Th, double eh, double tground, double soilrh,
-    double rH_g, double rH_h_zref, double Tsrc, double esrc, int maxIter, double tolerance)
+    double rH_g, double rH_h_zref, double Tsrc, double esrc, int maxIter)
 {
+    // The balance is closed far more closely than the hour as a whole is asked
+    // to be, so that nothing of this loop's own stopping point shows in the hour's.
+    constexpr double tolerance = 1e-8;
     size_t nb = vegpc.paii.size();
     double FcH = 0.0;
     double FcL = 0.0;
@@ -3279,7 +3284,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         climdata.pk, ga.R, soilwater.swo.theta[0]);
     if (zref > vegpc.hgt) {
         cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, c.Th, c.eh, c.tground, soilrh,
-            rhg, rhz, ga.Ttop, ga.etop, maxIter, tolerance);
+            rhg, rhz, ga.Ttop, ga.etop, maxIter);
         c.Th = Theh.Th;
         c.eh = Theh.eh;
     }
@@ -3328,13 +3333,21 @@ static void injectState(const std::vector<double>& x, onestep& s, outercarry& c)
     }
     c.tground = x[3 * n]; c.Th = x[3 * n + 1]; c.eh = x[3 * n + 2]; c.H_iter = x[3 * n + 3]; c.G_iter = x[3 * n + 4];
 }
-// Passes remembered by the hour's iteration.
-constexpr int OUTER_MEMORY = 5;
+// Passes remembered by the hour's iteration. Most hours are solved before
+// the memory fills, so its length costs them nothing. It matters in the few
+// hours where the heat leaving the surface and the stability of the air chase
+// each other: with a short memory the iteration keeps forgetting the passes
+// that showed it both sides of that loop.
+constexpr int OUTER_MEMORY = 10;
+// The furthest a combined state may lie from the latest pass's own result, in
+// kelvin or its equivalent in the other variables. Beyond it the combination
+// is an extrapolation the passes behind it cannot support.
+constexpr double OUTER_REACH = 10.0;
 // The last few states the iteration visited, in comparable units, with how far
 // a pass moved each; and what the latest pass itself produced.
 struct outermemory {
     std::vector<std::vector<double>> X, F;
-    std::vector<double> passResult;
+    std::vector<double> passStart, passResult;
     double lastMove = 1e99;
     int depth = OUTER_MEMORY;   // zero repeats plain passes
 };
@@ -3359,7 +3372,8 @@ struct outermemory {
 // Two safeguards. If a pass moves the state three times further than the one
 // before, the estimate has gone astray, usually because the canopy has crossed
 // a point where its behaviour changes abruptly, and the memory is cleared. If
-// the combination is not finite the plain pass is taken.
+// the combination is not finite, or lies implausibly far from what the latest
+// pass produced, the memory is cleared and the plain pass is taken.
 static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstruct& climdata,
     vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
@@ -3368,6 +3382,7 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     const size_t n = s.tair.size(), m = 3 * n + 5;
     const std::vector<double> x = packState(s, c);
     outerPass(s, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
+    mem.passStart = x;
     mem.passResult = packState(s, c);
     if ((c.tdif <= tolerance && c.pass >= 3) || mem.depth <= 0) return;   // the pass's own result stands
     // One kelvin's worth of each variable, so that none dominates the fit for
@@ -3405,15 +3420,16 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     for (size_t p = 0; p < k; ++p) A[p * k + p] += 1e-10 * tr + 1e-300;   // keeps the fit defined when two moves coincide
     const std::vector<double> gam = solveDense(A, b, k);
     std::vector<double> xn(m);
-    bool finite = true;
+    bool sound = true;
     for (size_t i = 0; i < m; ++i) {
         double v = xs[i] + f[i];
         for (size_t p = 0; p < k; ++p)
             v -= gam[p] * ((mem.X[p + 1][i] - mem.X[p][i]) + (mem.F[p + 1][i] - mem.F[p][i]));
         xn[i] = v * sc[i];
-        if (!std::isfinite(xn[i])) finite = false;
+        if (!std::isfinite(v) || std::abs(v - (xs[i] + f[i])) > OUTER_REACH) sound = false;
     }
-    if (finite) injectState(xn, s, c);
+    if (sound) injectState(xn, s, c);
+    else { mem.X.clear(); mem.F.clear(); }
 }
 // One vegetated timestep, fully coupled: radiation (fixed for the step) is
 // computed once; wind, rain interception, the plant energy balance, the
@@ -3463,9 +3479,22 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // the passes and the rain reaching the ground stays what the canopy let through.
     const std::vector<double> swater0 = onestepin.swaterdepth;
     outermemory mem;
+    std::vector<double> steadiestStart;
+    double steadiestMove = 1e99;
     while ((c.pass < 3 || c.tdif > tolerance) && c.pass < maxIter) {
         outerStep(onestepin, c, mem, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance,
             a0v, a1, dcan, C3);
+        if (c.pass >= 3 && c.tdif < steadiestMove) { steadiestMove = c.tdif; steadiestStart = mem.passStart; }
+    }
+    // An hour that has not settled within the passes allowed returns the pass
+    // that moved the canopy air least, not whichever happened to come last:
+    // of the states visited that is the one nearest to being unchanged by a
+    // pass, and the pass is repeated from it so that every quantity returned
+    // belongs to the same state. The error reported is that pass's own move.
+    if (c.tdif > tolerance && steadiestMove < c.tdif) {
+        injectState(steadiestStart, onestepin, c);
+        outerPass(onestepin, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
+        c.pass = maxIter;
     }
     onestepin.iters = c.pass;
     onestepin.error = c.tdif;
