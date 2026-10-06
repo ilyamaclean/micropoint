@@ -105,3 +105,19 @@ BigLeafBareCpp <- function(obstime, climdata, soilc, zref, zmr, lat, lon, bounda
     .Call(`_micropoint_BigLeafBareCpp`, obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter, C3)
 }
 
+DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations = 100L, tolerance = 1e-2, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+    .Call(`_micropoint_DiagSetupCpp`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations, tolerance, a0, a1, C3)
+}
+
+DiagRunCpp <- function(ctxptr, opts, maxPass, tolerance, xstart, setBase = TRUE) {
+    .Call(`_micropoint_DiagRunCpp`, ctxptr, opts, maxPass, tolerance, xstart, setBase)
+}
+
+DiagMapCpp <- function(ctxptr, x, followLeafAir = FALSE) {
+    .Call(`_micropoint_DiagMapCpp`, ctxptr, x, followLeafAir)
+}
+
+DiagSetTrialCpp <- function(opts) {
+    invisible(.Call(`_micropoint_DiagSetTrialCpp`, opts))
+}
+

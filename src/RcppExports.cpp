@@ -484,6 +484,73 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// DiagSetupCpp
+SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc, Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int hourIndex, int maxNrIterations, double tolerance, double a0, double a1, bool C3);
+RcppExport SEXP _micropoint_DiagSetupCpp(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zrefSEXP, SEXP CaSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP hourIndexSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP, SEXP a0SEXP, SEXP a1SEXP, SEXP C3SEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type obstime(obstimeSEXP);
+    Rcpp::traits::input_parameter< Rcpp::DataFrame >::type climdata(climdataSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type soilc(soilcSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type vegp(vegpSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type paii(paiiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type Lfrac(LfracSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< double >::type Ca(CaSEXP);
+    Rcpp::traits::input_parameter< double >::type lat(latSEXP);
+    Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
+    Rcpp::traits::input_parameter< int >::type hourIndex(hourIndexSEXP);
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< double >::type a0(a0SEXP);
+    Rcpp::traits::input_parameter< double >::type a1(a1SEXP);
+    Rcpp::traits::input_parameter< bool >::type C3(C3SEXP);
+    rcpp_result_gen = Rcpp::wrap(DiagSetupCpp(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations, tolerance, a0, a1, C3));
+    return rcpp_result_gen;
+END_RCPP
+}
+// DiagRunCpp
+Rcpp::List DiagRunCpp(SEXP ctxptr, Rcpp::List opts, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase);
+RcppExport SEXP _micropoint_DiagRunCpp(SEXP ctxptrSEXP, SEXP optsSEXP, SEXP maxPassSEXP, SEXP toleranceSEXP, SEXP xstartSEXP, SEXP setBaseSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ctxptr(ctxptrSEXP);
+    Rcpp::traits::input_parameter< Rcpp::List >::type opts(optsSEXP);
+    Rcpp::traits::input_parameter< int >::type maxPass(maxPassSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type xstart(xstartSEXP);
+    Rcpp::traits::input_parameter< bool >::type setBase(setBaseSEXP);
+    rcpp_result_gen = Rcpp::wrap(DiagRunCpp(ctxptr, opts, maxPass, tolerance, xstart, setBase));
+    return rcpp_result_gen;
+END_RCPP
+}
+// DiagMapCpp
+Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x, bool followLeafAir);
+RcppExport SEXP _micropoint_DiagMapCpp(SEXP ctxptrSEXP, SEXP xSEXP, SEXP followLeafAirSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< SEXP >::type ctxptr(ctxptrSEXP);
+    Rcpp::traits::input_parameter< Rcpp::NumericVector >::type x(xSEXP);
+    Rcpp::traits::input_parameter< bool >::type followLeafAir(followLeafAirSEXP);
+    rcpp_result_gen = Rcpp::wrap(DiagMapCpp(ctxptr, x, followLeafAir));
+    return rcpp_result_gen;
+END_RCPP
+}
+// DiagSetTrialCpp
+void DiagSetTrialCpp(Rcpp::List opts);
+RcppExport SEXP _micropoint_DiagSetTrialCpp(SEXP optsSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< Rcpp::List >::type opts(optsSEXP);
+    DiagSetTrialCpp(opts);
+    return R_NilValue;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
@@ -512,6 +579,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_expand_outputCpp", (DL_FUNC) &_micropoint_expand_outputCpp, 2},
     {"_micropoint_BigLeafCpp2", (DL_FUNC) &_micropoint_BigLeafCpp2, 12},
     {"_micropoint_BigLeafBareCpp", (DL_FUNC) &_micropoint_BigLeafBareCpp, 10},
+    {"_micropoint_DiagSetupCpp", (DL_FUNC) &_micropoint_DiagSetupCpp, 18},
+    {"_micropoint_DiagRunCpp", (DL_FUNC) &_micropoint_DiagRunCpp, 6},
+    {"_micropoint_DiagMapCpp", (DL_FUNC) &_micropoint_DiagMapCpp, 3},
+    {"_micropoint_DiagSetTrialCpp", (DL_FUNC) &_micropoint_DiagSetTrialCpp, 1},
     {NULL, NULL, 0}
 };
 
