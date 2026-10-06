@@ -618,6 +618,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
            col = "black", xlab = "", ylab = "", lwd = 2)
     } else (stop("varn not reconised\n"))
   }
+  mout$thetas <- reportedtheta(mout$thetas, soilc)
   return(mout)
 }
 #' Run the microclimate model at a specified height
@@ -746,7 +747,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   # Rename variables if below ground
   if (reqhgt <= 0) {
     mout$tsoil <- mout$tair; mout$tair <- NULL
-    mout$soilwater <- mout$relhum; mout$relhum <- NULL
+    mout$soilwater <- reportedtheta(mout$relhum, soilc); mout$relhum <- NULL
   }
   return(mout)
 }
@@ -818,7 +819,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{relhum}{Relative humidity profile (\%).}
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
-#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
+#'     than the soil's residual water content.}
 #'   \item{runoff}{Rain reaching the ground that the saturated soil surface
 #'     could not take, each hour (mm). A vector, one value per time step.}
 #' }
@@ -835,7 +837,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{relhum}{Relative humidity profile (\%).}
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
-#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
+#'     than the soil's residual water content.}
 #'   \item{runoff}{Rain reaching the ground that the saturated soil surface
 #'     could not take, each hour (mm). A vector, one value per time step.}
 #'   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
@@ -885,7 +888,24 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                          -1, 1.25, C3)
 
   }
+  mout$theta <- reportedtheta(mout$theta, soilc)
   return(mout)
+}
+#' Soil water content as reported to the user
+#'
+#' @param theta volumetric water content from the model (vector or matrix).
+#' @param soilc soil parameter list as returned by [createsoilc()].
+#' @return `theta`, no lower than the soil's residual water content.
+#' @details
+#' The retention curve the model uses falls to nothing as soil dries, where a
+#' real soil keeps a film of water that no suction removes; in sand the model's
+#' dry surface would read near zero. What is returned is therefore not allowed
+#' below the residual water content. Only the reported value is affected: the
+#' model's own state, its water potentials and its water budget are untouched.
+#' @noRd
+reportedtheta <- function(theta, soilc) {
+  if (is.null(theta)) return(theta)
+  pmax(theta, min(soilc$Smin))
 }
 #' R wrapper for c++ expand_outputCpp function
 #'

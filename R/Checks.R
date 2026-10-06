@@ -20,15 +20,29 @@
 #' **Direct and diffuse shortwave.** The direct beam is recorded as the part of
 #' `swdown` not in `difrad`, as it arrives on a horizontal surface. Dividing by
 #' the cosine of the solar zenith angle gives the beam as it arrives normal to
-#' the sun, which is what leaves and slopes intercept. That cannot exceed the
-#' solar constant. Hourly records sum an hour of radiation, but the sun's
-#' position is computed for a single instant, and the two disagree most near the
-#' horizon: the implied beam can be impossibly strong, or present while the sun
-#' is below the horizon. In those hours the excess is treated as diffuse, so
-#' total shortwave is always the recorded value and only its partition changes.
+#' the sun, which is what leaves and slopes intercept. That cannot exceed what
+#' the clearest sky lets through: the solar constant reduced by the depth of
+#' atmosphere the beam has crossed, which is many times greater with the sun
+#' near the horizon than overhead. The limit used is
+#' `1352 * 0.76^((m * pres / 101.3)^0.678)` W m^-2, where `m` is the relative
+#' air mass of Kasten and Young (1989). The form is that of Meinel and Meinel
+#' (1976), in which each further unit of air mass removes a little less than
+#' the one before, with the transmittance of a very clear atmosphere (0.76 for
+#' an overhead sun at sea level) in place of their typical one. It is a
+#' ceiling, not an estimate of the beam: no account is taken of season, water
+#' vapour or aerosol.
+#' Hourly records sum an hour of radiation, but the sun's position is computed
+#' for a single instant, and the two disagree most near the horizon: the implied
+#' beam can be impossibly strong, or present while the sun is below the horizon.
+#' In those hours the excess is treated as diffuse, so total shortwave is always
+#' the recorded value and only its partition changes.
 #'
 #' @return A list with elements `climdata`, `vegp` and `soilc`, with any
 #' corrections applied.
+#' @references Kasten F, Young AT (1989) Revised optical air mass tables and
+#'   approximation formula. Applied Optics 28: 4735-4738.
+#'
+#'   Meinel AB, Meinel MP (1976) Applied Solar Energy. Addison Wesley.
 #' @export
 runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   # ~~~~ Weather ~~~~
@@ -62,12 +76,13 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
     warning("Diffuse radiation above total shortwave in ", length(s), " hours. Set to total shortwave")
     climdata$difrad[s] <- climdata$swdown[s]
   }
-  # Beam normal to the sun cannot exceed the solar constant (see details)
+  # Beam normal to the sun cannot exceed what the clearest sky passes (see details)
   obstime <- data.frame(year = tme$year + 1900, month = tme$mon + 1, day = tme$mday,
                         hour = tme$hour)
-  cosz <- sin(solaltCpp(obstime, lat, long) * pi / 180)
+  alt <- solaltCpp(obstime, lat, long)
+  cosz <- sin(alt * pi / 180)
   beamh <- climdata$swdown - climdata$difrad
-  beammax <- 1352 * pmax(cosz, 0)
+  beammax <- clearestbeam(alt, climdata$pres) * pmax(cosz, 0)
   s <- which(beamh > beammax)
   if (length(s) > 0) {
     warning("Direct beam stronger than the sun can deliver, or with the sun below the horizon, in ",
@@ -128,4 +143,29 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   if (any(soilc$Ksat <= 0)) stop("soilc$Ksat must be positive")
   if (any(soilc$b <= 0)) stop("soilc$b must be positive")
   return(list(climdata = climdata, vegp = vegp, soilc = soilc))
+}
+#' Strongest direct beam the clearest sky can deliver
+#'
+#' @param alt solar altitude (degrees above the horizon).
+#' @param pres atmospheric pressure (kPa).
+#' @return Beam irradiance normal to the sun (W m^-2); zero with the sun at or
+#'   below the horizon.
+#' @details
+#' The solar constant reduced by a very clear atmosphere's transmittance. The
+#' depth of air the beam crosses is the relative air mass of Kasten and Young
+#' (1989), which stays finite at the horizon, scaled by pressure for the site's
+#' elevation. Transmittance falls with that depth as Meinel and Meinel (1976)
+#' have it: each further unit of air mass removes less than the one before,
+#' because the wavelengths most easily scattered are already gone. A constant
+#' transmittance per unit air mass would cut the beam of a low sun to half its
+#' real strength. The base, 0.76 for an overhead sun at sea level (about 1030
+#' W m^-2 at the ground), is that of an exceptionally clear day where they give
+#' 0.7 for a typical one; it is chosen to bound the beam from above, not to
+#' estimate it.
+#' @noRd
+clearestbeam <- function(alt, pres) {
+  up <- alt > 0
+  m <- rep(Inf, length(alt))
+  m[up] <- 1 / (sin(alt[up] * pi / 180) + 0.50572 * (alt[up] + 6.07995)^-1.6364)
+  ifelse(up, 1352 * 0.76^((m * pres / 101.325)^0.678), 0)
 }
