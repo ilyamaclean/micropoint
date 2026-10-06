@@ -2599,11 +2599,29 @@ static std::vector<double> solveDense(std::vector<double> A, std::vector<double>
     return x;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// A guard against still air. Every exchange in the model scales with the
+// friction velocity, and so with the wind; as the wind dies a fixed source of
+// heat demands an ever larger temperature difference to carry it away, and the
+// solved air ends up pinned to its plausibility bounds with its vertical
+// structure lost. Two pieces of physics already keep exchange going in light
+// wind: convection driven by a heated surface, which adds its own velocity to
+// the wind, and free convection at the leaf. Neither acts on a calm, stable
+// night, and that is the case this guard is for: the friction velocity used to
+// build resistances and canopy mixing is never less than this wind would give
+// over the same surface. It is a guard, not a description of how still air
+// behaves; its value was found by trial as the least that prevents the
+// collapse. Expressing it as a wind lets one value mean the same weather over
+// forest, grass and bare soil, and combining in quadrature leaves ordinary
+// winds untouched with no threshold at which anything jumps.
 constexpr double U_MIN_MIXING = 0.5;
+static double guardedFrictionVelocity(double uf, double ufPerUnitWind)
+{
+    const double uf_calm = ufPerUnitWind * U_MIN_MIXING;
+    return std::sqrt(uf * uf + uf_calm * uf_calm);
+}
 static double mixingFrictionVelocity(const windmodel& windvars)
 {
-    const double uf_calm = windvars.ufratio * U_MIN_MIXING;
-    return std::sqrt(windvars.uf * windvars.uf + uf_calm * uf_calm);
+    return guardedFrictionVelocity(windvars.uf, windvars.ufratio);
 }
 // Below-canopy air temperature and humidity at each layer, from a
 // localised near-field/far-field Lagrangian dispersion solution (Raupach
@@ -3320,8 +3338,11 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     int nrIterations = 0;
     soilmod soilheat;
     soilwaterout soilwater;
-    zh = heatRoughness(zm, uf);
-    double rHa = (std::log(zref / zh) + psi_h) / (ka * uf);
+    // The resistance is built from the friction velocity guarded against still
+    // air, as under a canopy; stability is still found from the wind as it is.
+    double ufr = guardedFrictionVelocity(uf, ka / (std::log(zref / zm) + psi_m));
+    zh = heatRoughness(zm, ufr);
+    double rHa = (std::log(zref / zh) + psi_h) / (ka * ufr);
     // G: surface energy balance residual, Aitken-damped across outer passes.
     Aitken1DState st_G;
     double G_iter = onestepin.soilheatvars.Gflux;
@@ -3340,8 +3361,9 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
             psi_h = 0.0;
         }
         uf = (ka * driveWind(H)) / (std::log(zref / zm) + psi_m);
-        zh = heatRoughness(zm, uf);
-        rHa = (std::log(zref / zh) + psi_h) / (ka * uf);
+        ufr = guardedFrictionVelocity(uf, ka / (std::log(zref / zm) + psi_m));
+        zh = heatRoughness(zm, ufr);
+        rHa = (std::log(zref / zh) + psi_h) / (ka * ufr);
         soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 1.0, maxIter);
         climforwaterstruct cfw = {};
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
@@ -3387,7 +3409,9 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zh) {
             double psihz = dpsihCpp2(zh / LL) - dpsihCpp2(z[i] / LL);
-            double rHz = (std::log(z[i] / zh) + psihz) / (ka * uf);
+            // the same guarded friction velocity the surface exchange was built
+            // with, so that the profile meets the reference air at its own height
+            double rHz = (std::log(z[i] / zh) + psihz) / (ka * ufr);
             tair[i] = Ts - (rHz / cpph) * H;
             double ez = eg - onestepin.L * (climdata.pk * rHz) / (la * ph);
             rh[i] = (ez / satvapCpp2(tair[i])) * 100.0;
@@ -3713,8 +3737,9 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
             Ueff = std::sqrt(climdata.uref * climdata.uref + wstar * wstar);
         }
         uf = (ka * Ueff) / (std::log(zref / zm) + psim);
-        double zh = heatRoughness(zm, uf);
-        double rHa = (std::log(zref / zh) + psih) / (ka * uf);
+        const double ufr = guardedFrictionVelocity(uf, ka / (std::log(zref / zm) + psim));
+        double zh = heatRoughness(zm, ufr);
+        double rHa = (std::log(zref / zh) + psih) / (ka * ufr);
         soilheat.wc = soilwater.swo.theta;
         soilheat = SoilHeatCpp(soilheat, soilp, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, 1.0, maxiter);
         climforwaterstruct cfw = {};
