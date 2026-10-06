@@ -3,7 +3,9 @@
 \docType{data}
 \name{vegparams}
 \alias{vegparams}
-\title{A dataset of vegetation parameters for running Big Leaf model.}
+\title{A dataset of vegetation parameters for running Big Leaf model. It holds the
+parameter set of the earlier model and cannot be passed to [RunMicro()] or
+[RunModelFull()], which need the list returned by [createvegp()].}
 \format{
 A data.frame with the following elements:
 \describe{

@@ -706,7 +706,14 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   or `-999.99` where not applicable.
 #'   \item `Evaporation`: soil evaporation.
 #'   \item `Transpiration`: plant transpiration.
+#'   \item `witers`: passes taken by the soil water solve.
 #' }
+#'
+#' Both also return `runoff`, the rain reaching the ground that the saturated
+#' soil surface could not take, each hour (mm). Wind speed is the wind itself:
+#' the velocity that convection adds to exchange over a heated surface is not
+#' included. Below ground, `soilwater` is no lower than the soil's residual
+#' water content.
 #'
 #' @importFrom Rcpp sourceCpp
 #' @useDynLib micropoint, .registration = TRUE

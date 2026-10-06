@@ -89,7 +89,8 @@ For **bare-ground runs** (`vegp = NA`) the returned elements are:
   \item{relhum}{Relative humidity profile (\%).}
   \item{windspeed}{Wind speed profile (m s^-1).}
   \item{tsoil}{Soil temperature profile (°C).}
-  \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+  \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
+    than the soil's residual water content.}
   \item{runoff}{Rain reaching the ground that the saturated soil surface
     could not take, each hour (mm). A vector, one value per time step.}
 }
@@ -106,7 +107,8 @@ For **vegetated runs** the returned elements are:
   \item{relhum}{Relative humidity profile (\%).}
   \item{windspeed}{Wind speed profile (m s^-1).}
   \item{tsoil}{Soil temperature profile (°C).}
-  \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+  \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
+    than the soil's residual water content.}
   \item{runoff}{Rain reaching the ground that the saturated soil surface
     could not take, each hour (mm). A vector, one value per time step.}
   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value

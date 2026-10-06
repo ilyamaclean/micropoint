@@ -25,6 +25,8 @@ A list of  the following objects:
 forestparams
 }
 \description{
-An object of class forestparams
+An object of class forestparams. It holds the parameter set of the earlier
+model and cannot be passed to [RunMicro()] or [RunModelFull()], which need the
+list returned by [createvegp()].
 }
 \keyword{datasets}
