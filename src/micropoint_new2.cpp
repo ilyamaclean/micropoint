@@ -1190,7 +1190,11 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
         // Carbon conversion
         double ea = satvapCpp2(envdata.tair) * (envdata.rh / 100.0);
         double es = satvapCpp2(envdata.tleaf);
-        double DD = es - ea; // vapour pressure deficit
+        // Vapour pressure deficit between leaf and air. A leaf at or below the
+        // air's dew point loses no water through its stomata and has nothing
+        // to save by closing them, so the deficit is taken as nil there and
+        // the stomata stand fully open, as they do just above it.
+        double DD = std::max(es - ea, 1e-9);
         double ca = envdata.Ca * envdata.pk / 1000.0;  // convert carbon concentration to Pa
         double ci = vegp.f0 * (1.0 - DD / vegp.Dcrit) * (ca - photocomp); // in Pa
         // Initialize variables
@@ -1270,7 +1274,7 @@ static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool 
         // vegp, like apsi above, rather than recomputed every call.
         if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
         double rp = vegp.rpmin / K_psi_pd;
-        double DDm = (es - ea) / envdata.pk; // vapour pressure deficit, mol/mol
+        double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
         double zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
         if (dadc < 1e-99) dadc = 1e-99;
         double mu = 1.0 + (4.0 * zeta) / dadc;
