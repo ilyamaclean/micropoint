@@ -1962,6 +1962,29 @@ static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
     double theta = Se * soilp.thetaS[i];
     return theta;
 }
+// Water potential of the root zone (J/kg), which tells the stomata how dry the
+// soil is. A plant draws on all the soil its roots reach, so what it senses is
+// the water held across the root zone: the water content of each layer weighted
+// by the share of roots in it, read as a potential through the retention curve.
+// Averaging the layers' potentials instead lets one dry layer speak for the
+// rest, because potential falls by orders of magnitude as soil dries while
+// water content does not: a parched surface layer holding a tenth of the roots
+// would close the stomata of a plant standing in moist soil. The retention
+// curve is that of the shallowest rooted layer.
+static double rootZonePotential(const soilpstruct& soilp, const std::vector<double>& theta,
+    const std::vector<double>& rootfrac)
+{
+    double sum = 0.0, wgt = 0.0;
+    int first = -1;
+    for (size_t i = 0; i < rootfrac.size() && i < theta.size(); ++i) {
+        if (rootfrac[i] <= 0.0) continue;
+        if (first < 0) first = static_cast<int>(i);
+        sum += rootfrac[i] * theta[i];
+        wgt += rootfrac[i];
+    }
+    if (first < 0) return waterPotential(soilp, theta[0], 0);
+    return waterPotential(soilp, sum / wgt, first);
+}
 // Unfrozen (liquid) water content below 0C: freezing-point depression
 // treated as extra suction through the same Campbell retention curve as
 // thetaFromPsi() (dev-notes/soil_freezing_design_notes.md). Capped at
@@ -3100,10 +3123,8 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // to hour as a state of its own.
     double Th = onestepin.tcanopy;
     double eh = satvapCpp2(Th) * (onestepin.rhcanopy / 100.0);
-    double psir = 0.0; // root-zone mean water potential
-    size_t nb = onestepin.soilwatervars.rootfrac.size();
-    for (size_t i = 0; i < nb; ++i) psir += onestepin.soilwatervars.rootfrac[i] * onestepin.soilwatervars.psiw[i];
-    psir = psir / 1000.0; // J/kg -> MPa
+    // root-zone water potential, J/kg -> MPa
+    double psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac) / 1000.0;
     WAitkenState st_tair;
     WAitkenState st_rh;
     WAitkenState st_leaf;
@@ -3228,9 +3249,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         }
         aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
         aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
-        psir = 0.0;
-        for (size_t i = 0; i < nb; ++i) psir += soilwater.swo.rootfrac[i] * soilwater.swo.psiw[i];
-        psir = psir / 1000.0; // J/kg -> MPa
+        psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
         onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
         ++nrIterations;
     }
@@ -3492,12 +3511,15 @@ double bulkstomatalresist(double tair, double tcan, double relhum, double pk, do
     envdata.Ca = Ca; // CO2 ppm
     envdata.precip = precip; // precipitation (mm)
     double z = vegp.hgt / 2.0;
-    double gs_sun = leafgs(envdata, vegp, z, C3);
+    // Each leaf's conductance is at least its closed-stomata value, as in the
+    // multilayer model.
+    const double ph = phairCpp(tair, pk);
+    const double gsClosed = ph / R_STOMATA_CLOSED;
+    double gs_sun = std::max(leafgs(envdata, vegp, z, C3), gsClosed);
     envdata.PARabs = Rshade_abs;
-    double gs_shade = leafgs(envdata, vegp, z, C3);
+    double gs_shade = std::max(leafgs(envdata, vegp, z, C3), gsClosed);
     double Gs = gs_sun * Lsun + gs_shade * Lshade;
     // Convert to bulk surface resistance
-    double ph = phairCpp(tair, pk);
     return ph / Gs;
 }
 // Calculate dewpoint temperature
@@ -3646,15 +3668,9 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
             canopyEnhancement(vegp.hgt, vegp.pai, soilp.z0, fade), soilp.z0);
         const double rGz = soilToZ(col, zref);
         const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL, soilp.z0) + rGz - col.Rh;
-        // Bulk surface stomatal resistance. psiw here needs to be
-        // the root-zone mean water potential (rootfrac-weighted across all
-        // soil layers), matching OneStepBelow's treatment -- not just the
-        // top layer's value, which would make transpiration blind to
-        // moisture held deeper in the profile than the very surface.
-        double psiw = 0.0;
-        for (size_t i = 0; i < soilwater.swo.rootfrac.size(); ++i) {
-            psiw += soilwater.swo.rootfrac[i] * soilwater.swo.psiw[i];
-        }
+        // Bulk surface stomatal resistance, from the water potential of the
+        // whole root zone, as in the multilayer model.
+        const double psiw = rootZonePotential(soilp, soilwater.swo.theta, soilwater.swo.rootfrac);
         double rS = bulkstomatalresist(climdata.tref, tcanopy, climdata.relhum, climdata.pk, psiw,
             Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
         rS = std::min(rS, 1e10);
