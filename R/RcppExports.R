@@ -73,11 +73,11 @@ WeatherhgtCpp2 <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zou
     .Call(`_micropoint_WeatherhgtCpp2`, obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, lon, SoilTempIni, SoilThetaIni, CO2ppm)
 }
 
-RunBelowFullBare <- function(obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-2) {
+RunBelowFullBare <- function(obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3) {
     .Call(`_micropoint_RunBelowFullBare`, obstime, climdata, soilc, z, zref, zm, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance)
 }
 
-RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-2, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_RunBelowFull`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
@@ -105,7 +105,7 @@ BigLeafBareCpp <- function(obstime, climdata, soilc, zref, zmr, lat, lon, bounda
     .Call(`_micropoint_BigLeafBareCpp`, obstime, climdata, soilc, zref, zmr, lat, lon, boundaryT, maxiter, C3)
 }
 
-DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations = 100L, tolerance = 1e-2, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
+DiagSetupCpp <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations = 100L, tolerance = 1e-3, a0 = -1.0, a1 = 1.25, C3 = TRUE) {
     .Call(`_micropoint_DiagSetupCpp`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, hourIndex, maxNrIterations, tolerance, a0, a1, C3)
 }
 

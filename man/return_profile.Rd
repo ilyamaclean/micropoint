@@ -20,7 +20,7 @@ return_profile(
   boundaryT = NA,
   zm = 0.004,
   maxiter = 100,
-  tolerance = 0.01,
+  tolerance = 0.001,
   C3 = TRUE,
   plotout = TRUE,
   varn = "temp"

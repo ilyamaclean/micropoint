@@ -42,6 +42,14 @@ constexpr double PSI_WILTING_POINT = -1500.0;
 // earlier functions' Aitken-damped iterates (windmodelCpp's uf_iter,
 // SoilHeatCpp's Tsurf_iter, OneStepBelow's H_iter).
 inline double aitken1d(double oldv, double newv, Aitken1DState& st);
+// How closely the coupled hour is solved: the iteration stops when a pass moves
+// the air (the canopy air, or the ground surface where there is no canopy) by
+// less than this (K). The accelerated iteration reaches it in about one pass
+// more than it would need for a tolerance ten times looser, and at this value
+// air and leaves lie within about a hundredth of a degree of the state no pass
+// would move. The run functions take the same value as their default
+// (exported signatures must spell it as a number).
+constexpr double OUTER_TOLERANCE = 1e-3;
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
 // This section establishes solar geometry only.  It converts date/time and location into
@@ -3287,7 +3295,7 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
 static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const climstruct& climdata, vegpstruct& vegpc, const soilpstruct& soilpc,
     const std::vector<double>& z, const tsvegstruct& tspveg, const tsvegstruct& tspvegPAR, const tsdifstruct& tspdif,
     const tsdifstruct& tspdifPAR, const LWweights& wgts, const std::vector<double>& wc,
-    double Ca, double latr, double lonr, double zref, int maxIter = 100, double  tolerance = 1e-3,
+    double Ca, double latr, double lonr, double zref, int maxIter = 100, double  tolerance = OUTER_TOLERANCE,
     double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     solmodel solp = solpositionCpp2(latr, lonr, obsdata.year, obsdata.month, obsdata.day, obsdata.hour);
@@ -3395,7 +3403,7 @@ double Uabove(double za, double zref, double uh, double uref, double hgt, double
 // Ground radiation/energy balance, soil heat/water and atmospheric stability are iterated to a mutually consistent surface state.
 static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, const climstruct& climdata, const soilpstruct& soilpc,
     const std::vector<double>& z, double latr, double lonr, double zref, double zm = 0.004, int maxIter = 100,
-    double  tolerance = 1e-8)
+    double  tolerance = OUTER_TOLERANCE)
 {
     double Rswin = 0.0;   // shortwave arriving on the (possibly sloping) ground
     double Rb0 = 0.0;
@@ -3727,7 +3735,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     Aitken1DState st;
     // At least two passes, so that stability is evaluated at least once from
     // this hour's own sensible heat flux before the solution is accepted.
-    while ((itr < 2 || error > 1e-2) && itr < maxiter) {
+    while ((itr < 2 || error > OUTER_TOLERANCE) && itr < maxiter) {
         const double fade = canopyTurbulence(climdata.uref, vegp.hgt, vegp.pai, d, zref, soilp.z0);
         double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d, soilp.z0, fade);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
@@ -3830,7 +3838,7 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
     double G = soilheat.Gflux;
     // At least two passes, so that stability is evaluated at least once from
     // this hour's own sensible heat flux before the solution is accepted.
-    while ((itr < 2 || error > 1e-2) && itr < maxiter) {
+    while ((itr < 2 || error > OUTER_TOLERANCE) && itr < maxiter) {
         // As in OneStepBare: the surface layer from the soil's roughness height,
         // with the convective velocity scale in calm, sunny conditions.
         const double zm = zmr;
@@ -5154,7 +5162,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         climin.Rsw = Rsw[hr]; climin.Rdif = Rdif[hr]; climin.Rlw = Rlw[hr]; climin.uref = wspeed[hr];
         climin.winddir = wdir[hr]; climin.precip = precip[hr];
         onestepin = OneStepBelow(onestepin, obsdata, climin, vegpc, soilpc, z, tspveg, tspvegPAR, tspdif,
-            tspdifPAR, wgts, wc, CO2ppm, latr, lonr, zin, 100, 1e-2);
+            tspdifPAR, wgts, wc, CO2ppm, latr, lonr, zin, 100, OUTER_TOLERANCE);
         const double th = onestepin.tcanopy;
         temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL, soilpc.z0, onestepin.fade);
         relhum_new[hr] = RHabove(zout, zin, onestepin.rhcanopy, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai,
@@ -5197,7 +5205,7 @@ void FillMyMatrix(NumericMatrix& mat, std::vector<double>& v, size_t hr)
 // [[Rcpp::export]]
 List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z,
     double zref, double zm, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
-    int maxNrIterations = 100, double  tolerance = 1e-2)
+    int maxNrIterations = 100, double  tolerance = 1e-3)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5277,7 +5285,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
 List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii,
     std::vector<double> Lfrac, double zref, double Ca, double lat, double lon,
     std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int maxNrIterations = 100,
-    double  tolerance = 1e-2, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
+    double  tolerance = 1e-3, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5744,7 +5752,7 @@ static outercarry diagStartCarry(const diagcontext& ctx, const onestep& s)
 SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca,
     double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, int hourIndex,
-    int maxNrIterations = 100, double tolerance = 1e-2, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
+    int maxNrIterations = 100, double tolerance = 1e-3, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5857,6 +5865,6 @@ Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x)
     injectState(Rcpp::as<std::vector<double>>(x), s, c);
     if (c.pass < 3) c.pass = 3;
     outerPass(s, c, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
-        ctx->Ca, ctx->zref, ctx->maxIter, 1e-2, ctx->a0v, ctx->a1, ctx->dcan, ctx->C3);
+        ctx->Ca, ctx->zref, ctx->maxIter, OUTER_TOLERANCE, ctx->a0v, ctx->a1, ctx->dcan, ctx->C3);
     return Rcpp::wrap(packState(s, c));
 }
