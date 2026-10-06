@@ -311,11 +311,12 @@ forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, b
 #' of the soil roughness length, so a rougher soil raises it. It is a safety
 #' stop, not a transition: the canopy's own effect on the air has already faded
 #' to nothing by the time vegetation is this short, so the result is continuous
-#' across it.
+#' across it. A canopy of no height or no plant area is bare ground too.
 #' @noRd
 SHORT_CANOPY_MULTIPLE <- 2
 asbareifshort <- function(vegp, zm = 0.004) {
   if (class(vegp) == "logical") return(vegp)
+  if (vegp$h <= 0 || vegp$pai <= 0) return(NA)   # no height or no foliage: there is no canopy
   if (vegp$h < SHORT_CANOPY_MULTIPLE * zm) {
     warning("Canopy height is below ", SHORT_CANOPY_MULTIPLE, " times the soil roughness length (",
             signif(SHORT_CANOPY_MULTIPLE * zm * 1000, 3), " mm), so the vegetation is no taller than the soil is rough. ",

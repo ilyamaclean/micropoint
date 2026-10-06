@@ -83,9 +83,8 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
   return(paii)
 }
 #' @title Generates vegetation parameters for grass
-#' @description Generates an object of class
-#' `vegparams` and a vector of of length `n` of plausible plant
-#' area index values for grassy vegetation.
+#' @description Generates a vegetation parameter list and a vector of length
+#' `n` of plausible plant area index values for grassy vegetation.
 #' @param hgt grass height (m) - of tallest grass spike (~1.5x drop disk measured height)
 #' @param n Number of plant area index values to generate. Default: 20 (see details)
 #' @param PAI optionally total plant area index value for grass. Estimated
@@ -93,38 +92,35 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #' @param taper parameter controlling how tapered the plant area index
 #' is towards the top. A value of one is typical of grass. Lower values give
 #' a more even spread. Cannot be negative or zero.
-#' @return a vector of length `n` of plant area index values the sum of which equals `PAI`
-#' @details a list comrpising the following:
+#' @return a list comprising the following:
 #' \describe{
-#'  \item{vegp}{An object of vegetation parameters for running the microclimate model}
-#'  \item{paii}{a vector of length `n` of plant area index values}
+#'  \item{vegp}{A vegetation parameter list as returned by [createvegp()] for
+#'  a C3 grass, with height, plant area index, leaf inclination and leaf size
+#'  set for grass of this height}
+#'  \item{paii}{a vector of length `n` of plant area index values, the sum of
+#'  which equals the plant area index}
 #' }
+#' @details The plant area index, if not given, is estimated from height. Leaves
+#' are taken as near vertical and their width as 8 percent of the height.
 #' @rdname vegpforgrass
 #' @export
-#' @note The `vegp` list returned here uses the simplified legacy parameter
-#' set (`h`, `pai`, `x`, `clump`, `lref`, `ltra`, `leafd`, `em`, `gsmax`,
-#' `q50`) and is not directly usable by the current model's `RunMicro`/
-#' `RunModelFull`, which expect the richer parameter set produced by
-#' [createvegp()]. It remains here, duplicated from the legacy version,
-#' pending a decision on whether to extend it for the current model.
 #' @examples
 #' \dontrun{
 #' vp <- vegpforgrass(0.25, 20)
-#' vegp <- vp$vegp
-#' paii <- vp$paii
-#' mout <- runpointmodel(climdata, reqhgt = 0.12, vegp, paii,  groundparams, lat = 49.96807, long= -5.215668)
+#' mout <- RunMicro(climdata, 0.12, vp$vegp, createsoilc("Loam"), vp$paii, rep(0.8, 20),
+#'                  lat = 49.96807, long = -5.215668)
 #' tme <- as.POSIXct(climdata$obs_time)
 #' plot(mout$tair ~ tme, type="l", xlab = "Month", ylab = "Air temperature",
 #'      ylim = c(-5, 40), col = "red")
 #' }
 vegpforgrass <- function(hgt, n = 20, PAI = NA, taper = 1) {
-  lpai<- -8.9388+1.3898 *log(hgt*1000)
-  PAI<-exp(lpai)
-  vegp<-list(h=hgt,pai=PAI,x=0.161808,
-             clump=0.3,lref=0.25,ltra=0.22,
-             leafd=0.08*hgt,em=0.97,
-             gsmax=0.38,q50=100)
-  class(vegp)<-"vegparams"
-  paii<-PAIgrass(hgt, n, PAI = PAI, taper = taper)
-  return(list(vegp=vegp,paii=paii))
+  if (is.na(PAI)) PAI <- exp(-8.9388 + 1.3898 * log(hgt * 1000))
+  vegp <- createvegp("C3")
+  vegp$h <- hgt
+  vegp$pai <- PAI
+  vegp$x <- 0.161808
+  vegp$len <- 0.08 * hgt
+  vegp$wid <- 0.08 * hgt
+  paii <- PAIgrass(hgt, n, PAI = PAI, taper = taper)
+  return(list(vegp = vegp, paii = paii))
 }

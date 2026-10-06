@@ -37,7 +37,9 @@
 #'
 #' A dataset of vegetation parameters for running the Small Leaf model.
 #'
-#' An object of class forestparams
+#' An object of class forestparams. It holds the parameter set of the earlier
+#' model and cannot be passed to [RunMicro()] or [RunModelFull()], which need the
+#' list returned by [createvegp()].
 #' @format A list of  the following objects:
 #' \describe{
 #'   \item{h}{vegetation height (m)}
@@ -106,7 +108,9 @@
 #' @source: \url{https://onlinelibrary.wiley.com/doi/full/10.1002/ird.1751}
 "soilparams"
 #'
-#' A dataset of vegetation parameters for running Big Leaf model.
+#' A dataset of vegetation parameters for running Big Leaf model. It holds the
+#' parameter set of the earlier model and cannot be passed to [RunMicro()] or
+#' [RunModelFull()], which need the list returned by [createvegp()].
 #'
 #' A data.frame of parameters for running the soil models
 #'

@@ -161,6 +161,7 @@ namespace newmodel {
         // roughness and stability, so it converts a wind speed into the
         // friction velocity that wind produces over this particular canopy.
         double ufratio;
+        double windscale; // measured wind over the wind that drives exchange: turns profile winds into the wind itself
         double fade; // weight of canopy-scale turbulence: 1 fully turbulent, 0 absent
     };
     struct rainmodel {
@@ -263,7 +264,8 @@ namespace newmodel {
         double fade; // weight of canopy-scale turbulence this step
         double tcanopy; // air temperature at canopy top (deg C), the upper boundary of the canopy air
         double rhcanopy; // relative humidity at canopy top (%)
-        double ucanopy; // wind speed at canopy top (m/s)
+        double ucanopy; // wind speed at canopy top (m/s), on the scale that drives exchange
+        double windscale; // turns the exchange-scale winds into the wind itself, for reporting
         double LL; // // Monin�Obukhov length (m)
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run

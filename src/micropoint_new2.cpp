@@ -1057,6 +1057,10 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     out.psi_h = psi_h;
     out.phi_h = phi_h;
     out.ufratio = ufratio;
+    // The profile is built on the wind that drives exchange, which includes the
+    // velocity convection adds over a heated surface. What is reported to the
+    // user is the wind itself, so every wind returned is scaled back by this.
+    out.windscale = (Ueff > 0.0) ? uref / Ueff : 1.0;
     out.fade = fade;
     return out;
 }
@@ -3156,6 +3160,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
             onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
         onestepin.uz = wind.uz;
         onestepin.ucanopy = wind.uh;
+        onestepin.windscale = wind.windscale;
         onestepin.psih = wind.psi_h;
         onestepin.psim = wind.psi_m;
         onestepin.phih = wind.phi_h;
@@ -3427,7 +3432,10 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zm) {
             double psimz = dpsimCpp2(zm / LL) - dpsimCpp2(z[i] / LL);
-            uz[i] = (uf / ka) * (std::log(z[i] / zm) + psimz);
+            // reported as the wind itself: the profile is built on the wind that
+            // drives exchange, which includes the velocity convection adds
+            const double Udrive = driveWind(H);
+            uz[i] = (uf / ka) * (std::log(z[i] / zm) + psimz) * ((Udrive > 0.0) ? climdata.uref / Udrive : 1.0);
         }
         else {
             uz[i] = 0.0;
@@ -4439,6 +4447,7 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.fade = 1.0;
     onestepin.tcanopy = temp0;
     onestepin.ucanopy = 1.0;
+    onestepin.windscale = 1.0;
     onestepin.rhcanopy = rh0;
     onestepin.LL = 999.99;
     onestepin.iters = 0;
@@ -4478,8 +4487,13 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["rh"] = Rcpp::wrap(onestepin.rh);
     out["tcanopy"] = onestepin.tcanopy;
     out["rhcanopy"] = onestepin.rhcanopy;
-    out["ucanopy"] = onestepin.ucanopy;
-    out["uz"] = Rcpp::wrap(onestepin.uz);
+    // Winds are returned as the wind itself, not the wind that drives exchange.
+    std::vector<double> uzActual = onestepin.uz;
+    for (double& u : uzActual) u *= onestepin.windscale;
+    out["ucanopy"] = onestepin.ucanopy * onestepin.windscale;
+    out["uz"] = Rcpp::wrap(uzActual);
+    out["runoff"] = onestepin.runoff;
+    out["witers"] = onestepin.witers;
     out["rLB"] = Rcpp::wrap(onestepin.rLB);
     out["swaterdepth"] = Rcpp::wrap(onestepin.swaterdepth);
     out["Hz"] = Rcpp::wrap(onestepin.Hz);
@@ -4772,6 +4786,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     std::vector<double> L(n);
     std::vector<double> G(n);
     std::vector<double> Ev(n);
+    std::vector<double> runoff(n);
     std::vector<int> iters(n);
     std::vector<double> error(n);
     // Run model for every hr
@@ -4792,6 +4807,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         L[hr] = onestepin.L;
         G[hr] = onestepin.soilheatvars.Gflux;
         Ev[hr] = onestepin.Ev;
+        runoff[hr] = onestepin.runoff;
         iters[hr] = onestepin.iters;
         error[hr] = onestepin.error;
         if (reqhgt >= 0.0) {
@@ -4846,6 +4862,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         Named("H") = Rcpp::wrap(H),
         Named("L") = Rcpp::wrap(L),
         Named("G") = Rcpp::wrap(G),
+        Named("runoff") = Rcpp::wrap(runoff),
         // Error variables
         Named("iters") = Rcpp::wrap(iters),
         Named("error") = Rcpp::wrap(error)
@@ -4911,8 +4928,8 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     }
     std::vector<double> Rdirdown(n), Rdifdown(n), Rswup(n), Rlwdown(n), Rlwup(n);
     std::vector<double> tair(n), tground(n), tleaf(n), rz(n), uz(n);
-    std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n);
-    std::vector<int> iters(n);
+    std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n);
+    std::vector<int> iters(n), witers(n);
     for (size_t hr = 0; hr < n; ++hr) {
         obsstruct obsdata;
         climstruct climin;
@@ -4942,6 +4959,8 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
         Et[hr] = onestepin.Et;
         iters[hr] = onestepin.iters;
         error[hr] = onestepin.error;
+        runoff[hr] = onestepin.runoff;
+        witers[hr] = onestepin.witers;
         if (reqhgt < 0.0) {
             Rdirdown[hr] = Rdifdown[hr] = Rswup[hr] = Rlwdown[hr] = Rlwup[hr] = 0.0;
             tair[hr] = onestepin.soilheatvars.Te[sel];
@@ -4961,7 +4980,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                 tleaf[hr] = -999.99;
                 rz[hr] = RHabove(reqhgt, zref, onestepin.rhcanopy, Th, temp[hr], tair[hr], relhum[hr], vegpc.hgt, vegpc.pai,
                     onestepin.LL, soilpc.z0, onestepin.fade);
-                uz[hr] = Uabove(reqhgt, zref, onestepin.ucanopy, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
+                uz[hr] = Uabove(reqhgt, zref, onestepin.ucanopy * onestepin.windscale, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
             }
             else {
                 Rdifdown[hr] = onestepin.Rdifdown[sel];
@@ -4976,7 +4995,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                     tair[hr] = onestepin.tair[sel];
                     tleaf[hr] = onestepin.tleaf[sel];
                     rz[hr] = onestepin.rh[sel];
-                    uz[hr] = onestepin.uz[sel];
+                    uz[hr] = onestepin.uz[sel] * onestepin.windscale;
                 }
             }
         }
@@ -5004,7 +5023,9 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     out["G"] = G;
     out["Evaporation"] = Ev;
     out["Transpiration"] = Et;
+    out["runoff"] = runoff;
     out["iters"] = iters;
+    out["witers"] = witers;
     out["error"] = error;
     out.attr("class") = "data.frame";
     out.attr("row.names") = Rcpp::IntegerVector::create(NA_INTEGER, static_cast<int>(n));
@@ -5256,7 +5277,11 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         FillMyMatrix(tair, onestepin.tair, hr);
         FillMyMatrix(tleaf, onestepin.tleaf, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
-        FillMyMatrix(uz, onestepin.uz, hr);
+        {
+            std::vector<double> uzActual = onestepin.uz;   // the wind itself, not the wind that drives exchange
+            for (double& u : uzActual) u *= onestepin.windscale;
+            FillMyMatrix(uz, uzActual, hr);
+        }
         FillMyMatrix(tsoil, onestepin.soilheatvars.Te, hr);
         FillMyMatrix(theta, onestepin.soilwatervars.theta, hr);
         onestepin.soilheatvars.oldTe = onestepin.soilheatvars.Te;
