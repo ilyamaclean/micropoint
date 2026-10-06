@@ -1166,6 +1166,7 @@ static double rpmin_calc(double h, double hv, double Kxmx)
     const double rpmin = h / (Kpmx * hv * Chi_tap);
     return rpmin;
 }
+constexpr double R_STOMATA_CLOSED = 2000.0; // leaf resistance to vapour with stomata closed (s/m)
 // Leaf stomatal conductance from the Eller et al. (2020) hydraulic-
 // optimisation scheme: photosynthesis (Jacobs 1994 co-limitation of
 // light/carbon/transport-limited assimilation, C3 or C4) traded off
@@ -1641,11 +1642,16 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             const double tsw = PenmanMonteithCpp2(Rabs, onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2, rH2, rV, 0.0, 4);
             follow = (tsw - ts) / dTa;
         };
-        // Stomatal conductance responds to the light each leaf class absorbs
+        // Stomatal conductance responds to the light each leaf class absorbs.
+        // Stomata never seal completely: some species keep them partly open
+        // at night and every leaf leaks a little through its cuticle, so
+        // conductance falls no lower than a small closed-stomata value, in
+        // the dark as in dim light.
+        const double gsClosed = ph / R_STOMATA_CLOSED;
         envdata.PARabs = swout.RPARsun[i];
-        const double gssun = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
+        const double gssun = std::max(leafgs(envdata, vegp, vegp.hgt / 2.0, C3), gsClosed);
         envdata.PARabs = swout.RPARshade[i];
-        const double gsshade = leafgs(envdata, vegp, vegp.hgt / 2.0, C3);
+        const double gsshade = std::max(leafgs(envdata, vegp, vegp.hgt / 2.0, C3), gsClosed);
         const double sf = swout.sunfrac[i];
         onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
         // Water the layer can evaporate over the step, per unit plant area
