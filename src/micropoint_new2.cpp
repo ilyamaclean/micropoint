@@ -18,10 +18,6 @@ constexpr double Mw = 0.018015; // kg/mol
 constexpr double RgasC = 8.314; // J/mol/K
 constexpr double g = 9.80665;
 constexpr double torad = 3.14159265358979323846 / 180.0;
-// Temperature offset used to measure how fast a surface energy balance
-// weakens as the surface warms; small enough to be a local slope, large
-// enough to stay clear of rounding in the balance itself.
-constexpr double EB_SLOPE_DT = 0.01;
 // Matric-potential offset used to measure how fast evaporation responds to
 // surface wetness. Taken as a fraction of the potential itself, which spans
 // orders of magnitude between saturation and the dry limit, with a floor for
@@ -1802,9 +1798,16 @@ static double groundLatentFlux(const soilpstruct& soilp, double Tsurface, double
     const double ph = phairCpp(Tref, pk);
     const double es = satvapCpp2(Tsurface) * soilrelhumCpp(soilp, Tsurface, theta);
     const double ea = satvapCpp2(Tref) * relhum / 100.0;
-    // latent heat of vaporisation, or of sublimation below freezing (J/mol)
-    const double la = (Tsurface >= 0.0) ? (45068.7 - 42.8428 * Tsurface)
-        : (51078.69 - 4.338 * Tsurface - 0.06367 * Tsurface * Tsurface);
+    // Latent heat taken up by the vapour (J/mol): that of vaporisation from
+    // liquid water above freezing and of sublimation from ice below it. Soil
+    // water freezes progressively over the first degree or so below 0 degC, not
+    // all at once, so the one passes into the other across that degree. A
+    // sudden change at 0 degC would leave the surface balance with a step in
+    // it, and no temperature at which it closes whenever the answer fell there.
+    const double vaporisation = 45068.7 - 42.8428 * Tsurface;
+    const double sublimation = 51078.69 - 4.338 * Tsurface - 0.06367 * Tsurface * Tsurface;
+    const double frozen = std::min(1.0, std::max(0.0, -Tsurface));
+    const double la = vaporisation + frozen * (sublimation - vaporisation);
     return ((la * ph) / (rHa * pk)) * (es - ea);
 }
 // Ground surface energy balance residual (net radiation minus sensible
@@ -2221,19 +2224,26 @@ constexpr double SOIL_HEAT_TOL = 1e-3;
 // conserves energy; with hourly steps and a surface layer a few millimetres
 // thick that is also free of the overshoot a time-centred scheme produces.
 //
-// The equations are solved for each node's heat content, with its temperature
-// read from that, and not for temperature with a heat capacity. In freezing
-// soil the two are very different. The heat needed to warm a layer by a degree
-// changes more than a hundredfold within a few hundredths of a degree of the
-// point where its water starts to freeze, so no one heat capacity describes a
-// step that crosses that point, and a solve built on one cannot settle on which
-// side of it a layer ends the step. Seen the other way round nothing is abrupt:
-// a layer's temperature changes little or much as it gains heat, never
-// suddenly, and the energy that enters it is exactly what its change of
+// The heat a node gains is the difference between its heat content at the end
+// of the step and at the start, not a heat capacity times its change of
+// temperature. In freezing soil the two are very different. The heat needed to
+// warm a layer by a degree changes more than a hundredfold within a few
+// hundredths of a degree of the point where its water starts to freeze, so no
+// one heat capacity describes a step that crosses that point. With heat
+// content the energy that enters a layer is exactly what its change of
 // temperature and of ice requires, whatever happened on the way.
+//
+// The balances are closed by repeated correction. Each correction is worked
+// out as if every balance responded in proportion to it, which near freezing
+// holds only for small changes and only on one side of the point where a
+// node's water begins to freeze; most of what follows is there to keep the
+// corrections honest across that point.
 static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs, double Tref, double relhum, double atmPressure,
-    double rHa, double dT = 3600.0, int maxNrIterations = 100, double tolerance = SOIL_HEAT_TOL)
+    double rHa, double dT = 3600.0, double tolerance = SOIL_HEAT_TOL)
 {
+    // Nearly every solve takes a handful of changes. A freezing front crossing many thin
+    // layers within the step takes one or two for each layer it passes.
+    constexpr int maxNrIterations = 500;
     const int n = state.n;
     const std::vector<double>& wc = state.wc;
     const std::vector<double>& dz = state.dz;
@@ -2247,8 +2257,23 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         heat[i] = soilHeatContent(soilp, wc[i], T[i], i);
     }
     std::vector<double> ff(n + 1), ffTrial(n + 1), imbalance(n + 1), imbalanceTrial(n + 1);
-    std::vector<double> aa(n + 1), bb(n + 1), cc(n + 1), dd(n + 1), step(n + 1, 0.0), degreesPerHeat(n + 1, 0.0);
+    std::vector<double> aa(n + 1), bb(n + 1), cc(n + 1), dd(n + 1), step(n + 1, 0.0);
+    std::vector<double> warmingPerHeat(n + 1, 0.0), coolingPerHeat(n + 1, 0.0);
+    std::vector<double> conductivityWarming(n + 1, 0.0), conductivityCooling(n + 1, 0.0);
+    std::vector<char> warming(n + 1, 1), byTemperature(n + 1, 0);
+    std::vector<double> degreesStep(n + 1, 0.0);
+    // Temperature at which each node's water begins to freeze: the freezing
+    // point lowered by the suction the soil already holds its water at.
+    std::vector<double> freezingOnset(n + 1, 0.0);
+    for (int i = 0; i <= n; ++i) freezingOnset[i] = waterPotential(soilp, wc[i], i) * 273.15 / 334000.0;
+    double restoringWarming = 0.0, restoringCooling = 0.0;
 
+    // Conductivity of the soil at a node, given its temperature and so its ice.
+    auto conductivityAt = [&](int i, double Ti) -> double {
+        double ice = wc[i] - unfrozenTheta(soilp, wc[i], Ti, i);
+        if (ice < 0.0) ice = 0.0;
+        return thermalConductivityCpp(soilp.Vq[i], soilp.Vm[i], soilp.Vo[i], wc[i], ice, soilp.Mc[i], Ti, atmPressure);
+    };
     // How far a trial profile is from closing every node's heat balance: the
     // heat gained since the start of the step less the heat conducted in, and
     // at the surface less the net heat from above (W/m2). Conductivity between
@@ -2256,9 +2281,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     auto heatImbalance = [&](const std::vector<double>& ht, const std::vector<double>& Tt, std::vector<double>& R, std::vector<double>& f) -> double {
         double lambda0 = 0.0, lambda1 = 0.0;
         for (int i = 0; i < n; ++i) {
-            double ice = wc[i] - unfrozenTheta(soilp, wc[i], Tt[i], i);
-            if (ice < 0.0) ice = 0.0;
-            const double lambda = thermalConductivityCpp(soilp.Vq[i], soilp.Vm[i], soilp.Vo[i], wc[i], ice, soilp.Mc[i], Tt[i], atmPressure);
+            const double lambda = conductivityAt(i, Tt[i]);
             if (i == 0) lambda0 = lambda;
             if (i == 1) lambda1 = lambda;
             f[i] = lambda / dz[i];
@@ -2270,7 +2293,8 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             if (i == 0) in += soilsurfaceEB(soilp, Rabs, Tref, Tt[0], atmPressure, relhum, rHa, wc[0]);
             else in += f[i - 1] * (Tt[i - 1] - Tt[i]);
             R[i] = state.vol[i] * (ht[i] - heatAtStart[i]) / dT - in;
-            if (std::abs(R[i]) > worst) worst = std::abs(R[i]);
+            if (!std::isfinite(R[i])) worst = 1e300;
+            else if (std::abs(R[i]) > worst) worst = std::abs(R[i]);
         }
         R[n] = 0.0;
         return worst;
@@ -2281,44 +2305,141 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     while (worst > tolerance && nrIterations < maxNrIterations) {
         // The change in heat contents that would close every balance if the
         // imbalances varied in proportion to it. A node's imbalance grows with
-        // its own heat content directly, and through the warming that heat
-        // brings: more is conducted away to its neighbours, and at the surface
-        // less arrives from above, because emitted longwave, sensible and
-        // latent heat all rise as the surface warms. Radiative cooling alone
-        // restores the surface that strongly whatever wind and wetness do, so
-        // it is the least that slope is allowed to be.
-        const double qsurface = soilsurfaceEB(soilp, Rabs, Tref, T[0], atmPressure, relhum, rHa, wc[0]);
-        const double qprobe = soilsurfaceEB(soilp, Rabs, Tref, T[0] + EB_SLOPE_DT, atmPressure, relhum, rHa, wc[0]);
-        double restoring = -(qprobe - qsurface) / EB_SLOPE_DT;
-        const double radiative = 4.0 * soilp.groundem * 5.67e-8 * std::pow(T[0] + 273.15, 3.0);
-        if (!(restoring > radiative)) restoring = radiative;
-        constexpr double probe = 0.002; // K
+        // its own heat content directly, and through what that heat does to
+        // it: as it warms more is conducted away to its neighbours, and at the
+        // surface less arrives from above, because emitted longwave, sensible
+        // and latent heat all rise with surface temperature.
+        //
+        // Two things about a node enter: how much it warms per unit of heat
+        // gained, and how its conductivity changes as it gains heat, ice
+        // conducting four times better than water. Both differ greatly on the
+        // two sides of the point where the node's water begins to freeze, so
+        // they are found for a gain and for a loss of heat separately and
+        // taken on the side the node is moving to: the change is solved for,
+        // and solved again if any node turns out to move the other way from
+        // the one assumed. They are found from a small change of heat and not
+        // of temperature, because in freezing soil a great deal of heat goes
+        // with almost no change of temperature.
+        constexpr double probe = 100.0; // J/m3
         for (int i = 0; i < n; ++i) {
-            degreesPerHeat[i] = 2.0 * probe / (soilHeatContent(soilp, wc[i], T[i] + probe, i)
-                - soilHeatContent(soilp, wc[i], T[i] - probe, i));
+            const double warmer = soilTemperatureFromHeat(soilp, wc[i], heat[i] + probe, i);
+            const double cooler = soilTemperatureFromHeat(soilp, wc[i], heat[i] - probe, i);
+            warmingPerHeat[i] = (warmer - T[i]) / probe;
+            coolingPerHeat[i] = (T[i] - cooler) / probe;
+            if (i == 0) {
+                // fall in the net heat from above per unit of heat gained by the surface node
+                const double q = soilsurfaceEB(soilp, Rabs, Tref, T[0], atmPressure, relhum, rHa, wc[0]);
+                restoringWarming = (q - soilsurfaceEB(soilp, Rabs, Tref, warmer, atmPressure, relhum, rHa, wc[0])) / probe;
+                restoringCooling = (soilsurfaceEB(soilp, Rabs, Tref, cooler, atmPressure, relhum, rHa, wc[0]) - q) / probe;
+            }
+            conductivityWarming[i] = 0.0; conductivityCooling[i] = 0.0;
+            if (cooler < 0.0) {
+                const double lambda = conductivityAt(i, T[i]);
+                conductivityWarming[i] = (conductivityAt(i, warmer) - lambda) / probe;
+                conductivityCooling[i] = (lambda - conductivityAt(i, cooler)) / probe;
+            }
+            warming[i] = (step[i] >= 0.0);
         }
-        degreesPerHeat[n] = 0.0;
+        // The conductance between the top two nodes depends on both of them,
+        // through the mean of their conductivities.
+        const double lambda0 = conductivityAt(0, T[0]), lambda1 = conductivityAt(1, T[1]);
+        const double meanPerTop = (kMeanCpp("LOGARITHMIC", lambda0 * (1.0 + 1e-6), lambda1) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda0 * 1e-6);
+        const double meanPerSecond = (kMeanCpp("LOGARITHMIC", lambda0, lambda1 * (1.0 + 1e-6)) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda1 * 1e-6);
+        for (int round = 0; round < 4; ++round) {
+            auto perHeat = [&](int i) { return (i >= n) ? 0.0 : (warming[i] ? warmingPerHeat[i] : coolingPerHeat[i]); };
+            // change of the conductance beneath node i per unit of heat gained by it
+            auto conductanceSlope = [&](int i) { return (warming[i] ? conductivityWarming[i] : conductivityCooling[i]) / dz[i]; };
+            // the conductance beneath the surface node responds to both of the top two nodes
+            const double topToOwn = meanPerTop * conductanceSlope(0);
+            const double topToSecond = meanPerSecond * (warming[1] ? conductivityWarming[1] : conductivityCooling[1]) / dz[0];
+            for (int i = 0; i < n; ++i) {
+                double below = 0.0, own, above = -ff[i] * perHeat(i + 1);
+                if (i == 0) {
+                    own = ff[0] * perHeat(0) + (warming[0] ? restoringWarming : restoringCooling) - topToOwn * (T[1] - T[0]);
+                    above -= topToSecond * (T[1] - T[0]);
+                }
+                else {
+                    own = (ff[i - 1] + ff[i]) * perHeat(i) - conductanceSlope(i) * (T[i + 1] - T[i]);
+                    if (i == 1) {
+                        below = -ff[0] * perHeat(0) - topToOwn * (T[0] - T[1]);
+                        own -= topToSecond * (T[0] - T[1]);
+                    }
+                    else below = -ff[i - 1] * perHeat(i - 1) - conductanceSlope(i - 1) * (T[i - 1] - T[i]);
+                }
+                aa[i] = below;
+                bb[i] = state.vol[i] / dT + own;
+                cc[i] = above;
+                dd[i] = -imbalance[i];
+            }
+            aa[n] = 0.0; bb[n] = 1.0; cc[n] = 0.0; dd[n] = 0.0;
+            step = ThomasBoundaryCondition(aa, bb, cc, dd, step, 0, n).x;
+            bool sidesHold = true;
+            for (int i = 0; i < n; ++i) {
+                if ((step[i] >= 0.0) != warming[i]) { warming[i] = !warming[i]; sidesHold = false; }
+            }
+            if (sidesHold) break;
+        }
+        // The same change can be applied to a node as a change of heat
+        // content or as the change of temperature that goes with it, and
+        // where the node's water is freezing the two are far from the same
+        // thing once the change is more than slight. Which is the truer guide
+        // depends on what dominates the node's balance. Where it is the heat
+        // the node stores, as in a thick layer, the balance is close to
+        // proportional in heat content, and the change is applied to that.
+        // Where it is exchange with its neighbours or the air, as in the thin
+        // layers near the surface, the balance is close to proportional in
+        // temperature, and the change is applied to temperature, the heat
+        // content following from it.
         for (int i = 0; i < n; ++i) {
-            aa[i] = (i == 0) ? 0.0 : -ff[i - 1] * degreesPerHeat[i - 1];
-            bb[i] = state.vol[i] / dT + (ff[i] + ((i == 0) ? restoring : ff[i - 1])) * degreesPerHeat[i];
-            cc[i] = -ff[i] * degreesPerHeat[i + 1];
-            dd[i] = -imbalance[i];
+            const double perHeat = warming[i] ? warmingPerHeat[i] : coolingPerHeat[i];
+            byTemperature[i] = (bb[i] - state.vol[i] / dT > state.vol[i] / dT);
+            degreesStep[i] = perHeat * step[i];
         }
-        aa[n] = 0.0; bb[n] = 1.0; cc[n] = 0.0; dd[n] = 0.0;
-        step = ThomasBoundaryCondition(aa, bb, cc, dd, step, 0, n).x;
-        // The whole change is taken if it leaves the profile closer to balance,
-        // and half of it, then a quarter and so on, if not.
-        double share = 1.0, worstTrial = worst;
+        // A node behaves quite differently on the two sides of the
+        // temperature at which its water begins to freeze, and the change was
+        // worked out for the side it is on. So the change is cut back, for all
+        // nodes alike, to the point where the first of them reaches that
+        // temperature; that node is placed exactly on it, and the next change
+        // is worked out afresh with the node free to go either way from there.
+        double share = 1.0;
+        int reaching = -1;
+        for (int i = 0; i < n; ++i) {
+            const double fromOnset = T[i] - freezingOnset[i];
+            if (std::abs(fromOnset) < 1e-10) continue;
+            const double full = byTemperature[i] ? T[i] + degreesStep[i]
+                : soilTemperatureFromHeat(soilp, wc[i], heat[i] + step[i], i);
+            if ((full - freezingOnset[i]) * fromOnset >= 0.0) continue;
+            const double part = byTemperature[i] ? -fromOnset / degreesStep[i]
+                : (soilHeatContent(soilp, wc[i], freezingOnset[i], i) - heat[i]) / step[i];
+            if (part < share) { share = part; reaching = i; }
+        }
+        // What is left of the change is taken if it leaves the profile closer
+        // to balance, and half of it, then a quarter and so on, if not.
+        double worstTrial = worst;
         for (int halvings = 0; halvings < 30; ++halvings) {
             for (int i = 0; i < n; ++i) {
-                heatTrial[i] = heat[i] + share * step[i];
-                Ttrial[i] = soilTemperatureFromHeat(soilp, wc[i], heatTrial[i], i);
+                if (i == reaching) {
+                    Ttrial[i] = freezingOnset[i];
+                    heatTrial[i] = soilHeatContent(soilp, wc[i], Ttrial[i], i);
+                }
+                else if (byTemperature[i]) {
+                    Ttrial[i] = T[i] + share * degreesStep[i];
+                    heatTrial[i] = soilHeatContent(soilp, wc[i], Ttrial[i], i);
+                }
+                else {
+                    heatTrial[i] = heat[i] + share * step[i];
+                    Ttrial[i] = soilTemperatureFromHeat(soilp, wc[i], heatTrial[i], i);
+                }
             }
+            reaching = -1;   // only the first trial, cut at that node's onset, places it there
             heatTrial[n] = heat[n]; Ttrial[n] = T[n];
             worstTrial = heatImbalance(heatTrial, Ttrial, imbalanceTrial, ffTrial);
             if (worstTrial < worst) break;
             share *= 0.5;
         }
+        // A change that brings the profile no closer to balance at any size is
+        // not taken, and the solve stops where it is.
+        if (!(worstTrial < worst)) { nrIterations = maxNrIterations; break; }
         heat = heatTrial; T = Ttrial; imbalance = imbalanceTrial; ff = ffTrial; worst = worstTrial;
         ++nrIterations;
     }
@@ -3126,7 +3247,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     // sources as the leaf model has just left them.
     const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
     double Rabs = swrad.RswGabs + lwrad.RlwGabs;
-    soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600, maxIter);
+    soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600);
     climforwaterstruct cfw = {};
     cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
     cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
@@ -3486,7 +3607,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         ufr = guardedFrictionVelocity(uf, ka / (std::log(zref / zm) + psi_m));
         zh = heatRoughness(zm, ufr);
         rHa = (std::log(zref / zh) + psi_h) / (ka * ufr);
-        soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, maxIter);
+        soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600);
         climforwaterstruct cfw = {};
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
         cfw.precip = climdata.precip; cfw.Et = 0.0;
@@ -3778,7 +3899,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         Tr = Mw / (RgasC * Tkc * rV) * (es - ea) * 1000.0 * 3600.0 * vegp.pai * LAIfrac; // transpiration
         if (Tr < 0.0) Tr = 0.0;
         soilheat.wc = soilwater.swo.theta;
-        soilheat = SoilHeatCpp(soilheat, soilp, RabsG, climdata.tref, climdata.relhum, climdata.pk, rGz, 3600, maxiter);
+        soilheat = SoilHeatCpp(soilheat, soilp, RabsG, climdata.tref, climdata.relhum, climdata.pk, rGz, 3600);
         climforwaterstruct cfw = {};
         cfw.Rabs = RabsG; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rGz;
         cfw.precip = climdata.precip; cfw.Et = Tr;
@@ -3863,7 +3984,7 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         double zh = heatRoughness(zm, ufr);
         double rHa = (std::log(zref / zh) + psih) / (ka * ufr);
         soilheat.wc = soilwater.swo.theta;
-        soilheat = SoilHeatCpp(soilheat, soilp, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600, maxiter);
+        soilheat = SoilHeatCpp(soilheat, soilp, Rabs, climdata.tref, climdata.relhum, climdata.pk, rHa, 3600);
         climforwaterstruct cfw = {};
         cfw.Rabs = Rabs; cfw.Tair = climdata.tref; cfw.relhum = climdata.relhum; cfw.pk = climdata.pk; cfw.rHa = rHa;
         cfw.precip = climdata.precip; cfw.Et = 0.0;
