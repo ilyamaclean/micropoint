@@ -3088,6 +3088,157 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
 // These are the core timestep couplers.  A timestep is not a simple sequence: radiation, leaves,
 // canopy air, ground, soil and above-canopy stability are iterated until their shared fluxes and boundary conditions agree.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// Which relaxations the outer iteration applies, and how far a relaxed step may
+// go. The defaults are the model's; the others exist so that the iteration can
+// be examined and alternatives tried without touching what a pass computes.
+struct outeropts {
+    bool relaxLeaf = true, relaxAir = true, relaxRh = true, relaxH = true, relaxG = true;
+    double stepBottom = 0.50, stepTop = 0.80, stepMax = 0.90; // share of a step taken at the ground and at canopy top, and its ceiling
+    double fixedH = -1.0;      // if positive, sensible heat is relaxed by this fixed share instead of adaptively
+    bool holdLeafAir = false;  // keep the leaf-to-air difference that seeds leaf convection as given
+};
+// What the outer iteration carries from one pass to the next beside the hourly
+// state itself: the ground and canopy-top air, the fluxes being relaxed, and
+// each relaxation's memory. Each pass also leaves here what it found before any
+// relaxation was applied.
+struct outercarry {
+    double tground = 0.0, Th = 0.0, eh = 0.0, psir = 0.0, H_iter = 0.0, G_iter = 0.0, tdif = 1e99;
+    std::vector<double> dTs;                       // leaf-to-air temperature difference seeding leaf convection
+    std::vector<double> rawTair, rawRh, rawTleaf;  // this pass's unrelaxed solution
+    double rawH = 0.0, rawG = 0.0, uf = 0.0;
+    WAitkenState st_tair, st_rh, st_leaf;
+    Aitken1DState st_H, st_G;
+    int pass = 0;
+};
+// One pass of the coupled hour. Everything in the canopy depends on everything
+// else: the wind and the stability of the air on the heat leaving the surface,
+// the leaves on the air around them and on each other's longwave, the ground on
+// the air above it, and the air on all of them. A pass takes the state the last
+// one left, works through each part in turn with the others as they then stand,
+// and leaves a new state; the hour is solved when a pass no longer moves the
+// canopy air. Radiation from the sun is fixed for the hour and passed in.
+static void outerPass(onestep& onestepin, outercarry& c, const outeropts& o, const climstruct& climdata,
+    vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
+    const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
+    double Ca, double zref, int maxIter, double tolerance, double a0v, double a1, double dcan, bool C3)
+{
+    const size_t na = onestepin.tair.size();
+    std::vector<double> rz_zref(na); // resistance from each layer to zref
+    std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // previous timestep's soil state, not touched by this pass's iteration
+    onestepin.swaterdepth = swater0;
+    radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, c.tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
+    onestepin.Rlwdown = lwrad.Rlwdown;
+    onestepin.Rlwup = lwrad.Rlwup;
+    windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, maxIter, a1,
+        onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
+    onestepin.uz = wind.uz;
+    onestepin.ucanopy = wind.uh;
+    onestepin.windscale = wind.windscale;
+    onestepin.psih = wind.psi_h;
+    onestepin.psim = wind.psi_m;
+    onestepin.phih = wind.phi_h;
+    onestepin.fade = wind.fade;
+    onestepin.LL = wind.LL;
+    c.uf = wind.uf;
+    rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, vegpc.x);
+    envstruct envdata{};
+    envdata.pk = climdata.pk;
+    envdata.psi_r = c.psir;
+    envdata.Ca = Ca;
+    envdata.precip = climdata.precip;
+    if (c.pass < 3 && !o.holdLeafAir) {
+        for (size_t i = 0; i < na; ++i) c.dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
+    }
+    std::vector<double> tleaf = onestepin.tleaf;
+    // Resistances from the soil and from each layer to the reference height,
+    // all from one diffusivity column (soilToZ).
+    // The column is built at the same friction velocity the dispersion solve
+    // uses, floored for calm wind, so that the ground's and each layer's
+    // resistances to the reference height are the ones the canopy air is
+    // solved with; otherwise, in near-calm hours, the sources found against
+    // one column would be carried through another many times more resistive.
+    const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, a0v, a1,
+        canopyEnhancement(vegpc.hgt, vegpc.pai, soilpc.z0, wind.fade), soilpc.z0);
+    double rHa = soilToZ(col, zref); // soil surface to zref
+    double rhg = col.Rh;             // soil surface to canopy top
+    double rhz = rHa - rhg;          // canopy top to zref
+    for (size_t i = 0; i < na; ++i) {
+        rz_zref[i] = rHa - soilToZ(col, z[i]);
+    }
+    plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, c.dTs, 3600.0, C3); // updates onestepin in place
+    c.rawTleaf = onestepin.tleaf;
+    if (o.relaxLeaf) aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, c.st_leaf, 0.02, o.stepMax, o.stepBottom, o.stepTop);
+    // The air the ground exchanges with this pass, given the foliage's
+    // sources as the leaf model has just left them.
+    const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
+    double Rabs = swrad.RswGabs + lwrad.RlwGabs;
+    soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600, 1.0, maxIter);
+    climforwaterstruct cfw = {};
+    cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
+    cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
+    onestepin.soilwatervars.oldTc = soilheat.oldTe;
+    onestepin.soilwatervars.Tc = soilheat.Te;
+    soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
+    onestepin.witers = soilwater.iterations;
+    onestepin.runoff = soilwater.surplus;
+    c.tground = soilheat.Te[0];
+    double soilrh = soilrelhumCpp(soilpc, c.tground, soilwater.swo.theta[0]);
+    soilheat.wc = soilwater.swo.theta;
+    double G_raw = soilsurfaceEB(soilpc, Rabs, ga.T, soilheat.Te[0], climdata.pk,
+        ga.relhum, ga.R, soilwater.swo.theta[0]);
+    c.rawG = G_raw;
+    c.G_iter = o.relaxG ? aitken1d(c.G_iter, G_raw, c.st_G) : G_raw;
+    soilheat.Gflux = c.G_iter;
+    onestepin.soilheatvars = soilheat;
+    onestepin.soilwatervars = soilwater.swo;
+    onestepin.Ev = soilwater.Evapmmhr;
+    onestepin.theta = soilwater.swo.theta[0];
+    // Sensible and latent heat leaving the whole surface: every foliage
+    // layer's source and the ground's, which together are the fluxes at the
+    // reference height and drive the stability of the air above.
+    {
+        const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
+        onestepin.H = ga.Hfoliage + (phr * cpr / ga.R) * (c.tground - ga.T);
+    }
+    c.rawH = onestepin.H;
+    if (!o.relaxH) c.H_iter = onestepin.H;
+    else if (o.fixedH > 0.0) c.H_iter += o.fixedH * (onestepin.H - c.H_iter);
+    else c.H_iter = aitken1d(c.H_iter, onestepin.H, c.st_H);
+    onestepin.L = ga.Lfoliage + groundLatentFlux(soilpc, c.tground, ga.T, ga.relhum,
+        climdata.pk, ga.R, soilwater.swo.theta[0]);
+    if (zref > vegpc.hgt) {
+        cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, c.Th, c.eh, c.tground, soilrh,
+            rhg, rhz, ga.Ttop, ga.etop, maxIter, tolerance);
+        c.Th = Theh.Th;
+        c.eh = Theh.eh;
+    }
+    else {
+        c.Th = climdata.tref;
+        c.eh = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
+    }
+    std::vector<double> tair = onestepin.tair;
+    std::vector<double> rh = onestepin.rh;
+    LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
+        (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
+    // Convergence is judged on canopy air alone, for speed: foliage and the
+    // ground surface may still be settling by a few tenths of a degree
+    // once the air has stopped moving. It is judged on how far this pass's
+    // solution lies from the air the pass started from, before relaxation:
+    // the relaxed step can be a small fraction of that distance, and would
+    // report convergence while the air is still far from its solution.
+    c.tdif = 0.0;
+    for (size_t i = 0; i < na; ++i) {
+        double dif = std::abs(tair[i] - onestepin.tair[i]);
+        if (dif > c.tdif) c.tdif = dif;
+    }
+    c.rawTair = onestepin.tair;
+    c.rawRh = onestepin.rh;
+    if (o.relaxAir) aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, c.st_tair, 0.02, o.stepMax, o.stepBottom, o.stepTop);
+    if (o.relaxRh) aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, c.st_rh, 0.02, o.stepMax, o.stepBottom, o.stepTop);
+    c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
+    onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
+    ++c.pass;
+}
 // One vegetated timestep, fully coupled: radiation (fixed for the step) is
 // computed once; wind, rain interception, the plant energy balance, the
 // soil heat/water solves and the Lagrangian dispersion model are then
@@ -3116,29 +3267,22 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     onestepin.Rdirdown = swrad.Rdirdown;
     onestepin.Rdifdown = swrad.Rdifdown;
     onestepin.Rswup = swrad.Rswup;
-    double tdif = 1e99;
-    int nrIterations = 0;
     size_t na = onestepin.tair.size();
-    double tground = onestepin.soilheatvars.Te[0];
+    outercarry c;
+    outeropts o;
+    c.tground = onestepin.soilheatvars.Te[0];
     // Canopy-top air is the upper boundary of the canopy air, carried from hour
     // to hour as a state of its own.
-    double Th = onestepin.tcanopy;
-    double eh = satvapCpp2(Th) * (onestepin.rhcanopy / 100.0);
+    c.Th = onestepin.tcanopy;
+    c.eh = satvapCpp2(c.Th) * (onestepin.rhcanopy / 100.0);
     // root-zone water potential, J/kg -> MPa
-    double psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac) / 1000.0;
-    WAitkenState st_tair;
-    WAitkenState st_rh;
-    WAitkenState st_leaf;
-    std::vector<double> dTs(na); // leaf-air temperature difference, held fixed after iteration 3 (see function doc comment)
-    std::vector<double> rz_zref(na); // resistance from each layer to zref
-    // Aitken-damps H feeding into windmodelCpp, breaking the self-referential
-    // H -> wind/stability -> new resistances -> new H loop. The raw,
-    // undamped H is still what's stored in onestepin.H and used elsewhere.
-    Aitken1DState st_H;
-    double H_iter = onestepin.H;
-    // G (ground heat flux): Aitken-damped surface energy balance residual (soilsurfaceEB).
-    Aitken1DState st_G;
-    double G_iter = onestepin.soilheatvars.Gflux;
+    c.psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac) / 1000.0;
+    c.dTs.assign(na, 0.0); // leaf-air temperature difference, held fixed after iteration 3 (see function doc comment)
+    // Sensible heat feeds the wind model and the ground heat flux the soil
+    // surface balance; both are relaxed between passes, starting from the
+    // values the last hour left.
+    c.H_iter = onestepin.H;
+    c.G_iter = onestepin.soilheatvars.Gflux;
     // Floor gust strength: a fixed value if one is given, otherwise from the
     // canopy's foliage (floorGustRatio).
     const double a0v = (a0 > 0.0) ? a0 : floorGustRatio(vegpc, a1);
@@ -3147,118 +3291,14 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     // this hour's rain afresh from that state, so the film cannot fill across
     // the passes and the rain reaching the ground stays what the canopy let through.
     const std::vector<double> swater0 = onestepin.swaterdepth;
-    while ((nrIterations < 3 || tdif > tolerance) && nrIterations < maxIter) {
-        std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // previous timestep's soil state, not touched by this pass's iteration
-        onestepin.swaterdepth = swater0;
-        radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
-        onestepin.Rlwdown = lwrad.Rlwdown;
-        onestepin.Rlwup = lwrad.Rlwup;
-        windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, H_iter, climdata.tref, climdata.pk, maxIter, a1,
-            onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
-        onestepin.uz = wind.uz;
-        onestepin.ucanopy = wind.uh;
-        onestepin.windscale = wind.windscale;
-        onestepin.psih = wind.psi_h;
-        onestepin.psim = wind.psi_m;
-        onestepin.phih = wind.phi_h;
-        onestepin.fade = wind.fade;
-        onestepin.LL = wind.LL;
-        rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, vegpc.x);
-        envstruct envdata{};
-        envdata.pk = climdata.pk;
-        envdata.psi_r = psir;
-        envdata.Ca = Ca;
-        envdata.precip = climdata.precip;
-        if (nrIterations < 3) {
-            for (size_t i = 0; i < na; ++i) dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
-        }
-        std::vector<double> tleaf = onestepin.tleaf;
-        // Resistances from the soil and from each layer to the reference height,
-        // all from one diffusivity column (soilToZ).
-        // The column is built at the same friction velocity the dispersion solve
-        // uses, floored for calm wind, so that the ground's and each layer's
-        // resistances to the reference height are the ones the canopy air is
-        // solved with; otherwise, in near-calm hours, the sources found against
-        // one column would be carried through another many times more resistive.
-        const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, a0v, a1,
-            canopyEnhancement(vegpc.hgt, vegpc.pai, soilpc.z0, wind.fade), soilpc.z0);
-        double rHa = soilToZ(col, zref); // soil surface to zref
-        double rhg = col.Rh;             // soil surface to canopy top
-        double rhz = rHa - rhg;          // canopy top to zref
-        for (size_t i = 0; i < na; ++i) {
-            rz_zref[i] = rHa - soilToZ(col, z[i]);
-        }
-        plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, dTs, 3600.0, C3); // updates onestepin in place
-        aitkin_weightdif(tleaf, onestepin.tleaf, z, vegpc.hgt, st_leaf);
-        // The air the ground exchanges with this pass, given the foliage's
-        // sources as the leaf model has just left them.
-        const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
-        double Rabs = swrad.RswGabs + lwrad.RlwGabs;
-        soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600, 1.0, maxIter);
-        climforwaterstruct cfw = {};
-        cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
-        cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
-        onestepin.soilwatervars.oldTc = soilheat.oldTe;
-        onestepin.soilwatervars.Tc = soilheat.Te;
-        soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
-        onestepin.witers = soilwater.iterations;
-        onestepin.runoff = soilwater.surplus;
-        tground = soilheat.Te[0];
-        double soilrh = soilrelhumCpp(soilpc, tground, soilwater.swo.theta[0]);
-        soilheat.wc = soilwater.swo.theta;
-        double G_raw = soilsurfaceEB(soilpc, Rabs, ga.T, soilheat.Te[0], climdata.pk,
-            ga.relhum, ga.R, soilwater.swo.theta[0]);
-        G_iter = aitken1d(G_iter, G_raw, st_G);
-        soilheat.Gflux = G_iter;
-        onestepin.soilheatvars = soilheat;
-        onestepin.soilwatervars = soilwater.swo;
-        onestepin.Ev = soilwater.Evapmmhr;
-        onestepin.theta = soilwater.swo.theta[0];
-        // Sensible and latent heat leaving the whole surface: every foliage
-        // layer's source and the ground's, which together are the fluxes at the
-        // reference height and drive the stability of the air above.
-        {
-            const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
-            onestepin.H = ga.Hfoliage + (phr * cpr / ga.R) * (tground - ga.T);
-        }
-        H_iter = aitken1d(H_iter, onestepin.H, st_H);
-        onestepin.L = ga.Lfoliage + groundLatentFlux(soilpc, tground, ga.T, ga.relhum,
-            climdata.pk, ga.R, soilwater.swo.theta[0]);
-        if (zref > vegpc.hgt) {
-            cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, Th, eh, tground, soilrh,
-                rhg, rhz, ga.Ttop, ga.etop, maxIter, tolerance);
-            Th = Theh.Th;
-            eh = Theh.eh;
-        }
-        else {
-            Th = climdata.tref;
-            eh = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
-        }
-        std::vector<double> tair = onestepin.tair;
-        std::vector<double> rh = onestepin.rh;
-        LangrangianOne(onestepin, climdata.pk, tground, soilrh, Th, eh, vegpc, z, wind, a0v, a1,
-            (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
-        // Convergence is judged on canopy air alone, for speed: foliage and the
-        // ground surface may still be settling by a few tenths of a degree
-        // once the air has stopped moving. It is judged on how far this pass's
-        // solution lies from the air the pass started from, before relaxation:
-        // the relaxed step can be a small fraction of that distance, and would
-        // report convergence while the air is still far from its solution.
-        tdif = 0.0;
-        for (size_t i = 0; i < na; ++i) {
-            double dif = std::abs(tair[i] - onestepin.tair[i]);
-            if (dif > tdif) tdif = dif;
-        }
-        aitkin_weightdif(tair, onestepin.tair, z, vegpc.hgt, st_tair);
-        aitkin_weightdif(rh, onestepin.rh, z, vegpc.hgt, st_rh);
-        psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
-        onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
-        ++nrIterations;
+    while ((c.pass < 3 || c.tdif > tolerance) && c.pass < maxIter) {
+        outerPass(onestepin, c, o, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance,
+            a0v, a1, dcan, C3);
     }
-    onestepin.iters = nrIterations;
-    onestepin.error = tdif;
-    onestepin.tcanopy = Th;
-    onestepin.rhcanopy = std::min(100.0, 100.0 * eh / satvapCpp2(Th));
+    onestepin.iters = c.pass;
+    onestepin.error = c.tdif;
+    onestepin.tcanopy = c.Th;
+    onestepin.rhcanopy = std::min(100.0, 100.0 * c.eh / satvapCpp2(c.Th));
     return onestepin;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
