@@ -1247,7 +1247,6 @@ static double rpmin_calc(double h, double hv, double Kxmx)
     const double rpmin = h / (Kpmx * hv * Chi_tap);
     return rpmin;
 }
-constexpr double R_STOMATA_CLOSED = 2000.0; // leaf resistance to vapour with stomata closed (s/m)
 // Leaf stomatal conductance from the Eller et al. (2020) hydraulic-
 // optimisation scheme: photosynthesis (Jacobs 1994 co-limitation of
 // light/carbon/transport-limited assimilation, C3 or C4) traded off
@@ -1755,16 +1754,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             follow = (tsw - ts) / dTa;
         };
         // Stomatal conductance responds to the light each leaf class absorbs.
-        // Stomata never seal completely: some species keep them partly open
-        // at night and every leaf leaks a little through its cuticle, so
-        // conductance falls no lower than a small closed-stomata value, in
-        // the dark as in dim light.
-        const double gsClosed = ph / R_STOMATA_CLOSED;
-        double gssun = gsClosed, gsshade = gsClosed;
+        // Where the stomata are closed, in the dark or because the soil
+        // cannot supply the plant, the leaf transpires nothing.
+        double gssun = 0.0, gsshade = 0.0;
         if (swout.RPARsun[i] > 0.0 || swout.RPARshade[i] > 0.0) {
             const stomatalState stomata = leafgsState(envdata, vegp, vegp.hgt / 2.0, C3);
-            gssun = std::max(leafgsLight(stomata, swout.RPARsun[i], envdata.pk, vegp, C3), gsClosed);
-            gsshade = std::max(leafgsLight(stomata, swout.RPARshade[i], envdata.pk, vegp, C3), gsClosed);
+            gssun = leafgsLight(stomata, swout.RPARsun[i], envdata.pk, vegp, C3);
+            gsshade = leafgsLight(stomata, swout.RPARshade[i], envdata.pk, vegp, C3);
         }
         const double sf = swout.sunfrac[i];
         onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
@@ -3936,13 +3932,10 @@ double bulkstomatalresist(double tair, double tcan, double relhum, double pk, do
     envdata.Ca = Ca; // CO2 ppm
     envdata.precip = precip; // precipitation (mm)
     double z = vegp.hgt / 2.0;
-    // Each leaf's conductance is at least its closed-stomata value, as in the
-    // multilayer model.
     const double ph = phairCpp(tair, pk);
-    const double gsClosed = ph / R_STOMATA_CLOSED;
-    double gs_sun = std::max(leafgs(envdata, vegp, z, C3), gsClosed);
+    double gs_sun = leafgs(envdata, vegp, z, C3);
     envdata.PARabs = Rshade_abs;
-    double gs_shade = std::max(leafgs(envdata, vegp, z, C3), gsClosed);
+    double gs_shade = leafgs(envdata, vegp, z, C3);
     double Gs = gs_sun * Lsun + gs_shade * Lshade;
     // Convert to bulk surface resistance
     return ph / Gs;
