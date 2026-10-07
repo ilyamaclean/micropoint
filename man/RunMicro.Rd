@@ -108,8 +108,12 @@ listed above, plus:
   \item `witers`: passes taken by the soil water solve.
 }
 
-Both also return `runoff`, the rain reaching the ground that the saturated
-soil surface could not take, each hour (mm). Wind speed is the wind itself:
+Both also return `Evaporation` from the soil (mm); `runoff`, the rain reaching
+the ground that the saturated soil surface could not take, each hour (mm);
+`drainage`, the water leaving through the base of the soil each hour (mm,
+negative where water enters there); and `witers`, the iterations taken to
+balance the soil's water. A warning is given if the balance was not reached
+in some hours. Wind speed is the wind itself:
 the velocity that convection adds to exchange over a heated surface is not
 included. Below ground, `soilwater` is no lower than the soil's residual
 water content.

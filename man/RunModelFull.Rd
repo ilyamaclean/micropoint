@@ -95,6 +95,10 @@ For **bare-ground runs** (`vegp = NA`) the returned elements are:
     than the soil's residual water content.}
   \item{runoff}{Rain reaching the ground that the saturated soil surface
     could not take, each hour (mm). A vector, one value per time step.}
+  \item{drainage}{Water leaving through the base of the soil each hour (mm),
+    negative where water enters there. A vector.}
+  \item{witers}{Iterations taken to balance the soil's water each hour. A
+    warning is given if the balance was not reached in some hours.}
 }
 
 For **vegetated runs** the returned elements are:
@@ -113,6 +117,10 @@ For **vegetated runs** the returned elements are:
     than the soil's residual water content.}
   \item{runoff}{Rain reaching the ground that the saturated soil surface
     could not take, each hour (mm). A vector, one value per time step.}
+  \item{drainage}{Water leaving through the base of the soil each hour (mm),
+    negative where water enters there. A vector.}
+  \item{witers}{Iterations taken to balance the soil's water each hour. A
+    warning is given if the balance was not reached in some hours.}
   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
     per time step.}
   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value

@@ -2862,6 +2862,8 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     out.iterations = iter;
     out.Evapmmhr = Evapmmhr;
     out.surplus = surplusRate * dT;
+    // Water crossing the base of the deepest layer, counted downward.
+    out.drainage = -ff[n - 1] * dT;
     return out;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
@@ -3429,6 +3431,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     MP_LAP(7);
     onestepin.witers = soilwater.iterations;
     onestepin.runoff = soilwater.surplus;
+    onestepin.drainage = soilwater.drainage;
     c.tground = soilheat.Te[0];
     double soilrh = soilrelhumCpp(soilpc, c.tground, soilwater.swo.theta[0]);
     soilheat.wc = soilwater.swo.theta;
@@ -3819,6 +3822,8 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         // Bare ground transpires nothing, so the depletion fraction is inert here.
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
         onestepin.runoff = soilwater.surplus;
+        onestepin.drainage = soilwater.drainage;
+        onestepin.witers = soilwater.iterations;
         // The next pass resumes the water solve where this one ended, as over
         // vegetation; the start-of-hour state it balances against is unchanged.
         onestepin.soilwatervars = soilwater.swo;
@@ -5198,8 +5203,8 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     std::vector<double> L(n);
     std::vector<double> G(n);
     std::vector<double> Ev(n);
-    std::vector<double> runoff(n);
-    std::vector<int> iters(n);
+    std::vector<double> runoff(n), drainage(n);
+    std::vector<int> iters(n), witers(n);
     std::vector<double> error(n);
     // Run model for every hr
     double latr = lat * torad;
@@ -5220,6 +5225,8 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         G[hr] = onestepin.soilheatvars.Gflux;
         Ev[hr] = onestepin.Ev;
         runoff[hr] = onestepin.runoff;
+        drainage[hr] = onestepin.drainage;
+        witers[hr] = onestepin.witers;
         iters[hr] = onestepin.iters;
         error[hr] = onestepin.error;
         if (reqhgt >= 0.0) {
@@ -5274,9 +5281,12 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         Named("H") = Rcpp::wrap(H),
         Named("L") = Rcpp::wrap(L),
         Named("G") = Rcpp::wrap(G),
+        Named("Evaporation") = Rcpp::wrap(Ev),
         Named("runoff") = Rcpp::wrap(runoff),
+        Named("drainage") = Rcpp::wrap(drainage),
         // Error variables
         Named("iters") = Rcpp::wrap(iters),
+        Named("witers") = Rcpp::wrap(witers),
         Named("error") = Rcpp::wrap(error)
     );
 }
@@ -5340,7 +5350,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     }
     std::vector<double> Rdirdown(n), Rdifdown(n), Rswup(n), Rlwdown(n), Rlwup(n);
     std::vector<double> tair(n), tground(n), tleaf(n), rz(n), uz(n);
-    std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n);
+    std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n), drainage(n);
     std::vector<int> iters(n), witers(n);
     for (size_t hr = 0; hr < n; ++hr) {
         obsstruct obsdata;
@@ -5372,6 +5382,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
         iters[hr] = onestepin.iters;
         error[hr] = onestepin.error;
         runoff[hr] = onestepin.runoff;
+        drainage[hr] = onestepin.drainage;
         witers[hr] = onestepin.witers;
         if (reqhgt < 0.0) {
             Rdirdown[hr] = Rdifdown[hr] = Rswup[hr] = Rlwdown[hr] = Rlwup[hr] = 0.0;
@@ -5436,6 +5447,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     out["Evaporation"] = Ev;
     out["Transpiration"] = Et;
     out["runoff"] = runoff;
+    out["drainage"] = drainage;
     out["iters"] = iters;
     out["witers"] = witers;
     out["error"] = error;
@@ -5569,6 +5581,8 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
     onestepin.theta = onestepin.soilwatervars.theta[0];
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
+    std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
+    std::vector<int> witers(n, 0); // iterations of the soil water solve
     // Create Numeric Matrices for above ground
     NumericMatrix tair(n, na);
     NumericMatrix rh(n, na);
@@ -5591,6 +5605,8 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
             maxNrIterations, tolerance);
         // Extract values
         runoff[hr] = onestepin.runoff;
+        drainage[hr] = onestepin.drainage;
+        witers[hr] = onestepin.witers;
         FillMyMatrix(tair, onestepin.tair, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
         FillMyMatrix(uz, onestepin.uz, hr);
@@ -5608,8 +5624,10 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
         Named("theta") = Rcpp::wrap(theta),
-        // Surface runoff
-        Named("runoff") = Rcpp::wrap(runoff)
+        // Surface runoff, drainage from the base, and the water solve's iterations
+        Named("runoff") = Rcpp::wrap(runoff),
+        Named("drainage") = Rcpp::wrap(drainage),
+        Named("witers") = Rcpp::wrap(witers)
     );
 }
 // Vegetated time x height matrices for the whole input time series and
@@ -5660,6 +5678,8 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     NumericMatrix rh(n, na);
     NumericMatrix uz(n, na);
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
+    std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
+    std::vector<int> witers(n, 0); // iterations of the soil water solve
     std::vector<double> tcanopy(n), rhcanopy(n); // air at canopy top, the upper boundary of the canopy air
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
@@ -5679,6 +5699,8 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
             tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
         // Extract values
         runoff[hr] = onestepin.runoff;
+        drainage[hr] = onestepin.drainage;
+        witers[hr] = onestepin.witers;
         tcanopy[hr] = onestepin.tcanopy;
         rhcanopy[hr] = onestepin.rhcanopy;
         FillMyMatrix(Rdirdown, onestepin.Rdirdown, hr);
@@ -5718,8 +5740,10 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
         Named("theta") = Rcpp::wrap(theta),
-        // Surface runoff
-        Named("runoff") = Rcpp::wrap(runoff)
+        // Surface runoff, drainage from the base, and the water solve's iterations
+        Named("runoff") = Rcpp::wrap(runoff),
+        Named("drainage") = Rcpp::wrap(drainage),
+        Named("witers") = Rcpp::wrap(witers)
     );
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //

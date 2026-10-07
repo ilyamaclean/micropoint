@@ -713,8 +713,12 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   \item `witers`: passes taken by the soil water solve.
 #' }
 #'
-#' Both also return `runoff`, the rain reaching the ground that the saturated
-#' soil surface could not take, each hour (mm). Wind speed is the wind itself:
+#' Both also return `Evaporation` from the soil (mm); `runoff`, the rain reaching
+#' the ground that the saturated soil surface could not take, each hour (mm);
+#' `drainage`, the water leaving through the base of the soil each hour (mm,
+#' negative where water enters there); and `witers`, the iterations taken to
+#' balance the soil's water. A warning is given if the balance was not reached
+#' in some hours. Wind speed is the wind itself:
 #' the velocity that convection adds to exchange over a heated surface is not
 #' included. Below ground, `soilwater` is no lower than the soil's residual
 #' water content.
@@ -756,6 +760,9 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, maxiter, tolerance, -1, 1.25, C3)
   }
+  # The soil's water balance is closed by iteration each hour; say so if it was not
+  stuck <- sum(mout$witers >= maxiter)
+  if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   # Rename variables if below ground
   if (reqhgt <= 0) {
     mout$tsoil <- mout$tair; mout$tair <- NULL
@@ -837,6 +844,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'     than the soil's residual water content.}
 #'   \item{runoff}{Rain reaching the ground that the saturated soil surface
 #'     could not take, each hour (mm). A vector, one value per time step.}
+#'   \item{drainage}{Water leaving through the base of the soil each hour (mm),
+#'     negative where water enters there. A vector.}
+#'   \item{witers}{Iterations taken to balance the soil's water each hour. A
+#'     warning is given if the balance was not reached in some hours.}
 #' }
 #'
 #' For **vegetated runs** the returned elements are:
@@ -855,6 +866,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'     than the soil's residual water content.}
 #'   \item{runoff}{Rain reaching the ground that the saturated soil surface
 #'     could not take, each hour (mm). A vector, one value per time step.}
+#'   \item{drainage}{Water leaving through the base of the soil each hour (mm),
+#'     negative where water enters there. A vector.}
+#'   \item{witers}{Iterations taken to balance the soil's water each hour. A
+#'     warning is given if the balance was not reached in some hours.}
 #'   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
 #'     per time step.}
 #'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
@@ -902,6 +917,9 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                          -1, 1.25, C3)
 
   }
+  # The soil's water balance is closed by iteration each hour; say so if it was not
+  stuck <- sum(mout$witers >= maxiter)
+  if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   mout$theta <- reportedtheta(mout$theta, soilc)
   return(mout)
 }

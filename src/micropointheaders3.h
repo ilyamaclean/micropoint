@@ -215,6 +215,7 @@ namespace newmodel {
         int iterations; // how many iterations model run for
         double Evapmmhr; // surface evaporation
         double surplus = 0.0; // water a saturated surface could not take, which runs off (mm)
+        double drainage = 0.0; // water leaving through the base of the soil (mm), negative where it enters
     };
     // Strucxtures used for convergence function
     struct WAitkenStateScalar {
@@ -265,6 +266,7 @@ namespace newmodel {
         int iters; // number of iterations for which model run
         int witers; // number of iterations for which water model run
         double runoff = 0.0; // water a saturated surface could not take (mm)
+        double drainage = 0.0; // water leaving through the base of the soil (mm)
         double error;
     };
     struct onestepbare {
@@ -286,6 +288,8 @@ namespace newmodel {
         int iters; // number of iterations for which model run
         double error;
         double runoff = 0.0; // water a saturated surface could not take (mm)
+        double drainage = 0.0; // water leaving through the base of the soil (mm)
+        int witers = 0; // number of iterations for which water model run
     };
     struct bigsmallleafstruct {
         double Hsmall;
