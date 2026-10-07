@@ -1804,7 +1804,10 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             gwet = phi * fw / rLB[i];
             gtsun = (gssun > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gssun) : 0.0;
             gtshade = (gsshade > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gsshade) : 0.0;
-            surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
+            // A layer that is all leaf has no woody surface; its share of every
+            // quantity below is nil whatever its temperature would have been.
+            if (vegp.Lfrac[i] == 1.0) { twood = 0.0; Ewwood = 0.0; Etwood = 0.0; fwood = 0.0; gwood = 0.0; }
+            else surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
             surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
             // In the dark, and under wholly diffuse light, sunlit and shaded
             // leaves absorb the same radiation and hold their stomata alike,
