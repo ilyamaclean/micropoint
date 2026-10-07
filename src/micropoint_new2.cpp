@@ -1171,17 +1171,22 @@ static double satVapDensityCpp2(double Tk)
 // (Nuf^3 + Nun^3)^(1/3)) over the leaf's characteristic dimension.
 // Boundary-layer resistance between a leaf surface and its surrounding canopy air.
 // Forced convection from local wind and free convection from leaf-air temperature difference are combined, making this the leaf-scale aerodynamic link in the energy balance.
-static double leafrHa(double tair, double dT, double uz, double len, double wid,
-    double x, double rHmax = 300.0)
+// Characteristic dimension of a leaf for its boundary layer (m): its size,
+// adjusted for how its inclination presents it to the wind. A property of the
+// foliage, the same in every layer and hour.
+static double leafDimension(double len, double wid, double x)
+{
+    double y = 1.0 / x;
+    double Gy = std::sqrt(y * y + (1.0 - y * y)) / (y + 1.774 * std::pow((y + 1.182), -0.733));
+    return std::sqrt(len * wid) * Gy;
+}
+static double leafrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
 {
     double Tk = tair + 273.15;
     double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6); // thermal diffusivity
     double v = 1.326 * std::pow(10.0, -5.0) * std::pow(Tk / 273.15, 1.5) * (393.55 / (Tk + 120.0)); // kinematic viscosity
     // Leaf area projected in the wind direction, from the leaf-angle
     // distribution parameter x (same G-function form as cankCpp).
-    double y = 1.0 / x;
-    double Gy = std::sqrt(y * y + (1.0 - y * y)) / (y + 1.774 * std::pow((y + 1.182), -0.733));
-    double d = std::sqrt(len * wid) * Gy; // characteristic dimension
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
     double Nuf; // Nusselt number, forced convection
@@ -1250,118 +1255,138 @@ constexpr double R_STOMATA_CLOSED = 2000.0; // leaf resistance to vapour with st
 // height (z), via the plant's vulnerability curve (psi50-based).
 // Predicts stomatal conductance by balancing carbon gain against hydraulic cost.
 // Photosynthetic demand, VPD, plant water status and height-dependent hydraulic vulnerability combine to determine how open stomata can profitably remain.
+// What a leaf's stomatal conductance depends on apart from the light it absorbs:
+// its biochemistry at its temperature, the vapour pressure deficit it sees, and
+// how freely water reaches it from the soil. The sunlit and shaded leaves of a
+// layer share all of it.
+struct stomatalState {
+    double Vcmax, Rd, Oa, photocomp, DD, ca, ci;
+    double Kc, Ko, Wc, We, Wc_ca;   // C3 only
+    double zeta;
+};
+static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, double z, bool C3)
+{
+    stomatalState st{};
+    // Vcmax temperature response
+    double xx = 0.1 * (envdata.tleaf - 25.0);
+    double Vcmax = vegp.Vcmax25 * std::exp2(xx) / ((1.0 + std::exp(0.3 * (envdata.tleaf - vegp.Tup))) *
+        (1.0 + std::exp(0.3 * (vegp.Tlw - envdata.tleaf))));
+    double Rd = vegp.fd * Vcmax;
+    // Photocompensation
+    double Q10rs = 0.57;
+    double Oa = 0.2095 * envdata.pk * 1000;
+    double photocomp = Oa / (2.0 * 2600.0 * std::pow(Q10rs, 0.1 * (envdata.tleaf - 25.0)));
+    // Vapour pressure deficit between leaf and air. A leaf at or below the
+    // air's dew point loses no water through its stomata and has nothing
+    // to save by closing them, so the deficit is taken as nil there and
+    // the stomata stand fully open, as they do just above it.
+    double ea = satvapCpp2(envdata.tair) * (envdata.rh / 100.0);
+    double es = satvapCpp2(envdata.tleaf);
+    double DD = std::max(es - ea, 1e-9);
+    double ca = envdata.Ca * envdata.pk / 1000.0;  // convert carbon concentration to Pa
+    double ci = vegp.f0 * (1.0 - DD / vegp.Dcrit) * (ca - photocomp); // in Pa
+    st.Vcmax = Vcmax; st.Rd = Rd; st.Oa = Oa; st.photocomp = photocomp; st.DD = DD; st.ca = ca; st.ci = ci;
+    if (C3) {
+        // Gross assimilation limited by carbon and by transport, evaluated at
+        // ci (Jacobs 1994) and, for carbon, at ca with stomata fully open
+        // (Eqn S2.1, Eller et al. 2020, New Phytologist 226:1622-1637).
+        double Q10Kc = 2.1;
+        double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tair - 25.0));
+        double Q10Ko = 1.2;
+        double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tair - 25.0));
+        double Wc = Vcmax * ((ci - photocomp) /(ci + Kc * (1 + Oa / Ko))); // Limitating rate due to carbon
+        double We = 0.5 * Vcmax; // Limiting rate due to transport
+        if (Wc < 0.0) Wc = 0.0;
+        if (We < 0.0) We = 0.0;
+        double Wc_ca = Vcmax * ((ca - photocomp) / (ca + Kc * (1 + Oa / Ko)));
+        if (Wc_ca < 0.0) Wc_ca = 0.0;
+        st.Kc = Kc; st.Ko = Ko; st.Wc = Wc; st.We = We; st.Wc_ca = Wc_ca;
+    }
+    if (vegp.apsi < 0.0) {
+        double stem_slope = 65.15 * pow(-vegp.psi50, -1.25);
+        vegp.apsi = -4.0 * stem_slope / 100.0 * vegp.psi50;
+    }
+    double rhow = 1000.0 * (1 - (envdata.tleaf + 288.9414) * std::pow(envdata.tleaf - 3.9863, 2.0) /
+        (508929.2 * (envdata.tleaf + 68.12963)));
+    double psi_pd = envdata.psi_r - z * g * rhow * 1e-6; // pre-dawn water potential at this leaf's height
+    double K_psi_pd = 1.0 / (1.0 + std::pow(psi_pd / vegp.psi50, vegp.apsi)); // fraction of max hydraulic conductance remaining (vulnerability curve)
+    double K_50f = 0.5 / (1.0 + std::pow((psi_pd + vegp.psi50) / vegp.psi50, vegp.apsi));
+    double psi_50f = (psi_pd + vegp.psi50) / 2.0;
+    double dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
+    // rpmin depends only on hgt/hv/Kxmx (fixed for a run); cached on
+    // vegp, like apsi above, rather than recomputed every call.
+    if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
+    double rp = vegp.rpmin / K_psi_pd;
+    double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
+    st.zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
+    return st;
+}
+// Stomatal conductance of leaves absorbing a given amount of light, in a state
+// already found for their layer.
+static double leafgsLight(const stomatalState& st, double PARabs, double pk, const vegpstruct& vegp, bool C3)
+{
+    if (!(PARabs > 0.0)) return 0.0;
+    const double Vcmax = st.Vcmax, Rd = st.Rd, Oa = st.Oa, photocomp = st.photocomp, ca = st.ca, ci = st.ci;
+    double IPAR = PARabs * (0.48 / 0.219) * 1e-6; // PAR converstion to(mol photons / m ^ 2 / s)
+    double Aca;
+    double Acol;
+    double cicol;
+    if (C3) { // C3 photosynthetic pathway
+        const double Kc = st.Kc, Ko = st.Ko, We = st.We;
+        // Light-limited assimilation at ci (Jacobs 1994): retains the
+        // ci-response that shapes the light-response curve, feeding the
+        // co-limitation smoothing (Wcol/cicol) below.
+        double Wl = vegp.alpha * IPAR * ((ci - photocomp) / (ci + 2.0 * photocomp)); // Limitating rate due to light
+        if (Wl < 0.0) Wl = 0.0;
+        double Wcol = ((We + Wl) - std::sqrt(std::pow(We + Wl, 2.0) - 4.0 * 0.93 * (We * Wl)))
+            / (2.0 * 0.93);  // Point at which no longer limited by ci
+        Acol = Wcol - Rd;
+        // Co-limiting CO2 concentration
+        cicol = (-Vcmax * photocomp - Kc * (1.0 + Oa / Ko) * Wcol)
+            / (Wcol - Vcmax);
+        // A(ca): the limiting rates evaluated at ca instead of ci, representing
+        // assimilation with stomata fully open. Feeds only dadc's numerator
+        // below -- substituting into Wcol/cicol would remove Wl's
+        // light-response shape and risk a ca==cicol singularity near
+        // ambient CO2.
+        double Wl_ca = vegp.alpha * IPAR * ((ca - photocomp) / (ca + 2.0 * photocomp));
+        double We_ca = We;
+        if (Wl_ca < 0.0) Wl_ca = 0.0;
+        double Wca = st.Wc_ca;
+        if (Wl_ca < Wca) Wca = Wl_ca;
+        if (We_ca < Wca) Wca = We_ca;
+        Aca = Wca - Rd;
+    }
+    else { // C4 pathway
+        double k = 2.0e-4;
+        double Wc = Vcmax;
+        double Wl = vegp.alpha * IPAR;
+        double We = k * Vcmax * (ci / (pk * 1000.0));
+        double W = Wc;
+        if (Wl < W) W = Wl;
+        if (We < W) W = We;
+        Aca = W - Rd; // net assimilation (can be negative)
+        double Wcol = ((Wc + Wl) - std::sqrt(std::pow(Wc + Wl, 2.0) - 4.0 * 0.83 * (We * Wl)))
+            / (2.0 * 0.83);
+        Acol = Wcol - Rd;
+        cicol = (Wcol * pk * 1000.0) / (k * Vcmax);
+    }
+    // dadc: finite difference of assimilation w.r.t. ci between A(ca)
+    // and A(ci,col) (Eqn S2.1). Acol is already A at ci,col by
+    // construction, so only the A(ca) term is evaluated separately.
+    double dadc = (Aca - Acol) / (ca - cicol);
+    if (dadc < 1e-99) dadc = 1e-99;
+    double mu = 1.0 + (4.0 * st.zeta) / dadc;
+    if (mu < 1.0) mu = 1.0;
+    double gs = 0.5 * dadc * (std::sqrt(mu) - 1.0);
+    double gsmax = vegp.Vcmax25 * 1e4;
+    gs = std::fmin(gs, gsmax);
+    return gs;
+}
 static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool C3 = true)
 {
-    double gs = 0.0;
-    if (envdata.PARabs > 0.0) {
-        double IPAR = envdata.PARabs * (0.48 / 0.219) * 1e-6; // PAR converstion to(mol photons / m ^ 2 / s)
-        // Vcmax temperature response
-        double xx = 0.1 * (envdata.tleaf - 25.0);
-        double Vcmax = vegp.Vcmax25 * std::exp2(xx) / ((1.0 + std::exp(0.3 * (envdata.tleaf - vegp.Tup))) *
-            (1.0 + std::exp(0.3 * (vegp.Tlw - envdata.tleaf))));
-        double Rd = vegp.fd * Vcmax;
-        // Photocompensation
-        double Q10rs = 0.57;
-        double Oa = 0.2095 * envdata.pk * 1000;
-        double photocomp = Oa / (2.0 * 2600.0 * std::pow(Q10rs, 0.1 * (envdata.tleaf - 25.0)));
-        // Carbon conversion
-        double ea = satvapCpp2(envdata.tair) * (envdata.rh / 100.0);
-        double es = satvapCpp2(envdata.tleaf);
-        // Vapour pressure deficit between leaf and air. A leaf at or below the
-        // air's dew point loses no water through its stomata and has nothing
-        // to save by closing them, so the deficit is taken as nil there and
-        // the stomata stand fully open, as they do just above it.
-        double DD = std::max(es - ea, 1e-9);
-        double ca = envdata.Ca * envdata.pk / 1000.0;  // convert carbon concentration to Pa
-        double ci = vegp.f0 * (1.0 - DD / vegp.Dcrit) * (ca - photocomp); // in Pa
-        // Initialize variables
-        double Aca;
-        double Acol;
-        double cicol;
-        if (C3) { // C3 photosynthetic pathway
-            // Calculate Kc and Ko
-            double Q10Kc = 2.1;
-            double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tair - 25.0));
-            double Q10Ko = 1.2;
-            double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tair - 25.0));
-            // Gross assimilation evaluated at ci (Jacobs 1994): retains
-            // the ci-response that shapes the light-response curve,
-            // feeding the co-limitation smoothing (Wcol/cicol) below.
-            double Wc = Vcmax * ((ci - photocomp) /(ci + Kc * (1 + Oa / Ko))); // Limitating rate due to carbon
-            double Wl = vegp.alpha * IPAR * ((ci - photocomp) / (ci + 2.0 * photocomp)); // Limitating rate due to light
-            double We = 0.5 * Vcmax; // Limiting rate due to transport
-            if (Wc < 0.0) Wc = 0.0;
-            if (Wl < 0.0) Wl = 0.0;
-            if (We < 0.0) We = 0.0;
-            // Co-limiting assimilation, derived from the ci-evaluated We/Wl above.
-            double Wcol = ((We + Wl) - std::sqrt(std::pow(We + Wl, 2.0) - 4.0 * 0.93 * (We * Wl)))
-                / (2.0 * 0.93);  // Point at which no longer limited by ci
-            Acol = Wcol - Rd;
-            // Co-limiting CO2 concentration
-            cicol = (-Vcmax * photocomp - Kc * (1.0 + Oa / Ko) * Wcol)
-                / (Wcol - Vcmax);
-            // A(ca): Wc/Wl evaluated at ca instead of ci (Eqn S2.1, Eller
-            // et al. 2020, New Phytologist 226:1622-1637), representing
-            // assimilation with stomata fully open. Feeds only dadc's
-            // numerator below -- substituting into Wcol/cicol would remove
-            // Wl's light-response shape and risk a ca==cicol singularity
-            // near ambient CO2.
-            double Wc_ca = Vcmax * ((ca - photocomp) / (ca + Kc * (1 + Oa / Ko)));
-            double Wl_ca = vegp.alpha * IPAR * ((ca - photocomp) / (ca + 2.0 * photocomp));
-            double We_ca = We;
-            if (Wc_ca < 0.0) Wc_ca = 0.0;
-            if (Wl_ca < 0.0) Wl_ca = 0.0;
-            double Wca = Wc_ca;
-            if (Wl_ca < Wca) Wca = Wl_ca;
-            if (We_ca < Wca) Wca = We_ca;
-            Aca = Wca - Rd;
-        }
-        else { // C4 pathway
-            double k = 2.0e-4;
-            double Wc = Vcmax;
-            double Wl = vegp.alpha * IPAR;
-            double We = k * Vcmax * (ci / (envdata.pk * 1000.0));
-            double W = Wc;
-            if (Wl < W) W = Wl;
-            if (We < W) W = We;
-            Aca = W - Rd; // net assimilation (can be negative)
-            // Co - limiting assimilation
-            double Wcol = ((Wc + Wl) - std::sqrt(std::pow(Wc + Wl, 2.0) - 4.0 * 0.83 * (We * Wl)))
-                / (2.0 * 0.83);
-            Acol = Wcol - Rd;
-            // Co-limiting CO2 concentration
-            cicol = (Wcol * envdata.pk * 1000.0) / (k * Vcmax);
-        }
-        // dadc: finite difference of assimilation w.r.t. ci between A(ca)
-        // and A(ci,col) (Eqn S2.1). Acol is already A at ci,col by
-        // construction, so only the A(ca) term is evaluated separately.
-        double dadc = (Aca - Acol) / (ca - cicol);
-        if (vegp.apsi < 0.0) {
-            double stem_slope = 65.15 * pow(-vegp.psi50, -1.25);
-            vegp.apsi = -4.0 * stem_slope / 100.0 * vegp.psi50;
-        }
-        double rhow = 1000.0 * (1 - (envdata.tleaf + 288.9414) * std::pow(envdata.tleaf - 3.9863, 2.0) /
-            (508929.2 * (envdata.tleaf + 68.12963)));
-        double psi_pd = envdata.psi_r - z * g * rhow * 1e-6; // pre-dawn water potential at this leaf's height
-        double K_psi_pd = 1.0 / (1.0 + std::pow(psi_pd / vegp.psi50, vegp.apsi)); // fraction of max hydraulic conductance remaining (vulnerability curve)
-        double K_50f = 0.5 / (1.0 + std::pow((psi_pd + vegp.psi50) / vegp.psi50, vegp.apsi));
-        double psi_50f = (psi_pd + vegp.psi50) / 2.0;
-        double dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
-        // rpmin depends only on hgt/hv/Kxmx (fixed for a run); cached on
-        // vegp, like apsi above, rather than recomputed every call.
-        if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
-        double rp = vegp.rpmin / K_psi_pd;
-        double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
-        double zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
-        if (dadc < 1e-99) dadc = 1e-99;
-        double mu = 1.0 + (4.0 * zeta) / dadc;
-        if (mu < 1.0) mu = 1.0;
-        gs = 0.5 * dadc * (std::sqrt(mu) - 1.0);
-        // Apply gsmax cap
-        double gsmax = vegp.Vcmax25 * 1e4;
-        gs = std::fmin(gs, gsmax);
-    }
-    return gs;
+    if (!(envdata.PARabs > 0.0)) return 0.0;
+    return leafgsLight(leafgsState(envdata, vegp, z, C3), envdata.PARabs, envdata.pk, vegp, C3);
 }
 // Share of a plant surface covered by intercepted water: all of it while rain
 // falls, and afterwards a share that shrinks as the film held on it (mm)
@@ -1375,13 +1400,25 @@ static double wetFraction(double surfwater, double precip)
 }
 // Solves surface temperature from a Penman-Monteith-style energy balance.
 // Given absorbed radiation and heat/vapour resistances, it iterates radiative and latent-heat terms to obtain the temperature at which the surface energy budget closes.
-static double PenmanMonteithCpp2(double Rabs, double Ta, double pk, double rh, double em,
+// The air's side of a surface's energy balance, which is the same for every
+// surface standing in that air: the longwave a surface at air temperature would
+// emit, the air's heat capacity and density, and its vapour pressure deficit.
+struct surfaceAir { double Ta, pk, Rema, cp, ph, Da; };
+static surfaceAir surfaceAirOf(double Ta, double pk, double rh, double em)
+{
+    surfaceAir air;
+    air.Ta = Ta; air.pk = pk;
+    air.Rema = em * sb * radem(Ta);
+    air.cp = cpairCpp(Ta);
+    air.ph = phairCpp(Ta, pk);
+    air.Da = satvapCpp2(Ta) * (1.0 - rh / 100.0);
+    return air;
+}
+static double PenmanMonteithCpp2(const surfaceAir& air, double Rabs, double em,
     double rHa, double rV, double G = 0.0, int iters = 4)
 {
+    const double Ta = air.Ta, pk = air.pk, Rema = air.Rema, cp = air.cp, ph = air.ph, Da = air.Da;
     double Ts = Ta;
-    double Rema = em * sb * radem(Ta);
-    double cp = cpairCpp(Ta);
-    double ph = phairCpp(Ta, pk);
     for (int i = 0; i < iters; ++i) {
         double Te = (Ts + Ta) / 2.0;
         double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
@@ -1392,7 +1429,6 @@ static double PenmanMonteithCpp2(double Rabs, double Ta, double pk, double rh, d
         else {
             la = 51078.69 - 4.338 * Ts - 0.06367 * Ts * Ts;
         }
-        double Da = satvapCpp2(Ta) * (1.0 - rh / 100.0);
         double De = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5);
         Ts = Ta + ((Rabs - Rema - ((la * ph) / (pk * rV)) * Da - G) /
             (Rer + ph * (cp / rHa + ((la * De) / (pk * rV)))));
@@ -1653,6 +1689,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     std::vector<double> Efilm(n);
     double arriving = envdata.precip; // water still falling, per unit ground area
     const double kdrip = cankCpp(0.0, vegp.x, 1.0).kd;
+    const double leafSize = leafDimension(vegp.len, vegp.wid, vegp.x);
     // Every load and flux on a plant surface is per unit one-sided plant area.
     // Both faces exchange heat with the air across the same boundary layer, so
     // the surface's heat conductance is twice the single-face value, and both
@@ -1661,7 +1698,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     // conductance for the whole leaf, so transpiration passes through it and
     // one boundary layer in series.
     for (int i = n - 1; i >= 0; --i) {
-        rLB[i] = leafrHa(onestepin.tair[i], dTs[i], onestepin.uz[i], vegp.len, vegp.wid, vegp.x);
+        rLB[i] = leafrHa(onestepin.tair[i], dTs[i], onestepin.uz[i], leafSize);
         envdata.tair = onestepin.tair[i];
         envdata.tleaf = onestepin.tleaf[i];
         envdata.rh = onestepin.rh[i];
@@ -1692,11 +1729,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double eair = satvap_tair * onestepin.rh[i] / 100.0;
         const double dTa = 0.1;
         const double rh_warm = 100.0 * eair / satvapCpp2(onestepin.tair[i] + dTa);
+        const surfaceAir airNow = surfaceAirOf(onestepin.tair[i], envdata.pk, onestepin.rh[i], em2);
+        const surfaceAir airWarm = surfaceAirOf(onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2);
         auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et,
             double& follow, double& gused) {
             const double g = gt + gwet;
             double rV = (g > 0.0) ? 1.0 / g : 1e9;
-            ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], em2, rH2, rV, 0.0, 4);
+            ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
             // vapour pressure deficit of the surface against the air (Pa)
             double DD = (satvapCpp2(ts) - eair) * 1000.0;
             if (DD >= 0.0) {
@@ -1706,13 +1745,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             }
             else {
                 rV = rH2;
-                ts = PenmanMonteithCpp2(Rabs, onestepin.tair[i], envdata.pk, onestepin.rh[i], em2, rH2, rV, 0.0, 4);
+                ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
                 DD = (satvapCpp2(ts) - eair) * 1000.0;
                 Ew = tomm * std::min(DD, 0.0) / rH2;
                 Et = 0.0;
                 gused = 1.0 / rH2;
             }
-            const double tsw = PenmanMonteithCpp2(Rabs, onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2, rH2, rV, 0.0, 4);
+            const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, 4);
             follow = (tsw - ts) / dTa;
         };
         // Stomatal conductance responds to the light each leaf class absorbs.
@@ -1721,10 +1760,12 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         // conductance falls no lower than a small closed-stomata value, in
         // the dark as in dim light.
         const double gsClosed = ph / R_STOMATA_CLOSED;
-        envdata.PARabs = swout.RPARsun[i];
-        const double gssun = std::max(leafgs(envdata, vegp, vegp.hgt / 2.0, C3), gsClosed);
-        envdata.PARabs = swout.RPARshade[i];
-        const double gsshade = std::max(leafgs(envdata, vegp, vegp.hgt / 2.0, C3), gsClosed);
+        double gssun = gsClosed, gsshade = gsClosed;
+        if (swout.RPARsun[i] > 0.0 || swout.RPARshade[i] > 0.0) {
+            const stomatalState stomata = leafgsState(envdata, vegp, vegp.hgt / 2.0, C3);
+            gssun = std::max(leafgsLight(stomata, swout.RPARsun[i], envdata.pk, vegp, C3), gsClosed);
+            gsshade = std::max(leafgsLight(stomata, swout.RPARshade[i], envdata.pk, vegp, C3), gsClosed);
+        }
         const double sf = swout.sunfrac[i];
         onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
         // Water the layer can evaporate over the step, per unit plant area
