@@ -79,12 +79,23 @@ constexpr double OUTER_TOLERANCE = 0.1;
 //   may end it. The test asks only how far the last pass moved the canopy air,
 //   and an hour's first pass or two can move it little while leaves and ground
 //   are still far from settled; three passes guard against stopping there.
-struct solversettings { int minPass = 3; };
+//   leafSteps: successive approximations made to a leaf surface's temperature
+//   each time its energy balance is solved. Each takes the surface's emission
+//   and its saturation vapour pressure as linear about the last estimate; four
+//   leave nothing to gain, two leave about a hundredth of a degree.
+//   soilHeatLoosening, topTolerance: how closely the two balances solved
+//   inside every pass are closed, the soil's heat as a multiple of its usual
+//   closure and canopy-top air in K. Both are ordinarily closed far more
+//   closely than the hour, so that their stopping points do not show in it.
+struct solversettings { int minPass = 3; int leafSteps = 4; double soilHeatLoosening = 1.0; double topTolerance = 1e-8; };
 static solversettings g_solver;
 // [[Rcpp::export]]
-void SolverSettingsCpp(int minpass = 3)
+void SolverSettingsCpp(int minpass = 3, int leafsteps = 4, double soilheatloosening = 1.0, double toptolerance = 1e-8)
 {
     g_solver.minPass = std::max(1, minpass);
+    g_solver.leafSteps = std::max(1, leafsteps);
+    g_solver.soilHeatLoosening = std::max(1.0, soilheatloosening);
+    g_solver.topTolerance = std::max(1e-8, toptolerance);
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
@@ -1759,7 +1770,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             double& follow, double& gused) {
             const double g = gt + gwet;
             double rV = (g > 0.0) ? 1.0 / g : 1e9;
-            ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
+            ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
             MP_TALLY(0);
             // vapour pressure deficit of the surface against the air (Pa)
             double DD = (satvapCpp2(ts) - eair) * 1000.0;
@@ -1770,14 +1781,14 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             }
             else {
                 rV = rH2;
-                ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
+                ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
                 MP_TALLY(1);
                 DD = (satvapCpp2(ts) - eair) * 1000.0;
                 Ew = tomm * std::min(DD, 0.0) / rH2;
                 Et = 0.0;
                 gused = 1.0 / rH2;
             }
-            const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, 4);
+            const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
             MP_TALLY(2);
             follow = (tsw - ts) / dTa;
         };
@@ -2436,6 +2447,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     std::vector<double> lambdaNow(n + 1, 0.0), lambdaTrial(n + 1, 0.0);
     double worst = heatImbalance(heat, T, imbalance, ff, lambdaNow);
     int nrIterations = 0;
+    tolerance *= g_solver.soilHeatLoosening;
     while (worst > tolerance && nrIterations < maxNrIterations) {
         // The change in heat contents that would close every balance if the
         // imbalances varied in proportion to it. A node's imbalance grows with
@@ -3328,7 +3340,7 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
 {
     // The balance is closed far more closely than the hour as a whole is asked
     // to be, so that nothing of this loop's own stopping point shows in the hour's.
-    constexpr double tolerance = 1e-8;
+    const double tolerance = g_solver.topTolerance;
     size_t nb = vegpc.paii.size();
     double FcH = 0.0;
     double FcL = 0.0;

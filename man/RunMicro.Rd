@@ -127,7 +127,35 @@ Runs the microclimate model for each time step in `climdata` and returns
 the simulated microclimate at the requested height `reqhgt`.
 }
 \details{
-ACCURACY_DETAILS_PLACEHOLDER
+\strong{Accuracy and run time.} Each hour is solved by repeated passes through
+the canopy and soil until a pass no longer changes the result by much.
+`accuracy` sets how closely that is done, and with it the run time. The
+figures below compare each level with the same model solved very tightly, for
+forest, crop and grass in a range of climates; they are a guide, not a
+guarantee. "Typical error" is the root-mean-square difference in air, leaf
+and ground temperature over a year; "worst hour" the largest difference in
+any hour of a year, at any height. Times are for one year of hourly data
+with twenty canopy layers.
+
+\tabular{llll}{
+  \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
+  very high \tab under 0.1 K (usually 0.01 to 0.02) \tab under 1 K, usually under 0.5 \tab 9 to 24 s \cr
+  high \tab under 0.4 K (usually 0.1 to 0.2) \tab 1 to 2 K, at most 3 \tab 7 to 12 s \cr
+  moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s
+}
+
+The larger figures of each range are for still, humid weather, in which the
+model settles least readily and its answer is least well defined: there even
+`"very high"` differs from the tightly solved model by up to 3 K in a few
+hours of a year. At `"moderate"` a run with more than ten canopy layers is
+made on ten and its results are returned at the height asked for. Bare
+ground takes about a second at every level. Weather measured too close to
+the canopy is translated to the height the model needs at the same level.
+
+If some hours do not settle within the passes the level allows, one warning
+says how many; the values returned for those hours are those of the pass
+that changed least. `tolerance` and `maxiter` override the level's own
+values and are not needed in ordinary use.
 
 Standard meteorological observations are typically made about 2 m above the
 ground. If vegetation is taller than the measurement height, these data lie

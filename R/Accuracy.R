@@ -1,18 +1,32 @@
 #' What each accuracy level sets
 #'
 #' One setting, `accuracy`, governs how closely each hour is solved and how much
-#' the run costs. Each level fixes: `tolerance`, how far a pass may still move
-#' the canopy air (K) when the hour is accepted; `minpass`, the least number of
-#' passes an hour takes; `maxiter`, the most, set a few times above what the
-#' level's tolerance ordinarily needs so that an hour reaching it is one that is
-#' not settling; and `canopylayers` and `soillayers`, the most layers the run
-#' itself is made with, results being returned on the layers the user gave.
-#' The levels were placed by comparing each with the model solved very tightly.
+#' the run costs. Each level fixes:
+#' * `tolerance`: how far a pass may still move the canopy air (K) when the hour
+#'   is accepted;
+#' * `minpass`: the least number of passes an hour takes;
+#' * `maxiter`: the most, set at about five times what one hour in a hundred
+#'   needs at the level's tolerance, so that an hour reaching it is one that is
+#'   not settling;
+#' * `canopylayers`, `soillayers`: the most layers the run itself is made with,
+#'   results being returned on the layers the user gave;
+#' * `leafsteps`: successive approximations in each solution of a leaf's energy
+#'   balance;
+#' * `soilheatloosening`, `toptolerance`: how closely the soil heat and
+#'   canopy-top balances inside each pass are closed.
+#'
+#' The levels were placed by comparing each with the model solved very tightly,
+#' for forest and grass in five kinds of year, against two targets each: the
+#' error of air, leaf and ground temperature over a year (0.1, 0.5 and 1 K for
+#' very high, high and moderate) and in the worst hour (five times that).
 #' @noRd
 ACCURACY_LEVELS <- list(
-  "very high" = list(tolerance = 0.01, minpass = 3, maxiter = 200, canopylayers = Inf, soillayers = Inf),
-  "high"      = list(tolerance = 0.1,  minpass = 3, maxiter = 50,  canopylayers = Inf, soillayers = Inf),
-  "moderate"  = list(tolerance = 0.1,  minpass = 2, maxiter = 25,  canopylayers = 10,  soillayers = Inf))
+  "very high" = list(tolerance = 0.003, minpass = 3, maxiter = 200, canopylayers = Inf, soillayers = Inf,
+                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8),
+  "high"      = list(tolerance = 0.1, minpass = 3, maxiter = 75, canopylayers = Inf, soillayers = Inf,
+                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8),
+  "moderate"  = list(tolerance = 0.3, minpass = 1, maxiter = 50, canopylayers = 10, soillayers = Inf,
+                     leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4))
 #' Settings for a run from its accuracy level
 #'
 #' @param accuracy one of `"high"`, `"very high"` or `"moderate"`. A list of
@@ -36,7 +50,7 @@ accuracy_settings <- function(accuracy = "high", tolerance = NULL, maxiter = NUL
 #' Hands the engine the parts of a level that are not arguments of a run
 #' @noRd
 set_solver <- function(st) {
-  SolverSettingsCpp(st$minpass)
+  SolverSettingsCpp(st$minpass, st$leafsteps, st$soilheatloosening, st$toptolerance)
   invisible(NULL)
 }
 #' One warning for a run in which some hours did not settle
@@ -76,12 +90,17 @@ coarsen_canopy <- function(paii, Lfrac, nmax) {
 #' Every profile returned is a value at the centre of each layer, so each is
 #' interpolated in height between the centres the run used. Above the highest of
 #' those, air temperature, humidity and wind run on to their canopy-top values,
-#' which the model carries; everything else, and everything below the lowest
-#' centre, takes the value of the nearest centre.
+#' which the model carries. Below the lowest centre, air temperature runs on
+#' towards the ground's as the logarithm of height, reaching it at the soil's
+#' roughness height for heat, since most of the difference between the ground
+#' and the air lies within a short distance of the soil. Everything else beyond
+#' the outermost centres takes the value of the nearest.
 #' @param mout output of the full run; matrices of hours by layers.
 #' @param n the number of layers wanted.
+#' @param h canopy height (m).
+#' @param zm roughness length of the soil (m).
 #' @noRd
-canopy_to_user <- function(mout, n) {
+canopy_to_user <- function(mout, n, h, zm) {
   nc <- ncol(mout$tair)
   if (nc == n) return(mout)
   zc <- c((seq_len(nc) - 0.5) / nc, 1)
@@ -94,10 +113,18 @@ canopy_to_user <- function(mout, n) {
     dimnames(out) <- NULL
     out
   }
+  lowest <- mout$tair[, 1]
   for (v in c("Rdirdown", "Rdifdown", "Rswup", "Rlwdown", "Rlwup", "tleaf")) mout[[v]] <- onto(mout[[v]])
   mout$windspeed <- onto(mout$windspeed, mout$ucanopy)
   mout$tair <- onto(mout$tair, mout$tcanopy)
   mout$relhum <- onto(mout$relhum, mout$rhcanopy)
+  zh <- zm / 5
+  low <- which(zu < zc[1] & zu * h > zh)
+  if (length(low) > 0) {
+    tground <- mout$tsoil[, 1]
+    share <- log(zu[low] * h / zh) / log(zc[1] * h / zh)
+    mout$tair[, low] <- tground + outer(lowest - tground, share)
+  }
   mout
 }
 #' Depths of a soil's nodes (m), the surface first
