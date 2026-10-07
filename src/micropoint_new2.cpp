@@ -10,10 +10,12 @@
 
 // Where a run's time goes. Compiled in only when MP_PROFILE is defined (the
 // ordinary build defines nothing and these lines vanish): each MP_LAP adds the
-// time since the last one to a named part of the hour.
+// time since the last one to a named part of the hour, and each MP_TALLY counts
+// one more of a kind of repeated work.
 #ifdef MP_PROFILE
 #include <chrono>
 static double g_profSeconds[20] = { 0 };
+static double g_profCount[24] = { 0 };
 static std::chrono::steady_clock::time_point g_profLast = std::chrono::steady_clock::now();
 static inline void profLap(int part) {
     const auto now = std::chrono::steady_clock::now();
@@ -22,9 +24,13 @@ static inline void profLap(int part) {
 }
 #define MP_LAP(part) profLap(part)
 #define MP_COUNT(part) (g_profSeconds[part] += 1.0)
+#define MP_TALLY(kind) (g_profCount[kind] += 1.0)
+#define MP_TALLYN(kind, n) (g_profCount[kind] += static_cast<double>(n))
 #else
 #define MP_LAP(part)
 #define MP_COUNT(part)
+#define MP_TALLY(kind)
+#define MP_TALLYN(kind, n)
 #endif
 using namespace Rcpp;
 using namespace newmodel;
@@ -1083,7 +1089,9 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     Aitken1DState st_uf;
     double uf_iter = uf;
     if (H != 0.0) {
+        MP_TALLY(11);
         while (dif > 0.00000001) {
+            MP_TALLY(12);
             {
                 const double ufL = guardedFrictionVelocity(uf_iter, ka / std::log((zref - d) / zm));
                 LL = (ph * cp * std::pow(ufL, 3.0) * Tk) / (-ka * g * H);
@@ -1698,6 +1706,9 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     // one boundary layer in series.
     for (int i = n - 1; i >= 0; --i) {
         rLB[i] = leafrHa(onestepin.tair[i], dTs[i], onestepin.uz[i], leafSize);
+        MP_TALLY(6);
+        if (vegp.Lfrac[i] == 1.0) MP_TALLY(16);
+        if (swout.sunfrac[i] == 0.0 || swout.sunfrac[i] == 1.0) MP_TALLY(17);
         envdata.tair = onestepin.tair[i];
         envdata.tleaf = onestepin.tleaf[i];
         envdata.rh = onestepin.rh[i];
@@ -1735,6 +1746,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             const double g = gt + gwet;
             double rV = (g > 0.0) ? 1.0 / g : 1e9;
             ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
+            MP_TALLY(0);
             // vapour pressure deficit of the surface against the air (Pa)
             double DD = (satvapCpp2(ts) - eair) * 1000.0;
             if (DD >= 0.0) {
@@ -1745,12 +1757,14 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             else {
                 rV = rH2;
                 ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, 4);
+                MP_TALLY(1);
                 DD = (satvapCpp2(ts) - eair) * 1000.0;
                 Ew = tomm * std::min(DD, 0.0) / rH2;
                 Et = 0.0;
                 gused = 1.0 / rH2;
             }
             const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, 4);
+            MP_TALLY(2);
             follow = (tsw - ts) / dTa;
         };
         // Stomatal conductance responds to the light each leaf class absorbs.
@@ -1759,6 +1773,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         double gssun = 0.0, gsshade = 0.0;
         if (swout.RPARsun[i] > 0.0 || swout.RPARshade[i] > 0.0) {
             const stomatalState stomata = leafgsState(envdata, vegp, vegp.hgt / 2.0, C3);
+            MP_TALLY(5);
             gssun = leafgsLight(stomata, swout.RPARsun[i], envdata.pk, vegp, C3);
             gsshade = leafgsLight(stomata, swout.RPARshade[i], envdata.pk, vegp, C3);
         }
@@ -1785,6 +1800,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         double tsun, Ewsun, Etsun, fsun, gsun;
         double tshade, Ewshade, Etshade, fshade, gshade;
         for (int pass = 0; ; ++pass) {
+            if (pass > 0) MP_TALLY(3);
             gwet = phi * fw / rLB[i];
             gtsun = (gssun > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gssun) : 0.0;
             gtshade = (gsshade > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gsshade) : 0.0;
@@ -1794,6 +1810,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             // leaves absorb the same radiation and hold their stomata alike,
             // and are one surface.
             if (swout.RswLshade[i] == swout.RswLsun[i] && gtshade == gtsun) {
+                MP_TALLY(4);
                 tshade = tsun; Ewshade = Ewsun; Etshade = Etsun; fshade = fsun; gshade = gsun;
             }
             else surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
@@ -3298,7 +3315,9 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     const double eref = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     double err = 1e99;
     int nrIterations = 0;
+    MP_TALLY(13);
     while (err > tolerance && nrIterations < maxIter) {
+        MP_TALLY(14);
         double ph = phairCpp(Th, climdata.pk);
         double cp = cpairCpp(Th);
         const double tg = tground + Tsrc;
@@ -3417,6 +3436,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
     double Rabs = swrad.RswGabs + lwrad.RlwGabs;
     soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600);
+    MP_TALLY(7); MP_TALLYN(8, soilheat.iters);
     MP_LAP(6);
     climforwaterstruct cfw = {};
     cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
@@ -3425,6 +3445,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.soilwatervars.Tc = soilheat.Te;
     soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
     MP_LAP(7);
+    MP_TALLY(9); MP_TALLYN(10, soilwater.iterations);
     onestepin.witers = soilwater.iterations;
     onestepin.runoff = soilwater.surplus;
     onestepin.drainage = soilwater.drainage;
@@ -6224,13 +6245,15 @@ Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x)
     return Rcpp::wrap(packState(s, c));
 }
 // Seconds spent in each part of the vegetated hour since the last reset, with
-// the numbers of passes and hours; all zero unless built with MP_PROFILE.
+// the numbers of passes and hours (the first 20 values), then the counts of
+// each kind of repeated work (24 more); all zero unless built with MP_PROFILE.
 // [[Rcpp::export]]
 Rcpp::NumericVector ProfileReadCpp(bool reset = true)
 {
-    Rcpp::NumericVector out(20);
+    Rcpp::NumericVector out(44);
 #ifdef MP_PROFILE
     for (int i = 0; i < 20; ++i) { out[i] = g_profSeconds[i]; if (reset) g_profSeconds[i] = 0.0; }
+    for (int i = 0; i < 24; ++i) { out[20 + i] = g_profCount[i]; if (reset) g_profCount[i] = 0.0; }
 #endif
     return out;
 }
