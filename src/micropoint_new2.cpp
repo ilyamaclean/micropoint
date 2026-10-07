@@ -3112,16 +3112,29 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // weight; its heat is real and finite, and enters as the kernel's exact mean
     // across the layer about its centre, together with its reflection off the
     // ground.
+    //
+    // Layer centres are evenly spaced, so the direct path between two of them and
+    // the reflected path are each a whole number of layer thicknesses, and the
+    // kernel's exponential decay along either is a whole power of the decay
+    // across one thickness of the source layer. The two paths' logarithmic terms
+    // are taken as one logarithm of their product.
     MP_LAP(9);
     std::vector<double> W(nn * nn), Wnear(nn * nn);
+    const size_t npow = 2 * nn;
+    std::vector<double> decay(nn * npow);
+    for (size_t j = 0; j < nn; ++j) {
+        const double q = std::exp(-dz * inowTL[j]);
+        double pw = 1.0;
+        for (size_t k = 0; k < npow; ++k) { decay[j * npow + k] = pw; pw *= q; }
+    }
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
         for (size_t j = 0; j < nn; ++j) {
             double nf;
             if (i != j) {
-                double zeta1 = (z[i] - z[j]) * inowTL[j];
-                double zeta2 = (z[i] + z[j]) * inowTL[j];
-                nf = (nearFieldKernel(zeta1) + nearFieldKernel(zeta2)) / ow[j];
+                const size_t apart = (i > j) ? i - j : j - i;
+                const double direct = decay[j * npow + apart], reflected = decay[j * npow + i + j + 1];
+                nf = (KN_C1 * std::log((1.0 - direct) * (1.0 - reflected)) + KN_C2 * (direct + reflected)) / ow[j];
             }
             else {
                 double halfthick = 0.5 * dz * inowTL[i];
