@@ -117,3 +117,7 @@ DiagMapCpp <- function(ctxptr, x) {
     .Call(`_micropoint_DiagMapCpp`, ctxptr, x)
 }
 
+ProfileReadCpp <- function(reset = TRUE) {
+    .Call(`_micropoint_ProfileReadCpp`, reset)
+}
+

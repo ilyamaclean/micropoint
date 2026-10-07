@@ -540,6 +540,17 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// ProfileReadCpp
+Rcpp::NumericVector ProfileReadCpp(bool reset);
+RcppExport SEXP _micropoint_ProfileReadCpp(SEXP resetSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< bool >::type reset(resetSEXP);
+    rcpp_result_gen = Rcpp::wrap(ProfileReadCpp(reset));
+    return rcpp_result_gen;
+END_RCPP
+}
 
 static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
@@ -571,6 +582,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_DiagSetupCpp", (DL_FUNC) &_micropoint_DiagSetupCpp, 18},
     {"_micropoint_DiagRunCpp", (DL_FUNC) &_micropoint_DiagRunCpp, 6},
     {"_micropoint_DiagMapCpp", (DL_FUNC) &_micropoint_DiagMapCpp, 2},
+    {"_micropoint_ProfileReadCpp", (DL_FUNC) &_micropoint_ProfileReadCpp, 1},
     {NULL, NULL, 0}
 };
 

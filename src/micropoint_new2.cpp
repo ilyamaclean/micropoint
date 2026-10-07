@@ -8,6 +8,24 @@
 #include <stdexcept>
 #include <cstddef>
 
+// Where a run's time goes. Compiled in only when MP_PROFILE is defined (the
+// ordinary build defines nothing and these lines vanish): each MP_LAP adds the
+// time since the last one to a named part of the hour.
+#ifdef MP_PROFILE
+#include <chrono>
+static double g_profSeconds[20] = { 0 };
+static std::chrono::steady_clock::time_point g_profLast = std::chrono::steady_clock::now();
+static inline void profLap(int part) {
+    const auto now = std::chrono::steady_clock::now();
+    if (part >= 0) g_profSeconds[part] += std::chrono::duration<double>(now - g_profLast).count();
+    g_profLast = now;
+}
+#define MP_LAP(part) profLap(part)
+#define MP_COUNT(part) (g_profSeconds[part] += 1.0)
+#else
+#define MP_LAP(part)
+#define MP_COUNT(part)
+#endif
 using namespace Rcpp;
 using namespace newmodel;
 
@@ -2947,6 +2965,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // weight; its heat is real and finite, and enters as the kernel's exact mean
     // across the layer about its centre, together with its reflection off the
     // ground.
+    MP_LAP(9);
     std::vector<double> W(nn * nn), Wnear(nn * nn);
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
@@ -2992,6 +3011,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // its air is fixed and rTop is zero.
     const double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
         : (45068.7 - 42.8428 * tground);
+    MP_LAP(10);
     std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
@@ -3015,8 +3035,10 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         bT[i] = Rz[i] * sT + ph * cp * Rup * tground;
         bL[i] = pk * Rz[i] * sL + la * ph * Rup * esg;
     }
+    MP_LAP(11);
     const std::vector<double> tnew = solveDense(AT, bT, nn);
     const std::vector<double> enew = solveDense(AL, bL, nn);
+    MP_LAP(12);
     // How much of each node's departure from canopy-top air the foliage accounts
     // for, split into the part ordinary diffusion of its heat and vapour through
     // the canopy gives (far field) and the extra imprint of nearby foliage whose
@@ -3207,6 +3229,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
     double Ca, double zref, int maxIter, double tolerance, double a0v, double a1, double dcan, bool C3)
 {
+    MP_LAP(14);
     const size_t na = onestepin.tair.size();
     std::vector<double> rz_zref(na); // resistance from each layer to zref
     std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // previous timestep's soil state, not touched by this pass's iteration
@@ -3214,6 +3237,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, c.tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
     onestepin.Rlwdown = lwrad.Rlwdown;
     onestepin.Rlwup = lwrad.Rlwup;
+    MP_LAP(2);
     windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, maxIter, a1,
         onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
     onestepin.uz = wind.uz;
@@ -3225,6 +3249,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.fade = wind.fade;
     onestepin.LL = wind.LL;
     c.uf = wind.uf;
+    MP_LAP(3);
     rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, vegpc.x);
     envstruct envdata{};
     envdata.pk = climdata.pk;
@@ -3247,18 +3272,22 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     for (size_t i = 0; i < na; ++i) {
         rz_zref[i] = rHa - soilToZ(col, z[i]);
     }
+    MP_LAP(4);
     plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, c.dTs, 3600.0, C3); // updates onestepin in place
+    MP_LAP(5);
     // The air the ground exchanges with this pass, given the foliage's
     // sources as the leaf model has just left them.
     const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
     double Rabs = swrad.RswGabs + lwrad.RlwGabs;
     soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600);
+    MP_LAP(6);
     climforwaterstruct cfw = {};
     cfw.Rabs = Rabs; cfw.Tair = ga.T; cfw.relhum = ga.relhum; cfw.pk = climdata.pk; cfw.rHa = ga.R;
     cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
     onestepin.soilwatervars.oldTc = soilheat.oldTe;
     onestepin.soilwatervars.Tc = soilheat.Te;
     soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
+    MP_LAP(7);
     onestepin.witers = soilwater.iterations;
     onestepin.runoff = soilwater.surplus;
     c.tground = soilheat.Te[0];
@@ -3292,9 +3321,11 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         c.Th = climdata.tref;
         c.eh = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
     }
+    MP_LAP(8);
     std::vector<double> tair = onestepin.tair;
     LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
         (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
+    MP_LAP(13);
     // Convergence is judged on canopy air: how far this pass's solution lies
     // from the air the pass started from.
     c.tdif = 0.0;
@@ -3305,6 +3336,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
     onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
     ++c.pass;
+    MP_LAP(8); MP_COUNT(15);
 }
 // The state the hour's iteration works on, as one vector: air temperature,
 // vapour pressure and leaf temperature at each node, then ground temperature,
@@ -3446,6 +3478,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     double Ca, double latr, double lonr, double zref, int maxIter = 100, double  tolerance = OUTER_TOLERANCE,
     double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
+    MP_LAP(-1); MP_COUNT(16);
     solmodel solp = solpositionCpp2(latr, lonr, obsdata.year, obsdata.month, obsdata.day, obsdata.hour);
     double si = solarindexCpp2(soilpc.slope, soilpc.aspect, solp.zenr, solp.azir);
     kstruct kp = cankCpp(solp.zenr, vegpc.x, si);
@@ -3458,6 +3491,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     onestepin.Rswup = swrad.Rswup;
     size_t na = onestepin.tair.size();
     outercarry c;
+    MP_LAP(1);
     c.tground = onestepin.soilheatvars.Te[0];
     // Canopy-top air is the upper boundary of the canopy air, carried from hour
     // to hour as a state of its own.
@@ -3496,6 +3530,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
         outerPass(onestepin, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
         c.pass = maxIter;
     }
+    MP_LAP(14);
     onestepin.iters = c.pass;
     onestepin.error = c.tdif;
     onestepin.tcanopy = c.Th;
@@ -6031,4 +6066,15 @@ Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x)
     outerPass(s, c, ctx->clim, ctx->vegp, ctx->soilp, ctx->z, ctx->wgts, ctx->wc, ctx->swrad, ctx->swater0,
         ctx->Ca, ctx->zref, ctx->maxIter, OUTER_TOLERANCE, ctx->a0v, ctx->a1, ctx->dcan, ctx->C3);
     return Rcpp::wrap(packState(s, c));
+}
+// Seconds spent in each part of the vegetated hour since the last reset, with
+// the numbers of passes and hours; all zero unless built with MP_PROFILE.
+// [[Rcpp::export]]
+Rcpp::NumericVector ProfileReadCpp(bool reset = true)
+{
+    Rcpp::NumericVector out(20);
+#ifdef MP_PROFILE
+    for (int i = 0; i < 20; ++i) { out[i] = g_profSeconds[i]; if (reset) g_profSeconds[i] = 0.0; }
+#endif
+    return out;
 }
