@@ -1794,7 +1794,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             gtshade = (gsshade > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gsshade) : 0.0;
             surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
             surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
-            surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
+            // In the dark, and under wholly diffuse light, sunlit and shaded
+            // leaves absorb the same radiation and hold their stomata alike,
+            // and are one surface.
+            if (swout.RswLshade[i] == swout.RswLsun[i] && gtshade == gtsun) {
+                tshade = tsun; Ewshade = Ewsun; Etshade = Etsun; fshade = fsun; gshade = gsun;
+            }
+            else surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
             // Layer averages. Each quantity is weighted once by the live share of
             // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
             Ez[i] = vegp.Lfrac[i] * (sf * Ewsun + (1.0 - sf) * Ewshade) + (1.0 - vegp.Lfrac[i]) * Ewwood; // per unit plant area
