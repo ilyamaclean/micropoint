@@ -2587,8 +2587,16 @@ static std::vector<double> root_distribute(const std::vector<double>& z, double 
 // (mixed liquid Darcy flow + vapour diffusion, Campbell retention curve),
 // linearised and solved implicitly (Newton-Raphson via a Thomas solve)
 // against surface evaporation, transpiration uptake (by root fraction)
-// and drainage, with an ice-impedance term reducing liquid conductivity
-// where the soil is partly frozen.
+// and drainage.
+//
+// Frozen soil. Where a node holds ice, its liquid water is in balance with
+// that ice and stands at the potential its temperature sets (the same relation
+// that fixes how much of the water is frozen), far lower than the node's total
+// water would suggest; water is therefore drawn towards freezing soil, as it is
+// observed to be. That liquid conducts as the same soil would unfrozen at that
+// potential, and the ice in the pores obstructs it. Whatever a frozen node
+// gains or loses is taken up or given by its ice, so its total water changes
+// while the potential that drives flow does not.
 // Advances liquid water and water vapour through the soil profile for one timestep.
 // An implicit Richards-type solve handles vertical redistribution and phase-coupled vapour transport, while rainfall/evaporation set the surface boundary and transpiration removes water through the root profile.
 //
@@ -2599,6 +2607,10 @@ static std::vector<double> root_distribute(const std::vector<double>& z, double 
 // bound is set by that carry-over rather than by the size of a single hour's
 // fluxes. With exact Newton steps it costs one or two further steps a call.
 constexpr double SOIL_WATER_TOL = 1e-6;   // kg m-2 s-1
+// Air-filled pore space (m3/m3) below which frozen soil begins to refuse more
+// water, refusing it altogether once ice and liquid fill the pores. A declared
+// placement: small enough to matter only in soil that is all but full.
+constexpr double FROZEN_PORE_CLOSING = 0.01;
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
     int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL)
@@ -2617,6 +2629,8 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> ff(n, 0.0), Ca(n, 0.0), dpsi(n, 0.0);
     std::vector<double> kh(n + 1, 0.0), kv(n + 1, 0.0), dkh(n + 1, 0.0), dkv(n + 1, 0.0);
     std::vector<double> dFaceA(n, 0.0), dFaceB(n, 0.0);
+    std::vector<double> psiFlow(n + 1, 0.0), ownFlow(n + 1, 1.0), passes(n + 1, 1.0), dpasses(n + 1, 0.0), room(n + 1, 1.0), droom(n + 1, 0.0);
+    std::vector<double> obstructA(n, 0.0), obstructB(n, 0.0);
     // Where the last full Newton step started and what it was, so that a step
     // which leaves more water unaccounted for than before can be retraced at
     // half the length.
@@ -2659,39 +2673,45 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         // Hydraulic properties
         for (int i = 0; i < n; ++i) {
             double Tkelvin = soilmod.Tc[i] + 273.15;
-            // Ice is immobile: liquid (Darcy) conductivity uses only the
-            // unfrozen water content, reduced by an impedance factor for
-            // the remaining ice (Lundin 1990 / Zhao et al. form). Vapour
-            // conductivity stays on total theta -- ice blocks vapour
-            // diffusion like liquid water does -- and is not impeded.
+            // Ice is immobile: only the unfrozen water conducts, and it
+            // conducts as the soil would at that liquid content. The ice
+            // left in the pores obstructs the flow (Lundin 1990 / Zhao et al.
+            // form). Where ice and liquid together fill the pores no more
+            // water can enter, though it can still leave, so a frozen node
+            // also has a share of arriving water it has room for, which falls
+            // to nothing as the last of its pore space closes.
             double theta_u = unfrozenTheta(soilp, theta[i], soilmod.Tc[i], i);
             double theta_ice = theta[i] - theta_u;
             if (theta_ice < 0.0) theta_ice = 0.0;
+            const bool holdsIce = (theta_ice > 0.0 && theta_u < theta[i]);
+            const double Cw = dTheta_dPsi(soilp, psiw[i], i);
+            const double airFilled = soilp.thetaS[i] - theta[i];
             kh[i] = hydraulicConductivityFromTheta(soilp, theta_u, i);
-            if (theta_ice > 0.0) {
+            passes[i] = 1.0; dpasses[i] = 0.0; room[i] = 1.0; droom[i] = 0.0;
+            if (holdsIce) {
                 constexpr double Omega = 7.0;
-                kh[i] *= std::pow(10.0, -Omega * theta_ice);
+                passes[i] = std::pow(10.0, -Omega * theta_ice);
+                dpasses[i] = -passes[i] * Omega * std::log(10.0) * Cw;
+                room[i] = std::min(1.0, std::max(0.0, airFilled / FROZEN_PORE_CLOSING));
+                droom[i] = (airFilled > 0.0 && airFilled < FROZEN_PORE_CLOSING) ? -Cw / FROZEN_PORE_CLOSING : 0.0;
             }
-            kv[i] = vaporConductivityFromPsiTheta(soilp, psiw[i], theta[i], Tkelvin, i);
-            k[i] = kh[i] + kv[i];
-            double Cw = dTheta_dPsi(soilp, psiw[i], i);
+            // The potential that drives flow to and from the node: that of its
+            // liquid, which where ice is present is set by temperature alone.
+            psiFlow[i] = holdsIce ? 334000.0 * soilmod.Tc[i] / 273.15 : psiw[i];
+            ownFlow[i] = holdsIce ? 0.0 : 1.0;
+            kv[i] = vaporConductivityFromPsiTheta(soilp, psiFlow[i], theta[i], Tkelvin, i);
+            k[i] = kh[i] * passes[i] + kv[i];
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
-            // How each conductivity responds to water potential. Unfrozen,
-            // liquid conductivity varies as psi^-(2+3/b). Where freezing holds
-            // the liquid at the content set by temperature alone, extra water
-            // becomes ice, and conductivity responds only through the ice
-            // impedance. Vapour conductivity responds through the Kelvin
-            // humidity and through the air-filled pore space.
-            if (theta_ice > 0.0 && theta_u < theta[i]) {
-                constexpr double Omega = 7.0;
-                dkh[i] = -kh[i] * Omega * std::log(10.0) * Cw;
-            }
-            else {
-                dkh[i] = -(2.0 + 3.0 / soilp.b[i]) * kh[i] / psiw[i];
-            }
-            double airFilled = soilp.thetaS[i] - theta[i];
-            dkv[i] = kv[i] * Mw / (RgasC * Tkelvin) - ((airFilled > 0.0) ? kv[i] / airFilled * Cw : 0.0);
+            // How each conductivity responds to the node's water potential.
+            // Unfrozen, liquid conductivity varies as psi^-(2+3/b). Where
+            // freezing holds the liquid at the content set by temperature
+            // alone, extra water becomes ice and the liquid's conductivity does
+            // not change; only the obstruction does. Vapour conductivity
+            // responds through the Kelvin humidity, where the potential is the
+            // node's own, and through the air-filled pore space.
+            dkh[i] = holdsIce ? 0.0 : -(2.0 + 3.0 / soilp.b[i]) * kh[i] / psiw[i];
+            dkv[i] = (holdsIce ? 0.0 : kv[i] * Mw / (RgasC * Tkelvin)) - ((airFilled > 0.0) ? kv[i] / airFilled * Cw : 0.0);
         }
         // Lower boundary: a saturated fixed head, which holds no vapour
         // pathway, or under free drainage a continuation of the deepest layer,
@@ -2701,43 +2721,63 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             theta[n] = soilp.thetaS[n - 1];
             kh[n] = soilp.Ksat[n - 1];
             kv[n] = 0.0;
+            psiFlow[n] = psiw[n]; passes[n] = 1.0; room[n] = 1.0;
         }
         else {
             psiw[n] = psiw[n - 1];
             theta[n] = theta[n - 1];
             kh[n] = kh[n - 1];
             kv[n] = kv[n - 1];
+            psiFlow[n] = psiFlow[n - 1]; passes[n] = passes[n - 1]; room[n] = 1.0;
         }
-        k[n] = kh[n] + kv[n];
+        ownFlow[n] = 0.0; dpasses[n] = 0.0; droom[n] = 0.0;
+        k[n] = kh[n] * passes[n] + kv[n];
         // Upward water flux across the face below each layer. Liquid water
         // moves down the gradient of the matric flux potential, psi*kh/(1 - n)
         // with n = 2 + 3/b the exponent of Campbell conductivity in potential,
         // which integrates the conductivity exactly between the two nodes, and
-        // falls under gravity. Vapour diffuses down the gradient of water
-        // potential with the mean of the two nodes' vapour conductivities, and
-        // is not moved by gravity.
+        // falls under gravity. The potentials and conductivities are those of
+        // each node's liquid, so the integration holds for frozen nodes too.
+        // Ice then obstructs the liquid flux by the share the more obstructed
+        // of the two nodes lets pass, so that a layer the ice has sealed
+        // passes nothing whatever stands above or below it, and by the room
+        // the node receiving the water has for it. Vapour diffuses
+        // down the gradient of the same potential with the mean of the two
+        // nodes' vapour conductivities, and is neither moved by gravity nor
+        // obstructed.
         for (int i = 0; i < n; ++i) {
             double nPsi = 2.0 + 3.0 / soilp.b[i];
             double sh = soilmod.dz[i] * (1.0 - nPsi);
-            double dpsiFace = psiw[i + 1] - psiw[i];
+            double dpsiFace = psiFlow[i + 1] - psiFlow[i];
             double kvFace = 0.5 * (kv[i] + kv[i + 1]);
-            ff[i] = (psiw[i + 1] * kh[i + 1] - psiw[i] * kh[i]) / sh
-                + kvFace * dpsiFace / soilmod.dz[i]
-                - g * kh[i];
+            const bool upperLimits = (passes[i] <= passes[i + 1]);
+            const double liquid = (psiFlow[i + 1] * kh[i + 1] - psiFlow[i] * kh[i]) / sh - g * kh[i];
+            const bool upperReceives = (liquid > 0.0);   // the flux is counted upward
+            const double throughIce = upperLimits ? passes[i] : passes[i + 1];
+            const double hasRoom = upperReceives ? room[i] : room[i + 1];
+            const double pass = throughIce * hasRoom;
+            // response of the share passed to the potential of the node above and of the node below
+            const double dpassA = (upperLimits ? dpasses[i] * hasRoom : 0.0) + (upperReceives ? throughIce * droom[i] : 0.0);
+            const double dpassB = (upperLimits ? 0.0 : dpasses[i + 1] * hasRoom) + (upperReceives ? 0.0 : throughIce * droom[i + 1]);
+            ff[i] = pass * liquid + kvFace * dpsiFace / soilmod.dz[i];
+            // How the flux responds through the obstruction alone, kept apart
+            // from the rest (below) because it can work against settling.
+            obstructA[i] = dpassA * liquid; obstructB[i] = (i + 1 < n) ? dpassB * liquid : 0.0;
             // The flux's exact response to the potential of the node above the
             // face (A) and the node below it (B). Beneath the deepest layer the
             // node below is either held fixed or moves with the layer, so only
             // the layer's own potential counts, and under free drainage only
             // through gravity.
             if (i == n - 1 && soilp.FreeDrain) {
-                dFaceA[i] = -g * dkh[i];
+                dFaceA[i] = pass * (-g * dkh[i]);
+                obstructA[i] = dpasses[i] * room[i] * liquid; obstructB[i] = 0.0;
                 dFaceB[i] = 0.0;
                 continue;
             }
-            dFaceA[i] = -(kh[i] + psiw[i] * dkh[i]) / sh - kvFace / soilmod.dz[i]
-                + 0.5 * dkv[i] * dpsiFace / soilmod.dz[i] - g * dkh[i];
-            dFaceB[i] = (i + 1 < n) ? (kh[i + 1] + psiw[i + 1] * dkh[i + 1]) / sh + kvFace / soilmod.dz[i]
-                + 0.5 * dkv[i + 1] * dpsiFace / soilmod.dz[i] : 0.0;
+            dFaceA[i] = pass * (-(kh[i] * ownFlow[i] + psiFlow[i] * dkh[i]) / sh - g * dkh[i])
+                - kvFace * ownFlow[i] / soilmod.dz[i] + 0.5 * dkv[i] * dpsiFace / soilmod.dz[i];
+            dFaceB[i] = (i + 1 < n) ? pass * ((kh[i + 1] * ownFlow[i + 1] + psiFlow[i + 1] * dkh[i + 1]) / sh)
+                + kvFace * ownFlow[i + 1] / soilmod.dz[i] + 0.5 * dkv[i + 1] * dpsiFace / soilmod.dz[i] : 0.0;
         }
         // Each layer's water balance: gained through the face below, lost
         // through the face above, to roots, and into storage. What is left
@@ -2745,15 +2785,22 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         // make the Newton step.
         massBalance = 0.0;
         aa[0] = 0.0;
-        cc[0] = -dFaceB[0];
-        bb[0] = -dFaceA[0] + Ca[0] + dEvap_dpsi;
+        cc[0] = -dFaceB[0] - obstructB[0];
+        // As ice melts out of a node its pores open and it passes water more
+        // freely, so losing water can make it lose water faster. Allowed for
+        // in the step, that would send a node the wrong way; it is allowed for
+        // only where it steadies a node, and between nodes. The balances
+        // themselves are exact either way, so this sets the path to the
+        // solution and not the solution.
+        auto steadying = [](double v) { return (v > 0.0) ? v : 0.0; };
+        bb[0] = -dFaceA[0] + Ca[0] + dEvap_dpsi + steadying(-obstructA[0]);
         dd[0] = surfaceFlux + STr[0] - ff[0]
             + soilmod.vol[0] * (rho * (theta[0] - oldtheta[0]) + (vapor[0] - oldvapor[0])) / dT;
         massBalance += std::abs(dd[0]);
         for (int i = 1; i < n; ++i) {
-            aa[i] = dFaceA[i - 1];
-            cc[i] = -dFaceB[i];
-            bb[i] = dFaceB[i - 1] - dFaceA[i] + Ca[i];
+            aa[i] = dFaceA[i - 1] + obstructA[i - 1];
+            cc[i] = -dFaceB[i] - obstructB[i];
+            bb[i] = dFaceB[i - 1] - dFaceA[i] + Ca[i] + steadying(obstructB[i - 1] - obstructA[i]);
             dd[i] = ff[i - 1] + STr[i] - ff[i]
                 + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
             massBalance += std::abs(dd[i]);
