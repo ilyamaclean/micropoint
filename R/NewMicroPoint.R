@@ -208,6 +208,12 @@ Cafromyear <- function(year) {
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
 #' (°C) used to initialise the soil temperature profile. If `NA`, it is
 #' estimated from `climdata$temp`.
+#' @param accuracy Character. How closely the model is solved: `"high"` (the
+#'   default), `"very high"` or `"moderate"`. See Details of [RunMicro()].
+#' @param maxiter Optional integer. The most passes an hour may take. By default
+#'   set by `accuracy`.
+#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
+#'   moves air temperature by less than this (K). By default set by `accuracy`.
 #'
 #' @details
 #' Standard meteorological observations are typically made about 2 m above the
@@ -223,7 +229,8 @@ Cafromyear <- function(year) {
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
 weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, ThetaIni = NA,
-                              CO2ppm = NA, boundaryT = NA) {
+                              CO2ppm = NA, boundaryT = NA, accuracy = "high", maxiter = NULL, tolerance = NULL) {
+  st <- accuracy_settings(accuracy, tolerance, maxiter)
   n <- dim(climdata)[1]
   if (class(boundaryT) == "logical") {
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -248,8 +255,9 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
+  set_solver(st)
   hgtvars <- WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, long,
-                            SoilTempIni, ThetaIni, CO2ppm)
+                            SoilTempIni, ThetaIni, CO2ppm, st$maxiter, st$tolerance)
   clim2 <- climdata
   clim2$temp <- hgtvars$new_temp
   clim2$relhum <- hgtvars$new_relhum
@@ -285,16 +293,19 @@ reference_height <- function(vegp, zm = 0.004) {
 #' Translates forcing measured too close to a canopy up to the height the model needs
 #'
 #' Returns the forcing and the height it then refers to. Forcing already at or
-#' above the required height is returned unchanged.
+#' above the required height is returned unchanged. The translation is itself a
+#' run of the model, over a short sward, and is made at the accuracy of the run
+#' it serves (`st`, that run's settings).
 #' @noRd
-forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004) {
+forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004,
+                                 st = accuracy_settings()) {
   zreq <- reference_height(vegp, zm)
   if (zref >= zreq - 1e-6) return(list(climdata = climdata, zref = zref))
   message(sprintf("Weather at %.4g m is too close to a canopy of this height and density; translated to %.4g m.",
                   zref, zreq))
   # forcing already checked by the caller
   climdata <- suppressWarnings(weatherhgt_adjust(climdata, zref, zreq, lat, long,
-                                                 CO2ppm = CO2ppm, boundaryT = boundaryT))
+                                                 CO2ppm = CO2ppm, boundaryT = boundaryT, accuracy = st))
   list(climdata = climdata, zref = zreq)
 }
 #' Reduces a canopy too short to resolve to bare ground
@@ -351,6 +362,11 @@ asbareifshort <- function(vegp, zm = 0.004) {
 #' @param maxiter Integer. Maximum number of iterations used to achieve convergence
 #'   within each time step.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
+#' @param accuracy Character. `"high"` (the default), `"very high"` or
+#'   `"moderate"`: the accuracy at which weather measured too close to the
+#'   canopy is translated up to the height the model needs (see Details of
+#'   [RunMicro()]). The spin-up itself is a quick, simplified run and is the
+#'   same at every level.
 #'
 #' @details
 #' The soil water model is run over the supplied climate data, and the final
@@ -365,7 +381,8 @@ asbareifshort <- function(vegp, zm = 0.004) {
 #' @export
 InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
                             CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE,
-                            Lfrac = NA) {
+                            Lfrac = NA, accuracy = "high") {
+  st <- accuracy_settings(accuracy)
   chk <- runchecks(climdata, vegp, soilc, lat, long, Lfrac = Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zmr   # the soil's roughness length travels with the soil parameters
@@ -389,7 +406,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
     }
     if (length(Lfrac) == 1) Lfrac <- rep(Lfrac, 10)
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zmr)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zmr, st)
     climdata <- fr$climdata; zref <- fr$zref
     blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
                        lat, long, boundaryT, maxiter, C3)
@@ -430,13 +447,15 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #'   used to initialise the soil temperature profile. If `NA`, it is estimated
 #'   from `climdata$temp`, which requires roughly a full year of data.
 #' @param zm Numeric. Roughness length for bare-ground calculations.
-#' @param maxiter Integer. Maximum number of iterations used to achieve
-#'   convergence.
-#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
-#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
-#'   gives a closer solution for a little more run time.
+#' @param maxiter Optional integer. The most passes an hour may take. By default
+#'   set by `accuracy`.
+#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
+#'   moves air temperature by less than this (K). By default set by `accuracy`.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param plotout Logical. If `TRUE`, plot the requested profile.
+#' @param accuracy Character. How closely the model is solved: `"high"` (the
+#'   default), `"very high"` or `"moderate"`. See Details of [RunMicro()]. The
+#'   hour returned is always solved on the canopy layers given.
 #' @param varn Character. Variable to plot. One of `"temp"`, `"relhum"`,
 #'   or `"radiation"`.
 #'
@@ -498,7 +517,9 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @export
 return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                            SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                           maxiter = 100, tolerance = 0.1, C3 = TRUE, plotout = TRUE, varn = "temp") {
+                           maxiter = NULL, tolerance = NULL, C3 = TRUE, plotout = TRUE, varn = "temp",
+                           accuracy = "high") {
+  st <- accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
@@ -523,25 +544,29 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- seq(0, zref, length.out = 1000)
     mout <- profilebareR(hr - 1, obstime, climdata, soilc, z, zref, lat, long, SoilTempIni, ThetaIni,
-                         zm, maxiter, tolerance)
+                         zm, st$maxiter, st$tolerance)
     zref2 <- zref
   }  else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    # The hours leading up to the one returned are run on twenty layers, or on
+    # as many as the accuracy level allows if that is fewer
     n <- length(paii)
-    paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = 20),
+    nlead <- min(20, st$canopylayers)
+    paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = nlead),
                      method = "natural")$y
     paii20 <- pmax(paii20, 0)
     mu <- sum(paii) / sum(paii20)
     paii20 <- paii20 * mu
-    Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = 20),
+    Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = nlead),
                       method = "natural")$y
     Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
     # Forcing measured too close to the canopy is translated up to the height the model needs
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata2 <- fr$climdata; zref2 <- fr$zref
+    set_solver(st)
     mout <- profileR(hr - 1, obstime, climdata2, soilc, vegp, paii20, paii,
                      Lfrac20, Lfrac, zref2, CO2ppm, lat, long, SoilTempIni, ThetaIni,
-                     maxiter, tolerance, -1, 1.25, C3)
+                     st$maxiter, st$tolerance, -1, 1.25, C3)
   }
   if (class(vegp) != "logical") {
     na <- round((2 / vegp$h) * length(paii), 0)
@@ -657,14 +682,18 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' used to initialise the soil temperature profile. If `NA`, it is estimated
 #' from `climdata$temp`, which requires roughly a full year of data.
 #' @param zm Numeric. Roughness length for bare-ground calculations.
-#' @param maxiter Integer. Maximum number of iterations used to achieve
-#' convergence.
-#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
-#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
-#'   gives a closer solution for a little more run time.
+#' @param maxiter Optional integer. The most passes an hour may take. By default
+#'   set by `accuracy`; supplying it overrides that.
+#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
+#'   moves air temperature by less than this (K). By default set by `accuracy`;
+#'   supplying it overrides that.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
+#' @param accuracy Character. How closely the model is solved, and so how long
+#'   it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details.
 #'
 #' @details
+#' ACCURACY_DETAILS_PLACEHOLDER
+#'
 #' Standard meteorological observations are typically made about 2 m above the
 #' ground. If vegetation is taller than the measurement height, these data lie
 #' within the canopy rather than above it. The microclimate model requires
@@ -728,7 +757,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @export
 RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                      SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                     maxiter = 100, tolerance = 0.1, C3 = TRUE) {
+                     maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
+  st <- accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
@@ -736,6 +766,15 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
+  }
+  # The soil the run is made with, where the accuracy level allows fewer layers
+  # than were given; initial profiles supplied for the user's nodes are carried
+  # to its nodes. The engine reads the result at the depth asked for.
+  cs <- coarsen_soil(soilc, st$soillayers)
+  if (!is.null(cs)) {
+    if (class(SoilTempIni) != "logical") SoilTempIni <- stats::approx(cs$zu, SoilTempIni, xout = cs$zc, rule = 2)$y
+    if (class(ThetaIni) != "logical") ThetaIni <- stats::approx(cs$zu, ThetaIni, xout = cs$zc, rule = 2)$y
+    soilc <- cs$soilc
   }
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
@@ -752,16 +791,23 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   vegp <- asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {
     mout <- RunBareR(reqhgt, obstime, climdata, soilc, zref, lat, long, SoilTempIni,
-                     ThetaIni, zm, maxiter, tolerance)
+                     ThetaIni, zm, st$maxiter, st$tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata <- fr$climdata; zref <- fr$zref
+    # The canopy the run is made with, where the level allows fewer layers than
+    # were given. The engine reads the result at the height asked for.
+    cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
+    if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
+    set_solver(st)
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
-                      ThetaIni, maxiter, tolerance, -1, 1.25, C3)
+                      ThetaIni, st$maxiter, st$tolerance, -1, 1.25, C3)
   }
-  # The soil's water balance is closed by iteration each hour; say so if it was not
-  stuck <- sum(mout$witers >= maxiter)
+  # Each hour is solved by iteration, and so is the soil's water balance within
+  # it; say so, once for the run, if either did not settle in some hours
+  warn_unsettled(mout$error, st)
+  stuck <- sum(mout$witers >= st$maxiter)
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   # Rename variables if below ground
   if (reqhgt <= 0) {
@@ -803,11 +849,14 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' to initialise the soil temperature profile. If `NA`, it is estimated from
 #' `climdata$temp`, which requires approximately a full year of data.
 #' @param zm Numeric. Roughness length used for bare-ground calculations.
-#' @param maxiter Integer. Maximum number of iterations allowed for convergence.
-#' @param tolerance Numeric. How closely each hour is solved: the iteration stops when a pass
-#'   moves air temperature by less than this (K). The default suits most uses; a smaller value
-#'   gives a closer solution for a little more run time.
+#' @param maxiter Optional integer. The most passes an hour may take. By default
+#'   set by `accuracy`.
+#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
+#'   moves air temperature by less than this (K). By default set by `accuracy`.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
+#' @param accuracy Character. How closely the model is solved, and so how long
+#'   it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details
+#'   of [RunMicro()]. Profiles are returned on the layers given whatever the level.
 #'
 #' @details
 #' The meteorological forcing data must describe air at or above the height
@@ -848,6 +897,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'     negative where water enters there. A vector.}
 #'   \item{witers}{Iterations taken to balance the soil's water each hour. A
 #'     warning is given if the balance was not reached in some hours.}
+#'   \item{iters}{Passes each hour took to settle. A vector.}
+#'   \item{error}{How far the last pass of each hour still moved air
+#'     temperature (K). One warning is given for the run if this exceeds the
+#'     tolerance in some hours.}
 #' }
 #'
 #' For **vegetated runs** the returned elements are:
@@ -874,6 +927,12 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'     per time step.}
 #'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
 #'     per time step.}
+#'   \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector, one value per
+#'     time step.}
+#'   \item{iters}{Passes each hour took to settle. A vector.}
+#'   \item{error}{How far the last pass of each hour still moved air
+#'     temperature (K). One warning is given for the run if this exceeds the
+#'     tolerance in some hours.}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp
@@ -881,7 +940,8 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @export
 RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2,
                        SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA,
-                       zm = 0.004, maxiter = 100, tolerance = 0.1, C3 = TRUE) {
+                       zm = 0.004, maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
+  st <- accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
   soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
@@ -890,6 +950,16 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
+  }
+  # The soil the run is made with, where the accuracy level allows fewer layers
+  # than were given; initial profiles supplied for the user's nodes are carried
+  # to its nodes, and the soil profiles returned are carried back.
+  soiluser <- soilc
+  cs <- coarsen_soil(soilc, st$soillayers)
+  if (!is.null(cs)) {
+    if (class(SoilTempIni) != "logical") SoilTempIni <- stats::approx(cs$zu, SoilTempIni, xout = cs$zc, rule = 2)$y
+    if (class(ThetaIni) != "logical") ThetaIni <- stats::approx(cs$zu, ThetaIni, xout = cs$zc, rule = 2)$y
+    soilc <- cs$soilc
   }
   nlay <- soilc$nLayers
   if (class(SoilTempIni) == "logical") {
@@ -907,20 +977,32 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- (c(1:20)/ 20) * zref
     mout <- RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, long,
-                             SoilTempIni, ThetaIni, maxiter, tolerance)
+                             SoilTempIni, ThetaIni, st$maxiter, st$tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm)
+    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata <- fr$climdata; zref <- fr$zref
+    # The canopy the run is made with, where the level allows fewer layers than
+    # were given; the profiles are returned on the layers given.
+    nuser <- length(paii)
+    cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
+    if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
+    set_solver(st)
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
-                         lat, long, SoilTempIni, ThetaIni, maxiter, tolerance,
+                         lat, long, SoilTempIni, ThetaIni, st$maxiter, st$tolerance,
                          -1, 1.25, C3)
-
+    mout <- canopy_to_user(mout, nuser)
   }
-  # The soil's water balance is closed by iteration each hour; say so if it was not
-  stuck <- sum(mout$witers >= maxiter)
+  if (!is.null(cs)) {
+    mout$tsoil <- soil_to_user(mout$tsoil, cs)
+    mout$theta <- soil_to_user(mout$theta, cs)
+  }
+  # Each hour is solved by iteration, and so is the soil's water balance within
+  # it; say so, once for the run, if either did not settle in some hours
+  warn_unsettled(mout$error, st)
+  stuck <- sum(mout$witers >= st$maxiter)
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
-  mout$theta <- reportedtheta(mout$theta, soilc)
+  mout$theta <- reportedtheta(mout$theta, soiluser)
   return(mout)
 }
 #' Soil water content as reported to the user

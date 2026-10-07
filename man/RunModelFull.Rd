@@ -18,9 +18,10 @@ RunModelFull(
   CO2ppm = NA,
   boundaryT = NA,
   zm = 0.004,
-  maxiter = 100,
-  tolerance = 0.1,
-  C3 = TRUE
+  maxiter = NULL,
+  tolerance = NULL,
+  C3 = TRUE,
+  accuracy = "high"
 )
 }
 \arguments{
@@ -64,13 +65,17 @@ to initialise the soil temperature profile. If `NA`, it is estimated from
 
 \item{zm}{Numeric. Roughness length used for bare-ground calculations.}
 
-\item{maxiter}{Integer. Maximum number of iterations allowed for convergence.}
+\item{maxiter}{Optional integer. The most passes an hour may take. By default
+set by `accuracy`.}
 
-\item{tolerance}{Numeric. How closely each hour is solved: the iteration stops when a pass
-moves air temperature by less than this (K). The default suits most uses; a smaller value
-gives a closer solution for a little more run time.}
+\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
+moves air temperature by less than this (K). By default set by `accuracy`.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
+
+\item{accuracy}{Character. How closely the model is solved, and so how long
+it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details
+of [RunMicro()]. Profiles are returned on the layers given whatever the level.}
 }
 \value{
 A list of numeric matrices giving simulated microclimate variables
@@ -99,6 +104,10 @@ For **bare-ground runs** (`vegp = NA`) the returned elements are:
     negative where water enters there. A vector.}
   \item{witers}{Iterations taken to balance the soil's water each hour. A
     warning is given if the balance was not reached in some hours.}
+  \item{iters}{Passes each hour took to settle. A vector.}
+  \item{error}{How far the last pass of each hour still moved air
+    temperature (K). One warning is given for the run if this exceeds the
+    tolerance in some hours.}
 }
 
 For **vegetated runs** the returned elements are:
@@ -125,6 +134,12 @@ For **vegetated runs** the returned elements are:
     per time step.}
   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
     per time step.}
+  \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector, one value per
+    time step.}
+  \item{iters}{Passes each hour took to settle. A vector.}
+  \item{error}{How far the last pass of each hour still moved air
+    temperature (K). One warning is given for the run if this exceeds the
+    tolerance in some hours.}
 }
 }
 \description{

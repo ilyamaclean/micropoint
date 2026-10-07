@@ -16,7 +16,8 @@ InitailizeWater(
   boundaryT = NA,
   maxiter = 100,
   C3 = TRUE,
-  Lfrac = NA
+  Lfrac = NA,
+  accuracy = "high"
 )
 }
 \arguments{
@@ -54,6 +55,12 @@ within each time step.}
 \item{Lfrac}{Fraction of plant area that is living vegetation, given either as
 a single value or as a vector giving the fraction in each canopy layer.
 Required unless `vegp` is `NA`.}
+
+\item{accuracy}{Character. `"high"` (the default), `"very high"` or
+`"moderate"`: the accuracy at which weather measured too close to the
+canopy is translated up to the height the model needs (see Details of
+[RunMicro()]). The spin-up itself is a quick, simplified run and is the
+same at every level.}
 }
 \value{
 Numeric vector of initial volumetric soil water contents in each layer

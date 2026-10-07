@@ -13,7 +13,10 @@ weatherhgt_adjust(
   SoilTempIni = NA,
   ThetaIni = NA,
   CO2ppm = NA,
-  boundaryT = NA
+  boundaryT = NA,
+  accuracy = "high",
+  maxiter = NULL,
+  tolerance = NULL
 )
 }
 \arguments{
@@ -41,6 +44,15 @@ If `NA`, it is estimated from the year of the first observation using [Cafromyea
 \item{boundaryT}{Optional numeric. Approximate mean annual air temperature
 (°C) used to initialise the soil temperature profile. If `NA`, it is
 estimated from `climdata$temp`.}
+
+\item{accuracy}{Character. How closely the model is solved: `"high"` (the
+default), `"very high"` or `"moderate"`. See Details of [RunMicro()].}
+
+\item{maxiter}{Optional integer. The most passes an hour may take. By default
+set by `accuracy`.}
+
+\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
+moves air temperature by less than this (K). By default set by `accuracy`.}
 }
 \value{
 A data.frame identical to `climdata` but with `temp`, `relhum`,

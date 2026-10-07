@@ -10,6 +10,16 @@ Rcpp::Rostream<true>&  Rcpp::Rcout = Rcpp::Rcpp_cout_get();
 Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
+// SolverSettingsCpp
+void SolverSettingsCpp(int minpass);
+RcppExport SEXP _micropoint_SolverSettingsCpp(SEXP minpassSEXP) {
+BEGIN_RCPP
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< int >::type minpass(minpassSEXP);
+    SolverSettingsCpp(minpass);
+    return R_NilValue;
+END_RCPP
+}
 // zeroplanedisCpp2
 double zeroplanedisCpp2(double h, double pai);
 RcppExport SEXP _micropoint_zeroplanedisCpp2(SEXP hSEXP, SEXP paiSEXP) {
@@ -318,8 +328,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // WeatherhgtCpp2
-List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zin, double zout, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double CO2ppm);
-RcppExport SEXP _micropoint_WeatherhgtCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP CO2ppmSEXP) {
+List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zin, double zout, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double CO2ppm, int maxNrIterations, double tolerance);
+RcppExport SEXP _micropoint_WeatherhgtCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP soilcSEXP, SEXP vegpSEXP, SEXP paiiSEXP, SEXP LfracSEXP, SEXP zinSEXP, SEXP zoutSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP SoilTempIniSEXP, SEXP SoilThetaIniSEXP, SEXP CO2ppmSEXP, SEXP maxNrIterationsSEXP, SEXP toleranceSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -336,7 +346,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< std::vector<double> >::type SoilTempIni(SoilTempIniSEXP);
     Rcpp::traits::input_parameter< std::vector<double> >::type SoilThetaIni(SoilThetaIniSEXP);
     Rcpp::traits::input_parameter< double >::type CO2ppm(CO2ppmSEXP);
-    rcpp_result_gen = Rcpp::wrap(WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, lon, SoilTempIni, SoilThetaIni, CO2ppm));
+    Rcpp::traits::input_parameter< int >::type maxNrIterations(maxNrIterationsSEXP);
+    Rcpp::traits::input_parameter< double >::type tolerance(toleranceSEXP);
+    rcpp_result_gen = Rcpp::wrap(WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, lon, SoilTempIni, SoilThetaIni, CO2ppm, maxNrIterations, tolerance));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -553,6 +565,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
+    {"_micropoint_SolverSettingsCpp", (DL_FUNC) &_micropoint_SolverSettingsCpp, 1},
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
     {"_micropoint_roughlengthCpp2", (DL_FUNC) &_micropoint_roughlengthCpp2, 5},
     {"_micropoint_dpsimCpp2", (DL_FUNC) &_micropoint_dpsimCpp2, 1},
@@ -570,7 +583,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_profileR", (DL_FUNC) &_micropoint_profileR, 20},
     {"_micropoint_RunBareR", (DL_FUNC) &_micropoint_RunBareR, 12},
     {"_micropoint_RunModelR", (DL_FUNC) &_micropoint_RunModelR, 18},
-    {"_micropoint_WeatherhgtCpp2", (DL_FUNC) &_micropoint_WeatherhgtCpp2, 13},
+    {"_micropoint_WeatherhgtCpp2", (DL_FUNC) &_micropoint_WeatherhgtCpp2, 15},
     {"_micropoint_RunBelowFullBare", (DL_FUNC) &_micropoint_RunBelowFullBare, 12},
     {"_micropoint_RunBelowFull", (DL_FUNC) &_micropoint_RunBelowFull, 17},
     {"_micropoint_clearskyradCpp2", (DL_FUNC) &_micropoint_clearskyradCpp2, 4},

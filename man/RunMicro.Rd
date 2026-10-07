@@ -19,9 +19,10 @@ RunMicro(
   CO2ppm = NA,
   boundaryT = NA,
   zm = 0.004,
-  maxiter = 100,
-  tolerance = 0.1,
-  C3 = TRUE
+  maxiter = NULL,
+  tolerance = NULL,
+  C3 = TRUE,
+  accuracy = "high"
 )
 }
 \arguments{
@@ -67,14 +68,17 @@ from `climdata$temp`, which requires roughly a full year of data.}
 
 \item{zm}{Numeric. Roughness length for bare-ground calculations.}
 
-\item{maxiter}{Integer. Maximum number of iterations used to achieve
-convergence.}
+\item{maxiter}{Optional integer. The most passes an hour may take. By default
+set by `accuracy`; supplying it overrides that.}
 
-\item{tolerance}{Numeric. How closely each hour is solved: the iteration stops when a pass
-moves air temperature by less than this (K). The default suits most uses; a smaller value
-gives a closer solution for a little more run time.}
+\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
+moves air temperature by less than this (K). By default set by `accuracy`;
+supplying it overrides that.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
+
+\item{accuracy}{Character. How closely the model is solved, and so how long
+it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details.}
 }
 \value{
 A data.frame containing model outputs for each time step.
@@ -123,6 +127,8 @@ Runs the microclimate model for each time step in `climdata` and returns
 the simulated microclimate at the requested height `reqhgt`.
 }
 \details{
+ACCURACY_DETAILS_PLACEHOLDER
+
 Standard meteorological observations are typically made about 2 m above the
 ground. If vegetation is taller than the measurement height, these data lie
 within the canopy rather than above it. The microclimate model requires

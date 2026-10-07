@@ -72,6 +72,20 @@ inline double aitken1d(double oldv, double newv, Aitken1DState& st);
 // take a tolerance from the user and fall back on this value (exported
 // signatures must spell it as a number).
 constexpr double OUTER_TOLERANCE = 0.1;
+// How fully each hour of a vegetated run is solved, beyond its tolerance and
+// its limit on passes, which the run functions hand over directly. Set once
+// for a run from the accuracy level the user asks for, and held until set again.
+//   minPass: the least number of passes an hour takes before the stopping test
+//   may end it. The test asks only how far the last pass moved the canopy air,
+//   and an hour's first pass or two can move it little while leaves and ground
+//   are still far from settled; three passes guard against stopping there.
+struct solversettings { int minPass = 3; };
+static solversettings g_solver;
+// [[Rcpp::export]]
+void SolverSettingsCpp(int minpass = 3)
+{
+    g_solver.minPass = std::max(1, minpass);
+}
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
 // This section establishes solar geometry only.  It converts date/time and location into
@@ -3591,7 +3605,7 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     outerPass(s, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
     mem.passStart = x;
     mem.passResult = packState(s, c);
-    if ((c.tdif <= tolerance && c.pass >= 3) || mem.depth <= 0) return;   // the pass's own result stands
+    if ((c.tdif <= tolerance && c.pass >= g_solver.minPass) || mem.depth <= 0) return;   // the pass's own result stands
     // One kelvin's worth of each variable, so that none dominates the fit for
     // its units alone.
     std::vector<double> sc(m, 1.0);
@@ -3690,10 +3704,10 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     outermemory mem;
     std::vector<double> steadiestStart;
     double steadiestMove = 1e99;
-    while ((c.pass < 3 || c.tdif > tolerance) && c.pass < maxIter) {
+    while ((c.pass < g_solver.minPass || c.tdif > tolerance) && c.pass < maxIter) {
         outerStep(onestepin, c, mem, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance,
             a0v, a1, dcan, C3);
-        if (c.pass >= 3 && c.tdif < steadiestMove) { steadiestMove = c.tdif; steadiestStart = mem.passStart; }
+        if (c.pass >= g_solver.minPass && c.tdif < steadiestMove) { steadiestMove = c.tdif; steadiestStart = mem.passStart; }
     }
     // An hour that has not settled within the passes allowed returns the pass
     // that moved the canopy air least, not whichever happened to come last:
@@ -5495,7 +5509,8 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
 // [[Rcpp::export]]
 List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii,
     std::vector<double> Lfrac, double zin, double zout, double lat, double lon, 
-    std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double CO2ppm = 430.0)
+    std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, double CO2ppm = 430.0,
+    int maxNrIterations = 100, double tolerance = 0.1)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5539,7 +5554,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
         climin.Rsw = Rsw[hr]; climin.Rdif = Rdif[hr]; climin.Rlw = Rlw[hr]; climin.uref = wspeed[hr];
         climin.winddir = wdir[hr]; climin.precip = precip[hr];
         onestepin = OneStepBelow(onestepin, obsdata, climin, vegpc, soilpc, z, tspveg, tspvegPAR, tspdif,
-            tspdifPAR, wgts, wc, CO2ppm, latr, lonr, zin, 100, OUTER_TOLERANCE);
+            tspdifPAR, wgts, wc, CO2ppm, latr, lonr, zin, maxNrIterations, tolerance);
         const double th = onestepin.tcanopy;
         temp_new[hr] = Tabove(zout, zin, th, temp[hr], vegpc.hgt, vegpc.pai, onestepin.LL, soilpc.z0, onestepin.fade);
         relhum_new[hr] = RHabove(zout, zin, onestepin.rhcanopy, th, temp[hr], temp_new[hr], relhum[hr], vegpc.hgt, vegpc.pai,
@@ -5613,6 +5628,8 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
     std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
     std::vector<int> witers(n, 0); // iterations of the soil water solve
+    std::vector<int> iters(n, 0); // passes the hour took
+    std::vector<double> error(n, 0.0); // how far its last pass still moved the air (K)
     // Create Numeric Matrices for above ground
     NumericMatrix tair(n, na);
     NumericMatrix rh(n, na);
@@ -5637,6 +5654,8 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         runoff[hr] = onestepin.runoff;
         drainage[hr] = onestepin.drainage;
         witers[hr] = onestepin.witers;
+        iters[hr] = onestepin.iters;
+        error[hr] = onestepin.error;
         FillMyMatrix(tair, onestepin.tair, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
         FillMyMatrix(uz, onestepin.uz, hr);
@@ -5657,7 +5676,10 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         // Surface runoff, drainage from the base, and the water solve's iterations
         Named("runoff") = Rcpp::wrap(runoff),
         Named("drainage") = Rcpp::wrap(drainage),
-        Named("witers") = Rcpp::wrap(witers)
+        Named("witers") = Rcpp::wrap(witers),
+        // Passes each hour took to settle, and the move of the last
+        Named("iters") = Rcpp::wrap(iters),
+        Named("error") = Rcpp::wrap(error)
     );
 }
 // Vegetated time x height matrices for the whole input time series and
@@ -5710,7 +5732,9 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
     std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
     std::vector<int> witers(n, 0); // iterations of the soil water solve
-    std::vector<double> tcanopy(n), rhcanopy(n); // air at canopy top, the upper boundary of the canopy air
+    std::vector<int> iters(n, 0); // passes the hour took
+    std::vector<double> error(n, 0.0); // how far its last pass still moved the air (K)
+    std::vector<double> tcanopy(n), rhcanopy(n), ucanopy(n); // air and wind at canopy top, the upper boundary of the canopy air
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
     NumericMatrix tsoil(n, nb);
@@ -5731,8 +5755,11 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         runoff[hr] = onestepin.runoff;
         drainage[hr] = onestepin.drainage;
         witers[hr] = onestepin.witers;
+        iters[hr] = onestepin.iters;
+        error[hr] = onestepin.error;
         tcanopy[hr] = onestepin.tcanopy;
         rhcanopy[hr] = onestepin.rhcanopy;
+        ucanopy[hr] = onestepin.ucanopy * onestepin.windscale;
         FillMyMatrix(Rdirdown, onestepin.Rdirdown, hr);
         FillMyMatrix(Rdifdown, onestepin.Rdifdown, hr);
         FillMyMatrix(Rswup, onestepin.Rswup, hr);
@@ -5767,13 +5794,17 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         // Air at canopy top
         Named("tcanopy") = Rcpp::wrap(tcanopy),
         Named("rhcanopy") = Rcpp::wrap(rhcanopy),
+        Named("ucanopy") = Rcpp::wrap(ucanopy),
         // Below ground temp and theta
         Named("tsoil") = Rcpp::wrap(tsoil),
         Named("theta") = Rcpp::wrap(theta),
         // Surface runoff, drainage from the base, and the water solve's iterations
         Named("runoff") = Rcpp::wrap(runoff),
         Named("drainage") = Rcpp::wrap(drainage),
-        Named("witers") = Rcpp::wrap(witers)
+        Named("witers") = Rcpp::wrap(witers),
+        // Passes each hour took to settle, and the move of the last
+        Named("iters") = Rcpp::wrap(iters),
+        Named("error") = Rcpp::wrap(error)
     );
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
