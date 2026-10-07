@@ -1925,29 +1925,48 @@ static double kMeanCpp(std::string meanType, double k1, double k2) {
 // Calculates soil thermal conductivity (W/m/K)
 // Calculates bulk soil thermal conductivity from mineral composition, porosity and water/ice content.
 // This makes heat transport respond to both soil texture and the evolving moisture/freezing state.
-static double thermalConductivityCpp(
-    double Vq, // Volumetric quartz fraction (m^3/m^3
-    double Vm, // Volumetric mineral fraction (m^3/m^3)
-    double Vo, // Volumetric organic fraction (m^3/m^3)
-    double Vw, // Volmetric water+ice fraction (m^3/m^3)
-    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
-    double Mc, // Mass fraction of clay (kg/kg
-    double Tc, // temperayure of air in air space
-    double pk) // pressure (kPa in air space
+// The part of a soil's thermal conductivity settled by what it is made of and
+// how much water it holds, which does not change while its temperature is being
+// found: the conductivity of its solids, the shape of its grains, its pore
+// space, and how far its water is connected enough to carry heat as vapour.
+struct soilConductivityFixed { double Vsolid, kSolid, Ga, Gc, porosity, gasPorosity, wf, wetShareSq; };
+static soilConductivityFixed soilConductivityFixedOf(double Vq, double Vm, double Vo, double Vw, double Mc)
 {
+    soilConductivityFixed f;
     // Calculate thermal conductivity of solids
     double Vsolid = Vq + Vm + Vo;
     // Quartz conducts heat much better than other minerals (~8.8 vs ~2.5
     // W/m/K); Vq and Vm must each be weighted by their own conductivity,
     // not swapped with each other.
-    double kSolid = std::pow(8.8, Vq / Vsolid) * std::pow(2.5, Vm / Vsolid) * std::pow(0.25, Vo / Vsolid);
+    f.kSolid = std::pow(8.8, Vq / Vsolid) * std::pow(2.5, Vm / Vsolid) * std::pow(0.25, Vo / Vsolid);
     // Calculate shape factor
-    double Ga = 0.088 * ((Vq + Vm) / Vsolid) + 0.5 * (Vo / Vsolid);
+    f.Ga = 0.088 * ((Vq + Vm) / Vsolid) + 0.5 * (Vo / Vsolid);
     double Q = 7.25 * Mc + 2.52;
     double xwo = 0.33 * Mc + 0.078;
     double porosity = 1.0 - Vsolid;
     double gasPorosity = porosity - Vw;
     if (gasPorosity < 0.0)  gasPorosity = 0.0;
+    if (Vw < 0.01 * xwo) {
+        f.wf = 0.0;
+    }
+    else {
+        f.wf = 1.0 / (1.0 + std::pow(Vw / xwo, -Q));
+    }
+    f.Gc = 1.0 - 2.0 * f.Ga;
+    f.Vsolid = Vsolid; f.porosity = porosity; f.gasPorosity = gasPorosity;
+    f.wetShareSq = pow(Vw / porosity, 2);
+    return f;
+}
+// Bulk thermal conductivity (W/m/K) of that soil at a given temperature and ice
+// content: water, ice, moist air and solids each conduct, weighted by how each
+// is arranged about the grains.
+static double thermalConductivityFrom(const soilConductivityFixed& f,
+    double Vw, // Volmetric water+ice fraction (m^3/m^3)
+    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
+    double Tc, // temperayure of air in air space
+    double pk) // pressure (kPa in air space
+{
+    const double Vsolid = f.Vsolid, kSolid = f.kSolid, Ga = f.Ga, Gc = f.Gc, gasPorosity = f.gasPorosity, wf = f.wf;
     double Tk = Tc + 273.15;
     double Lv = 45144.0 - 48.0 * Tc;
     double svp = 0.611 * std::exp(17.502 * Tc / (Tc + 240.97));
@@ -1962,16 +1981,8 @@ static double thermalConductivityCpp(
     // liquid (Vw_ice=0) reduces exactly to the original kWater.
     double kIce = 2.18 - 0.0068 * Tc;
     double kWaterPhase = (Vw > 1e-9) ? (kWater * (Vw - Vw_ice) + kIce * Vw_ice) / Vw : kWater;
-    double wf;
-    if (Vw < 0.01 * xwo) {
-        wf = 0.0;
-    }
-    else {
-        wf = 1.0 / (1.0 + std::pow(Vw / xwo, -Q));
-    }
     double kGas = 0.0242 + 0.00007 * Tc + wf * Lv * rhoAir * Dv * slope / (pk * stcor);
-    double Gc = 1.0 - 2.0 * Ga;
-    double kFluid = kGas + (kWaterPhase - kGas) * pow(Vw / porosity, 2);
+    double kFluid = kGas + (kWaterPhase - kGas) * f.wetShareSq;
     double ka = (2.0 / (1.0 + (kGas / kFluid - 1.0) * Ga) +
         1.0 / (1.0 + (kGas / kFluid - 1.0) * Gc)) / 3.0;
     double kw = (2.0 / (1.0 + (kWaterPhase / kFluid - 1.0) * Ga) +
@@ -1981,6 +1992,18 @@ static double thermalConductivityCpp(
     double out = (kw * kWaterPhase * Vw + ka * kGas * gasPorosity + ks * kSolid * Vsolid)
         / (kw * Vw + ka * gasPorosity + ks * Vsolid);
     return out;
+}
+static double thermalConductivityCpp(
+    double Vq, // Volumetric quartz fraction (m^3/m^3
+    double Vm, // Volumetric mineral fraction (m^3/m^3)
+    double Vo, // Volumetric organic fraction (m^3/m^3)
+    double Vw, // Volmetric water+ice fraction (m^3/m^3)
+    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
+    double Mc, // Mass fraction of clay (kg/kg
+    double Tc, // temperayure of air in air space
+    double pk) // pressure (kPa in air space
+{
+    return thermalConductivityFrom(soilConductivityFixedOf(Vq, Vm, Vo, Vw, Mc), Vw, Vw_ice, Tc, pk);
 }
 // Thomas algorithm: direct solve of a tridiagonal linear system (aa/bb/cc
 // sub/main/super-diagonals, dd right-hand side) between layers first..last.
@@ -2345,19 +2368,23 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     double restoringWarming = 0.0, restoringCooling = 0.0;
 
     // Conductivity of the soil at a node, given its temperature and so its ice.
+    std::vector<soilConductivityFixed> conductivityFixed(n + 1);
+    for (int i = 0; i <= n; ++i) conductivityFixed[i] = soilConductivityFixedOf(soilp.Vq[i], soilp.Vm[i], soilp.Vo[i], wc[i], soilp.Mc[i]);
     auto conductivityAt = [&](int i, double Ti) -> double {
         double ice = wc[i] - unfrozenTheta(soilp, wc[i], Ti, i);
         if (ice < 0.0) ice = 0.0;
-        return thermalConductivityCpp(soilp.Vq[i], soilp.Vm[i], soilp.Vo[i], wc[i], ice, soilp.Mc[i], Ti, atmPressure);
+        return thermalConductivityFrom(conductivityFixed[i], wc[i], ice, Ti, atmPressure);
     };
     // How far a trial profile is from closing every node's heat balance: the
     // heat gained since the start of the step less the heat conducted in, and
     // at the surface less the net heat from above (W/m2). Conductivity between
     // nodes follows the trial profile's own temperatures and ice.
-    auto heatImbalance = [&](const std::vector<double>& ht, const std::vector<double>& Tt, std::vector<double>& R, std::vector<double>& f) -> double {
+    auto heatImbalance = [&](const std::vector<double>& ht, const std::vector<double>& Tt, std::vector<double>& R, std::vector<double>& f,
+        std::vector<double>& conductivity) -> double {
         double lambda0 = 0.0, lambda1 = 0.0;
         for (int i = 0; i < n; ++i) {
             const double lambda = conductivityAt(i, Tt[i]);
+            conductivity[i] = lambda;
             if (i == 0) lambda0 = lambda;
             if (i == 1) lambda1 = lambda;
             f[i] = lambda / dz[i];
@@ -2376,7 +2403,8 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         return worst;
     };
 
-    double worst = heatImbalance(heat, T, imbalance, ff);
+    std::vector<double> lambdaNow(n + 1, 0.0), lambdaTrial(n + 1, 0.0);
+    double worst = heatImbalance(heat, T, imbalance, ff, lambdaNow);
     int nrIterations = 0;
     while (worst > tolerance && nrIterations < maxNrIterations) {
         // The change in heat contents that would close every balance if the
@@ -2410,7 +2438,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             }
             conductivityWarming[i] = 0.0; conductivityCooling[i] = 0.0;
             if (cooler < 0.0) {
-                const double lambda = conductivityAt(i, T[i]);
+                const double lambda = lambdaNow[i];
                 conductivityWarming[i] = (conductivityAt(i, warmer) - lambda) / probe;
                 conductivityCooling[i] = (lambda - conductivityAt(i, cooler)) / probe;
             }
@@ -2418,7 +2446,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         }
         // The conductance between the top two nodes depends on both of them,
         // through the mean of their conductivities.
-        const double lambda0 = conductivityAt(0, T[0]), lambda1 = conductivityAt(1, T[1]);
+        const double lambda0 = lambdaNow[0], lambda1 = lambdaNow[1];
         const double meanPerTop = (kMeanCpp("LOGARITHMIC", lambda0 * (1.0 + 1e-6), lambda1) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda0 * 1e-6);
         const double meanPerSecond = (kMeanCpp("LOGARITHMIC", lambda0, lambda1 * (1.0 + 1e-6)) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda1 * 1e-6);
         for (int round = 0; round < 4; ++round) {
@@ -2509,14 +2537,14 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             }
             reaching = -1;   // only the first trial, cut at that node's onset, places it there
             heatTrial[n] = heat[n]; Ttrial[n] = T[n];
-            worstTrial = heatImbalance(heatTrial, Ttrial, imbalanceTrial, ffTrial);
+            worstTrial = heatImbalance(heatTrial, Ttrial, imbalanceTrial, ffTrial, lambdaTrial);
             if (worstTrial < worst) break;
             share *= 0.5;
         }
         // A change that brings the profile no closer to balance at any size is
         // not taken, and the solve stops where it is.
         if (!(worstTrial < worst)) { nrIterations = maxNrIterations; break; }
-        heat = heatTrial; T = Ttrial; imbalance = imbalanceTrial; ff = ffTrial; worst = worstTrial;
+        heat = heatTrial; T = Ttrial; imbalance = imbalanceTrial; ff = ffTrial; lambdaNow = lambdaTrial; worst = worstTrial;
         ++nrIterations;
     }
     state.Te = T;
