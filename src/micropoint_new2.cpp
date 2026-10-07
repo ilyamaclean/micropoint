@@ -729,7 +729,7 @@ static double phihStar(double ze)
 // peak's L (the most stable case the profile can represent).
 // Maps a requested stable momentum correction back to an Obukhov length.
 // This is needed when the model caps the stable MOST correction: because the bounded correction is not one-to-one in L, the physically milder branch is selected and unattainable targets saturate at the peak.
-static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
+static double lStableFinalSearch(double psi_m, double zref, double d, double zm)
 {
     if (psi_m <= 1e-12) return std::numeric_limits<double>::infinity();
 
@@ -769,6 +769,19 @@ static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
         if (psiOfL(mid) > psi_m) lo = mid; else hi = mid;
     }
     return 0.5 * (lo + hi);
+}
+// The same, remembering its last answer. The length sought depends only on the
+// heights and the roughness, which stay as they are while an hour's wind and
+// stability are found, though the search is asked for at every step of that
+// iteration and takes several hundred evaluations of the stability function.
+static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
+{
+    static double lastPsi = -1.0, lastZref = -1.0, lastD = -1.0, lastZm = -1.0, lastL = 0.0;
+    if (psi_m != lastPsi || zref != lastZref || d != lastD || zm != lastZm) {
+        lastL = lStableFinalSearch(psi_m, zref, d, zm);
+        lastPsi = psi_m; lastZref = zref; lastD = d; lastZm = zm;
+    }
+    return lastL;
 }
 // Caps the stability correction psi_m(L) at a fraction (beta) of the
 // neutral log-law term ln((zref-d)/zm), on both the unstable (L<0) and
@@ -1071,8 +1084,6 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double uf_iter = uf;
     if (H != 0.0) {
         while (dif > 0.00000001) {
-            zm = roughlengthCpp2(hgt, pai, d, z0, fade);
-            zh = 0.2 * zm;
             {
                 const double ufL = guardedFrictionVelocity(uf_iter, ka / std::log((zref - d) / zm));
                 LL = (ph * cp * std::pow(ufL, 3.0) * Tk) / (-ka * g * H);
