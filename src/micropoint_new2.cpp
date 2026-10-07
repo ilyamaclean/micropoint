@@ -2894,7 +2894,7 @@ static std::vector<double> solveDense(std::vector<double> A, std::vector<double>
 static void LangrangianOne(onestep& onestepin, double pk, double tground, double soilrelhum,
     double th, double eh, const vegpstruct& vegp,
     const std::vector<double>& z, const windmodel& windvars,
-    double a0, double a1, double rTop, double z0)
+    double a0, double a1, double rTop, const aerocolumn& col, const std::vector<double>& Rz)
 {
     auto& tair = onestepin.tair;
     const auto& tleaf = onestepin.tleaf;
@@ -2922,12 +2922,10 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // far-field transport on which the formulation rests.
     const double uf_mix = mixingFrictionVelocity(windvars);
     const double dz = vegp.hgt / nnd;
-    // The same diffusivity column the ground's exchange uses, at the mixing
-    // friction velocity: canopy mixing, limited near the ground by the soil
-    // surface layer. Resistances between heights are then exact integrals of it.
-    const double dcan = zeroplanedisCpp2(vegp.hgt, vegp.pai);
-    const aerocolumn col = makeColumn(vegp.hgt, dcan, uf_mix, windvars.LL, a0, a1,
-        canopyEnhancement(vegp.hgt, vegp.pai, z0, windvars.fade), z0);
+    // The diffusivity column (col) is the one the ground's exchange uses, at the
+    // mixing friction velocity: canopy mixing, limited near the ground by the
+    // soil surface layer. Resistances between heights, among them that from the
+    // soil to each node (Rz), are exact integrals of it.
     // The range the vapour pressure of canopy air can occupy. Vapour enters
     // or leaves the air only at the ground, at the leaves and at canopy top,
     // and at each it moves towards what that surface holds: the vapour
@@ -2954,15 +2952,13 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // layer's sensible/latent heat source strength per unit ground area: the leaf
     // model gives sensible heat per unit foliage area, weighted here by the
     // layer's foliage, and latent heat already per unit ground area, as the
-    // layer's transpiration and evaporation of intercepted water. Rz is the
-    // resistance from the soil to each node.
-    std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn), Rz(nn);
+    // layer's transpiration and evaporation of intercepted water.
+    std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn);
     const double mu1 = (a1 + a0) * 0.5 * uf_mix;
     const double mu2 = (a1 - a0) * 0.5 * uf_mix;
     for (size_t i = 0; i < nn; ++i) {
         ow[i] = mu1 + mu2 * std::cos(pi * (1.0 - z[i] / vegp.hgt));
         inowTL[i] = ow[i] / columnK(col, z[i]);
-        Rz[i] = soilToZ(col, z[i]);
         ST[i] = vegp.paii[i] * onestepin.Hz[i];
         SL[i] = onestepin.Lz[i];
     }
@@ -3065,17 +3061,26 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         : (45068.7 - 42.8428 * tground);
     MP_LAP(10);
     std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
+    // Each node's air as the pass found it: vapour pressure, density, heat
+    // capacity, and the latent heat at its leaves' temperature.
+    std::vector<double> eAir(nn), phAir(nn), cpAir(nn), laLeaf(nn);
+    for (size_t i = 0; i < nn; ++i) {
+        eAir[i] = satvapCpp2(tair[i]) * rh[i] / 100.0;
+        phAir[i] = phairCpp(tair[i], pk);
+        cpAir[i] = cpairCpp(tair[i]);
+        laLeaf[i] = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
+            : (45068.7 - 42.8428 * tleaf[i]);
+    }
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
-        const double ph = phairCpp(tair[i], pk);
-        const double cp = cpairCpp(tair[i]);
-        const double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
-            : (45068.7 - 42.8428 * tleaf[i]);
+        const double ph = phAir[i];
+        const double cp = cpAir[i];
+        const double la_i = laLeaf[i];
         double sT = CfTh, sL = CfLh;
         for (size_t j = 0; j < nn; ++j) {
             const double w = W[i * nn + j];
             const double t0 = tair[j];
-            const double e0 = satvapCpp2(tair[j]) * rh[j] / 100.0;
+            const double e0 = eAir[j];
             const double wr = w + rTop;
             sT += w * ST[j] - wr * onestepin.dSTdT[j] * t0;
             sL += w * SL[j] - wr * onestepin.dSLde[j] * e0;
@@ -3100,14 +3105,13 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     onestepin.efar.assign(nn, 0.0); onestepin.enear.assign(nn, 0.0);
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
-        const double ph = phairCpp(tair[i], pk);
-        const double cp = cpairCpp(tair[i]);
-        const double la_i = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
-            : (45068.7 - 42.8428 * tleaf[i]);
+        const double ph = phAir[i];
+        const double cp = cpAir[i];
+        const double la_i = laLeaf[i];
         double tn = 0.0, tf = 0.0, en = 0.0, ef = 0.0;
         for (size_t j = 0; j < nn; ++j) {
             const double sTj = ST[j] + onestepin.dSTdT[j] * (tnew[j] - tair[j]);
-            const double sLj = SL[j] + onestepin.dSLde[j] * (enew[j] - satvapCpp2(tair[j]) * rh[j] / 100.0);
+            const double sLj = SL[j] + onestepin.dSLde[j] * (enew[j] - eAir[j]);
             const double wn = Wnear[i * nn + j], wf = W[i * nn + j] - wn;
             tn += wn * sTj; tf += wf * sTj; en += wn * sLj; ef += wf * sLj;
         }
@@ -3284,6 +3288,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     MP_LAP(14);
     const size_t na = onestepin.tair.size();
     std::vector<double> rz_zref(na); // resistance from each layer to zref
+    std::vector<double> rz_soil(na); // resistance from the soil to each layer
     std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // previous timestep's soil state, not touched by this pass's iteration
     onestepin.swaterdepth = swater0;
     radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, c.tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
@@ -3322,7 +3327,8 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     double rhg = col.Rh;             // soil surface to canopy top
     double rhz = rHa - rhg;          // canopy top to zref
     for (size_t i = 0; i < na; ++i) {
-        rz_zref[i] = rHa - soilToZ(col, z[i]);
+        rz_soil[i] = soilToZ(col, z[i]);
+        rz_zref[i] = rHa - rz_soil[i];
     }
     MP_LAP(4);
     plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, c.dTs, 3600.0, C3); // updates onestepin in place
@@ -3376,7 +3382,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     MP_LAP(8);
     std::vector<double> tair = onestepin.tair;
     LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
-        (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, soilpc.z0); // updates onestepin.tair/rh in place
+        (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, col, rz_soil); // updates onestepin.tair/rh in place
     MP_LAP(13);
     // Convergence is judged on canopy air: how far this pass's solution lies
     // from the air the pass started from.
