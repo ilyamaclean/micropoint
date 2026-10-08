@@ -1450,6 +1450,20 @@ static double wetFraction(double surfwater, double precip)
 // The air's side of a surface's energy balance, which is the same for every
 // surface standing in that air: the longwave a surface at air temperature would
 // emit, the air's heat capacity and density, and its vapour pressure deficit.
+// Latent heat taken up by water vapour leaving a surface at temperature Tc
+// (J/mol): that of vaporisation from liquid water above freezing and of
+// sublimation from ice below it. Water on a leaf, in a leaf and in soil does
+// not all freeze at 0 degC; it does so over the first degree or so below, and
+// the one latent heat passes into the other across that degree. A sudden
+// change at 0 degC would leave an energy balance with a step in it, and no
+// temperature at which it closes whenever the answer fell there.
+static inline double latentHeat(double Tc)
+{
+    const double vaporisation = 45068.7 - 42.8428 * Tc;
+    if (Tc >= 0.0) return vaporisation;
+    const double sublimation = 51078.69 - 4.338 * Tc - 0.06367 * Tc * Tc;
+    return vaporisation + std::min(1.0, -Tc) * (sublimation - vaporisation);
+}
 struct surfaceAir { double Ta, pk, Rema, cp, ph, Da; };
 static surfaceAir surfaceAirOf(double Ta, double pk, double rh, double em)
 {
@@ -1469,13 +1483,7 @@ static double PenmanMonteithCpp2(const surfaceAir& air, double Rabs, double em,
     for (int i = 0; i < iters; ++i) {
         double Te = (Ts + Ta) / 2.0;
         double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
-        double la;
-        if (Ts >= 0) {
-            la = 45068.7 - 42.8428 * Ts;
-        }
-        else {
-            la = 51078.69 - 4.338 * Ts - 0.06367 * Ts * Ts;
-        }
+        const double la = latentHeat(Ts);
         double De = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5);
         Ts = Ta + ((Rabs - Rema - ((la * ph) / (pk * rV)) * Da - G) /
             (Rer + ph * (cp / rHa + ((la * De) / (pk * rV)))));
@@ -1819,7 +1827,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
                 // pressure changes the load, since the surface would emit more at air
                 // temperature and the deficit grows, and changes the restoring
                 // strength, which is taken midway between surface and air.
-                const double latent = (ts >= 0) ? 45068.7 - 42.8428 * ts : 51078.69 - 4.338 * ts - 0.06367 * ts * ts;
+                const double latent = latentHeat(ts);
                 const double vapourPath = (latent * airNow.ph) / (airNow.pk * rV);
                 auto restoring = [&](double Tmid) {
                     return 4.0 * em2 * sb * std::pow(Tmid + 273.15, 3.0)
@@ -1904,8 +1912,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         // Response of the layer's sources to its own air, per unit ground area
         const double follow = vegp.Lfrac[i] * (sf * fsun + (1.0 - sf) * fshade) + (1.0 - vegp.Lfrac[i]) * fwood;
         const double gV = vegp.Lfrac[i] * (sf * gsun + (1.0 - sf) * gshade) + (1.0 - vegp.Lfrac[i]) * gwood;
-        const double la_leaf = (tleafn[i] >= 0.0) ? (45068.7 - 42.8428 * tleafn[i])
-            : (51078.69 - 4.338 * tleafn[i] - 0.06367 * tleafn[i] * tleafn[i]);
+        const double la_leaf = latentHeat(tleafn[i]);
         dSTdT[i] = vegp.paii[i] * ((ph * cp) / rH2) * (follow - 1.0);
         dSLde[i] = -vegp.paii[i] * la_leaf * gV * 1000.0 / (RgasC * Tk);
     }
@@ -1913,8 +1920,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     // Latent heat each layer releases into the canopy air, per unit ground
     // area: its transpiration and the intercepted water it evaporates.
     for (int i = 0; i < n; ++i) {
-        const double la = (tleafn[i] >= 0.0) ? (45068.7 - 42.8428 * tleafn[i])
-            : (51078.69 - 4.338 * tleafn[i] - 0.06367 * tleafn[i] * tleafn[i]);
+        const double la = latentHeat(tleafn[i]);
         Lz[i] = (la / Mw) * (Ezt[i] + vegp.paii[i] * Efilm[i]) / timestep;
     }
     // Transpiration drawn from the soil through the roots
@@ -1955,16 +1961,7 @@ static double groundLatentFlux(const soilpstruct& soilp, double Tsurface, double
     const double ph = phairCpp(Tref, pk);
     const double es = satvapCpp2(Tsurface) * soilrelhumCpp(soilp, Tsurface, theta);
     const double ea = satvapCpp2(Tref) * relhum / 100.0;
-    // Latent heat taken up by the vapour (J/mol): that of vaporisation from
-    // liquid water above freezing and of sublimation from ice below it. Soil
-    // water freezes progressively over the first degree or so below 0 degC, not
-    // all at once, so the one passes into the other across that degree. A
-    // sudden change at 0 degC would leave the surface balance with a step in
-    // it, and no temperature at which it closes whenever the answer fell there.
-    const double vaporisation = 45068.7 - 42.8428 * Tsurface;
-    const double sublimation = 51078.69 - 4.338 * Tsurface - 0.06367 * Tsurface * Tsurface;
-    const double frozen = std::min(1.0, std::max(0.0, -Tsurface));
-    const double la = vaporisation + frozen * (sublimation - vaporisation);
+    const double la = latentHeat(Tsurface);
     return ((la * ph) / (rHa * pk)) * (es - ea);
 }
 // Ground surface energy balance residual (net radiation minus sensible
@@ -3174,8 +3171,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // Far-field concentration at canopy top: the above-canopy air
     // temperature/vapour pressure expressed in the same flux-like units
     // (enthalpy/latent-heat-flux equivalent) as the source terms below.
-    double lah = (th < 0.0) ? (51078.69 - 4.338 * th - 0.06367 * th * th)
-        : (45068.7 - 42.8428 * th);
+    const double lah = latentHeat(th);
     const double phh = phairCpp(th, pk);
     const double CfTh = phh * cpairCpp(th) * th;
     const double CfLh = eh * phh * lah / pk;
@@ -3258,8 +3254,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // parallel, so a change in any layer's source moves it by that change times
     // rTop, and every node with it. Where the reference height is at canopy top
     // its air is fixed and rTop is zero.
-    const double la = (tground < 0.0) ? (51078.69 - 4.338 * tground - 0.06367 * tground * tground)
-        : (45068.7 - 42.8428 * tground);
+    const double la = latentHeat(tground);
     MP_LAP(10);
     std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
     // Each node's air as the pass found it: vapour pressure, density, heat
@@ -3269,8 +3264,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         eAir[i] = satvapCpp2(tair[i]) * rh[i] / 100.0;
         phAir[i] = phairCpp(tair[i], pk);
         cpAir[i] = cpairCpp(tair[i]);
-        laLeaf[i] = (tleaf[i] < 0.0) ? (51078.69 - 4.338 * tleaf[i] - 0.06367 * tleaf[i] * tleaf[i])
-            : (45068.7 - 42.8428 * tleaf[i]);
+        laLeaf[i] = latentHeat(tleaf[i]);
     }
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
@@ -3392,8 +3386,7 @@ static groundair airSeenByGround(const climstruct& climdata, const vegpstruct& v
     groundair out{};
     double Trise = 0.0, erise = 0.0, Tsrc = 0.0, esrc = 0.0;
     const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
-    const double lar = (climdata.tref >= 0.0) ? (45068.7 - 42.8428 * climdata.tref)
-        : (51078.69 - 4.338 * climdata.tref - 0.06367 * climdata.tref * climdata.tref);
+    const double lar = latentHeat(climdata.tref);
     for (size_t i = 0; i < rz_zref.size(); ++i) {
         const double SH = vegp.paii[i] * Hz[i], SL = Lz[i];
         out.Hfoliage += SH; out.Lfoliage += SL;
@@ -3450,13 +3443,7 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
         double ph = phairCpp(Th, climdata.pk);
         double cp = cpairCpp(Th);
         const double tg = tground + Tsrc;
-        double la;
-        if (tg >= 0) {
-            la = 45068.7 - 42.8428 * tg;
-        }
-        else {
-            la = 51078.69 - 4.338 * tg - 0.06367 * tg * tg;
-        }
+        const double la = latentHeat(tg);
         // The ground's heat and vapour reach canopy-top air through the soil
         // surface layer and the canopy air: rH_g is that resistance, soil to canopy top.
         // Canopy-top air sits between the reference air above and the ground
@@ -4030,7 +4017,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
         // Bare ground transpires nothing, so the depletion fraction is inert here.
-        soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, maxIter, SOIL_WATER_TOL);
+        soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, std::max(maxIter, INNER_ITERATIONS_LEAST), SOIL_WATER_TOL);
         onestepin.runoff = soilwater.surplus;
         onestepin.drainage = soilwater.drainage;
         onestepin.witers = soilwater.iterations;
@@ -4049,7 +4036,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     }
     double soilrh = soilrelhumCpp(soilpc, Ts, soilwater.swo.theta[0]);
     double eg = satvapCpp2(Ts) * soilrh;
-    double la = (Ts < 0.0) ? (51078.69 - 4.338 * Ts - 0.06367 * Ts * Ts) : (45068.7 - 42.8428 * Ts);
+    double la = latentHeat(Ts);
     onestepin.L = groundLatentFlux(soilpc, Ts, climdata.tref, climdata.relhum, climdata.pk, rHa,
         soilwater.swo.theta[0]);
     // One-shot, post-convergence height sweep: turns the converged
@@ -4327,7 +4314,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         soilheat.Gflux = G;
         double Te = (tcanopy + climdata.tref) / 2.0;
         double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
-        double la = (tcanopy >= 0.0) ? (45068.7 - 42.8428 * tcanopy) : (51078.69 - 4.338 * tcanopy - 0.06367 * tcanopy * tcanopy);
+        double la = latentHeat(tcanopy);
         double De = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5);
         double oldtcanopy = tcanopy;
         tcanopy = climdata.tref + ((Rabs - Rema - ((la * ph) / (climdata.pk * rV)) * Da - G) /
