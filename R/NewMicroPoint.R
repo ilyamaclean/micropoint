@@ -712,21 +712,17 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'
 #' \tabular{llll}{
 #'   \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
-#'   very high \tab under 0.1 K (usually 0.01 to 0.02) \tab under 1 K, usually under 0.5 \tab 9 to 24 s \cr
-#'   high \tab under 0.4 K (usually 0.1 to 0.2) \tab 1 to 2 K, at most 3 \tab 7 to 12 s \cr
-#'   moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s \cr
-#'   fast \tab under 1.5 K (usually 0.3 to 0.5) \tab 3 to 6 K \tab 1.6 to 4 s
+#'   very high \tab under 0.05 K (usually under 0.01) \tab under 1.5 K, usually under 0.5 \tab 9 to 25 s \cr
+#'   high \tab under 0.4 K (usually 0.1) \tab 1 to 2.5 K \tab 6 to 12 s \cr
+#'   moderate \tab under 0.9 K (usually 0.2) \tab 2 to 4 K \tab 2 to 5 s \cr
+#'   fast \tab under 1.1 K (usually 0.3) \tab 2.5 to 5.5 K \tab 1.6 to 4 s
 #' }
 #'
 #' The larger figures of each range are for still, humid weather, in which the
-#' model settles least readily and its answer is least well defined: there even
-#' `"very high"` differs from the tightly solved model by up to 3 K in a few
-#' hours of a year. At `"moderate"` a run with more than ten canopy layers is
-#' made on ten, and at `"fast"`, which is meant for runs over many grid cells,
-#' on five; results are returned at the height asked for. In a very dense,
-#' tall forest in still weather `"moderate"` and `"fast"` are coarser than the
-#' table says, by a degree or two on average. Bare
-#' ground takes about a second at every level. Weather measured too close to
+#' model settles least readily. At `"moderate"` a run with more than ten canopy
+#' layers is made on ten, and at `"fast"`, which is meant for runs over many
+#' grid cells, on five; results are returned at the height asked for. Bare
+#' ground takes one to two seconds at every level. Weather measured too close to
 #' the canopy is translated to the height the model needs at the same level.
 #'
 #' If some hours do not settle within the passes the level allows, one warning
