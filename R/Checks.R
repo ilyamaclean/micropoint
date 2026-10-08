@@ -119,6 +119,13 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
     if (vegp$root95 <= vegp$root50) stop("vegp$root95 must exceed vegp$root50")
     if (!(length(paii) == 1 && is.na(paii[1]))) {
       if (any(paii < 0)) stop("paii cannot be negative")
+      # Plant area includes the stems and branches that hold foliage up, so every
+      # layer of a real canopy holds some. A layer with none above foliage means
+      # the canopy height is above the vegetation; one below foliage means a
+      # crown with nothing beneath it.
+      if (any(paii == 0))
+        stop("paii must be greater than zero in every canopy layer: plant area includes the stems, ",
+             "so an empty layer means either a canopy height above the vegetation or foliage with nothing holding it up")
       if (abs(sum(paii) - vegp$pai) > 0.01 * max(vegp$pai, 1e-6))
         warning("sum(paii) differs from vegp$pai")
     }
