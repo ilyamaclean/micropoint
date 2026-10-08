@@ -2147,15 +2147,20 @@ static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
 // water content does not: a parched surface layer holding a tenth of the roots
 // would close the stomata of a plant standing in moist soil. The retention
 // curve is that of the shallowest rooted layer.
+static double unfrozenTheta(const soilpstruct& soilp, double theta, double Tc, int i);
 static double rootZonePotential(const soilpstruct& soilp, const std::vector<double>& theta,
-    const std::vector<double>& rootfrac)
+    const std::vector<double>& rootfrac, const std::vector<double>& Tc)
 {
     double sum = 0.0, wgt = 0.0;
     int first = -1;
     for (size_t i = 0; i < rootfrac.size() && i < theta.size(); ++i) {
         if (rootfrac[i] <= 0.0) continue;
         if (first < 0) first = static_cast<int>(i);
-        sum += rootfrac[i] * theta[i];
+        // Roots meet only the water that is liquid: in a layer holding ice,
+        // what its temperature leaves unfrozen.
+        const double liquid = (i < Tc.size() && Tc[i] < 0.0)
+            ? std::min(theta[i], unfrozenTheta(soilp, theta[i], Tc[i], static_cast<int>(i))) : theta[i];
+        sum += rootfrac[i] * liquid;
         wgt += rootfrac[i];
     }
     if (first < 0) return waterPotential(soilp, theta[0], 0);
@@ -2745,9 +2750,15 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             dEvap_dpsi = ((Evprobe - Evapmmhr) / hp) / dT;
             if (!(dEvap_dpsi > 0.0)) dEvap_dpsi = 0.0;
         }
-        // Transpiration outside Newton update, but based on current state
+        // Transpiration outside Newton update, but based on current state.
+        // Roots draw on a layer by the potential of its liquid water, which
+        // where the layer holds ice is the one its temperature sets, so a
+        // frozen layer gives up little and a hard-frozen one nothing.
+        std::vector<double> psiRoot = psiw;
+        for (size_t i = 0; i < psiRoot.size() && i < soilmod.Tc.size(); ++i)
+            if (soilmod.Tc[i] < 0.0) psiRoot[i] = std::min(psiw[i], 334000.0 * soilmod.Tc[i] / 273.15);
         std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
-            climdata.Et, dT, psiw, pTAW);
+            climdata.Et, dT, psiRoot, pTAW);
 
         // Hydraulic properties
         for (int i = 0; i < n; ++i) {
@@ -3672,7 +3683,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         double dif = std::abs(tair[i] - onestepin.tair[i]);
         if (dif > c.tdif) c.tdif = dif;
     }
-    c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac) / 1000.0; // J/kg -> MPa
+    c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac, soilwater.swo.Tc) / 1000.0; // J/kg -> MPa
     onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
     ++c.pass;
     MP_LAP(8); MP_COUNT(15);
@@ -3837,7 +3848,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     c.Th = onestepin.tcanopy;
     c.eh = satvapCpp2(c.Th) * (onestepin.rhcanopy / 100.0);
     // root-zone water potential, J/kg -> MPa
-    c.psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac) / 1000.0;
+    c.psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac, onestepin.soilwatervars.Tc) / 1000.0;
     c.dTs.assign(na, 0.0);
     // Sensible heat feeds the wind model and the ground heat flux the soil
     // surface balance; both start from the values the last hour left.
@@ -4289,7 +4300,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL, soilp.z0) + rGz - col.Rh;
         // Bulk surface stomatal resistance, from the water potential of the
         // whole root zone, as in the multilayer model.
-        const double psiw = rootZonePotential(soilp, soilwater.swo.theta, soilwater.swo.rootfrac);
+        const double psiw = rootZonePotential(soilp, soilwater.swo.theta, soilwater.swo.rootfrac, soilwater.swo.Tc);
         double rS = bulkstomatalresist(climdata.tref, tcanopy, climdata.relhum, climdata.pk, psiw,
             Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
         rS = std::min(rS, 1e10);
@@ -6310,7 +6321,7 @@ static outercarry diagStartCarry(const diagcontext& ctx, const onestep& s)
     c.tground = s.soilheatvars.Te[0];
     c.Th = s.tcanopy;
     c.eh = satvapCpp2(c.Th) * (s.rhcanopy / 100.0);
-    c.psir = rootZonePotential(ctx.soilp, s.soilwatervars.theta, s.soilwatervars.rootfrac) / 1000.0;
+    c.psir = rootZonePotential(ctx.soilp, s.soilwatervars.theta, s.soilwatervars.rootfrac, s.soilwatervars.Tc) / 1000.0;
     c.dTs.assign(s.tair.size(), 0.0);
     c.H_iter = s.H;
     c.G_iter = s.soilheatvars.Gflux;
