@@ -472,10 +472,19 @@ static LWweights lwradweights(const std::vector<double>& paii) {
     // for the exponential-attenuation approximation's discretisation error.
     std::vector<double> wsum(n);
     for (int i = 0; i < n; ++i) wsum[i] = wgt[i] + trh[i] + trg[i];
+    // A layer that sees no other foliage, because it holds all there is, has
+    // only the sky and the ground to look at, and it is those two views that
+    // are rescaled to sum to 2.
     std::vector<double> mu(n);
     for (int i = 0; i < n; ++i) {
         double mu1 = wsum[i] / 2.0;
-        mu[i] = 1.0 + (2.0 - 2.0 * mu1) / wgt[i];
+        if (wgt[i] > 0.0) mu[i] = 1.0 + (2.0 - 2.0 * mu1) / wgt[i];
+        else {
+            mu[i] = 1.0;
+            const double open = trh[i] + trg[i];
+            trh[i] *= 2.0 / open;
+            trg[i] *= 2.0 / open;
+        }
     }
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) wgts(i, j) = wgts(i, j) * mu[i];
@@ -484,7 +493,7 @@ static LWweights lwradweights(const std::vector<double>& paii) {
     // one-sided: weights plus transmission to sky should sum to 1.
     std::vector<double> wgtg(n);
     for (int i = 0; i < n; ++i) {
-        wgtg[i] = trg[i] * paii[i];
+        wgtg[i] = std::exp(-paib[i]) * paii[i];
     }
     double gwsum = 0.0;
     for (int i = 0; i < n; ++i) gwsum += wgtg[i];
