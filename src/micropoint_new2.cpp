@@ -87,11 +87,27 @@ constexpr double OUTER_TOLERANCE = 0.1;
 //   inside every pass are closed, the soil's heat as a multiple of its usual
 //   closure and canopy-top air in K. Both are ordinarily closed far more
 //   closely than the hour, so that their stopping points do not show in it.
-struct solversettings { int minPass = 3; int leafSteps = 4; double soilHeatLoosening = 1.0; double topTolerance = 1e-8; };
+//   nearLocal: the near field kept only for a layer's own foliage and the
+//   layer either side. The kernel reaches about one layer of ten, so these
+//   carry nearly all of it.
+//   leafClosed: how a leaf follows its air read from the balance just solved,
+//   not found by solving it again in warmer air.
+//   groundRow: whether the ground's surface temperature is found together
+//   with the canopy air (see groundfollow), and if so whether the soil is
+//   then solved again (1) or only its surface node moved (2).
+struct solversettings { int minPass = 3; int leafSteps = 4; double soilHeatLoosening = 1.0; double topTolerance = 1e-8; int groundRow = 0;
+    bool nearLocal = false; bool leafClosed = false; };
+// The solves inside a pass (wind and stability, soil water, canopy-top air)
+// are allowed at least this many iterations however few passes the hour is.
+constexpr int INNER_ITERATIONS_LEAST = 50;
+
 static solversettings g_solver;
 // [[Rcpp::export]]
-void SolverSettingsCpp(int minpass = 3, int leafsteps = 4, double soilheatloosening = 1.0, double toptolerance = 1e-8)
+void SolverSettingsCpp(int minpass = 3, int leafsteps = 4, double soilheatloosening = 1.0, double toptolerance = 1e-8, int groundrow = 0,
+    bool nearlocal = false, bool leafclosed = false)
 {
+    g_solver.groundRow = groundrow;
+    g_solver.nearLocal = nearlocal; g_solver.leafClosed = leafclosed;
     g_solver.minPass = std::max(1, minpass);
     g_solver.leafSteps = std::max(1, leafsteps);
     g_solver.soilHeatLoosening = std::max(1.0, soilheatloosening);
@@ -1765,6 +1781,10 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double rh_warm = 100.0 * eair / satvapCpp2(onestepin.tair[i] + dTa);
         const surfaceAir airNow = surfaceAirOf(onestepin.tair[i], envdata.pk, onestepin.rh[i], em2);
         const surfaceAir airWarm = surfaceAirOf(onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2);
+        // per degree of air, at fixed vapour pressure: longwave a surface at air
+        // temperature would emit, and the air's vapour pressure deficit
+        const double emitSlope = (airWarm.Rema - airNow.Rema) / dTa;
+        const double deficitSlope = (airWarm.Da - airNow.Da) / dTa;
         auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et,
             double& follow, double& gused) {
             const double g = gt + gwet;
@@ -1787,9 +1807,30 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
                 Et = 0.0;
                 gused = 1.0 / rH2;
             }
-            const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
-            MP_TALLY(2);
-            follow = (tsw - ts) / dTa;
+            if (!g_solver.leafClosed) {
+                const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
+                MP_TALLY(2);
+                follow = (tsw - ts) / dTa;
+            }
+            else {
+                // The surface stands above or below its air by the load on it over
+                // its restoring strength: the heat it sheds per degree by radiation,
+                // convection and evaporation together. Warmer air of the same vapour
+                // pressure changes the load, since the surface would emit more at air
+                // temperature and the deficit grows, and changes the restoring
+                // strength, which is taken midway between surface and air.
+                const double latent = (ts >= 0) ? 45068.7 - 42.8428 * ts : 51078.69 - 4.338 * ts - 0.06367 * ts * ts;
+                const double vapourPath = (latent * airNow.ph) / (airNow.pk * rV);
+                auto restoring = [&](double Tmid) {
+                    return 4.0 * em2 * sb * std::pow(Tmid + 273.15, 3.0)
+                        + airNow.ph * airNow.cp / rH2 + vapourPath * (satvapCpp2(Tmid + 0.5) - satvapCpp2(Tmid - 0.5));
+                };
+                const double Tmid = 0.5 * (ts + airNow.Ta);
+                const double strength = restoring(Tmid);
+                const double loadSlope = -emitSlope - vapourPath * deficitSlope;
+                const double lean = (ts - airNow.Ta) * ((restoring(Tmid + 0.25) - strength) / 0.25) / (2.0 * strength);
+                follow = (1.0 + loadSlope / strength - lean) / (1.0 + lean);
+            }
         };
         // Stomatal conductance responds to the light each leaf class absorbs.
         // Where the stomata are closed, in the dark or because the soil
@@ -3015,10 +3056,29 @@ static std::vector<double> solveDense(std::vector<double> A, std::vector<double>
 // coupled system to convergence.
 // Translates distributed canopy/ground heat and moisture sources into vertical air temperature and humidity profiles.
 // The Lagrangian dispersion kernel represents turbulent transport within the canopy; the resulting profiles provide the atmospheric state seen by leaves and the soil at the next coupling iteration.
+// How the ground's surface temperature follows the canopy air within the
+// dispersion solve. The ground exchanges heat with the air the foliage's
+// sources leave beneath them, and those sources change as the air the leaves
+// stand in is solved; held fixed while that is done, the ground is a pass
+// behind the air it answers to. Its surface balance says how far it moves per
+// degree that air warms: the share of everything restoring the surface
+// (emission, evaporation, exchange with the air, and the heat the soil takes
+// up over the step) that the exchange with the air makes up. With that the
+// ground enters the solve as a quantity that moves with every layer's air,
+// and canopy-top air, which lies between the ground and the reference air,
+// moves with it.
+struct groundfollow {
+    double share = 0.0;      // ground's change per degree change in the air it exchanges with
+    double rToRef = 0.0;     // resistance from the soil surface to the reference height (s/m)
+    double topShare = 0.0;   // canopy-top air's change per degree change in the ground
+    double rhocp = 1.0;      // volumetric heat capacity of the reference air (J m-3 K-1)
+    double moved = 0.0;      // set by the solve: how far the ground moved (K)
+};
 static void LangrangianOne(onestep& onestepin, double pk, double tground, double soilrelhum,
     double th, double eh, const vegpstruct& vegp,
     const std::vector<double>& z, const windmodel& windvars,
-    double a0, double a1, double rTop, const aerocolumn& col, const std::vector<double>& Rz)
+    double a0, double a1, double rTop, const aerocolumn& col, const std::vector<double>& Rz,
+    groundfollow* ground = nullptr)
 {
     auto& tair = onestepin.tair;
     const auto& tleaf = onestepin.tleaf;
@@ -3089,8 +3149,11 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // Near-field weight of each layer's source at canopy top, the upper boundary
     // of the canopy air. The solve works with each node's departure from
     // canopy-top air, so this is taken from every layer's weight at each node.
-    std::vector<double> cTop(nn);
+    std::vector<double> cTop(nn, 0.0);
+    // source layers kept either side of a node
+    const size_t band = g_solver.nearLocal ? 1 : nn;
     for (size_t j = 0; j < (nn - 1); ++j) {
+        if (nn - 1 - j > band) continue;
         // Each source reaches the observation height by two paths: directly,
         // and reflected at the ground, which imposes the no-flux condition
         // there. Each path is attenuated by the kernel over its own distance.
@@ -3155,8 +3218,9 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     for (size_t i = 0; i < nn; ++i) {
         const double Rup = col.Rh - Rz[i];
         for (size_t j = 0; j < nn; ++j) {
-            double nf;
-            if (i != j) {
+            double nf = 0.0;
+            if (i != j && ((i > j) ? i - j : j - i) > band) {}
+            else if (i != j) {
                 const size_t apart = (i > j) ? i - j : j - i;
                 const double direct = decay[j * npow + apart], reflected = decay[j * npow + i + j + 1];
                 nf = (KN_C1 * std::log((1.0 - direct) * (1.0 - reflected)) + KN_C2 * (direct + reflected)) / ow[j];
@@ -3229,8 +3293,32 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         bT[i] = Rz[i] * sT + ph * cp * Rup * tground;
         bL[i] = pk * Rz[i] * sL + la * ph * Rup * esg;
     }
+    // The ground following the air: each layer's air, through the change it
+    // makes to that layer's source, warms the air the ground exchanges with by
+    // the change in source times the resistance from the layer to the
+    // reference height, and the ground takes its share of that. The ground's
+    // change reaches each node across the resistance above the node, and
+    // through canopy-top air across the resistance below it.
+    std::vector<double> groundPerAir;
+    if (ground != nullptr) {
+        groundPerAir.assign(nn, 0.0);
+        double atStart = 0.0;
+        for (size_t j = 0; j < nn; ++j) {
+            groundPerAir[j] = (ground->share / ground->rhocp) * (ground->rToRef - Rz[j]) * onestepin.dSTdT[j];
+            atStart += groundPerAir[j] * tair[j];
+        }
+        for (size_t i = 0; i < nn; ++i) {
+            const double reach = phAir[i] * cpAir[i] * ((col.Rh - Rz[i]) + Rz[i] * ground->topShare);
+            for (size_t j = 0; j < nn; ++j) AT[i * nn + j] -= reach * groundPerAir[j];
+            bT[i] -= reach * atStart;
+        }
+    }
     MP_LAP(11);
     const std::vector<double> tnew = solveDense(AT, bT, nn);
+    if (ground != nullptr) {
+        ground->moved = 0.0;
+        for (size_t j = 0; j < nn; ++j) ground->moved += groundPerAir[j] * (tnew[j] - tair[j]);
+    }
     const std::vector<double> enew = solveDense(AL, bL, nn);
     MP_LAP(12);
     // How much of each node's departure from canopy-top air the foliage accounts
@@ -3425,6 +3513,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     double Ca, double zref, int maxIter, double tolerance, double a0v, double a1, double dcan, bool C3)
 {
     MP_LAP(14);
+    const int innerIter = std::max(maxIter, INNER_ITERATIONS_LEAST);
     const size_t na = onestepin.tair.size();
     std::vector<double> rz_zref(na); // resistance from each layer to zref
     std::vector<double> rz_soil(na); // resistance from the soil to each layer
@@ -3434,7 +3523,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.Rlwdown = lwrad.Rlwdown;
     onestepin.Rlwup = lwrad.Rlwup;
     MP_LAP(2);
-    windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, maxIter, a1,
+    windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, innerIter, a1,
         onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
     onestepin.uz = wind.uz;
     onestepin.ucanopy = wind.uh;
@@ -3484,7 +3573,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     cfw.precip = onestepin.precipground; cfw.Et = onestepin.Et;
     onestepin.soilwatervars.oldTc = soilheat.oldTe;
     onestepin.soilwatervars.Tc = soilheat.Te;
-    soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, maxIter, SOIL_WATER_TOL);
+    soilwaterout soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, vegpc.pTAW, innerIter, SOIL_WATER_TOL);
     MP_LAP(7);
     MP_TALLY(9); MP_TALLYN(10, soilwater.iterations);
     onestepin.witers = soilwater.iterations;
@@ -3513,7 +3602,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         climdata.pk, ga.R, soilwater.swo.theta[0]);
     if (zref > vegpc.hgt) {
         cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, c.Th, c.eh, c.tground, soilrh,
-            rhg, rhz, ga.Ttop, ga.etop, maxIter);
+            rhg, rhz, ga.Ttop, ga.etop, innerIter);
         c.Th = Theh.Th;
         c.eh = Theh.eh;
     }
@@ -3523,8 +3612,71 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     }
     MP_LAP(8);
     std::vector<double> tair = onestepin.tair;
+    groundfollow follower;
+    const bool groundFollows = (g_solver.groundRow > 0);
+    std::vector<double> eBefore;
+    if (groundFollows) {
+        // The surface's restoring strength (W m-2 K-1): the slope of its balance
+        // with its own temperature, and what the soil beneath takes up per
+        // degree over the step, which for a step of this length is set by the
+        // conductivity and heat capacity of the soil at the surface, its
+        // capacity counting any water freezing or thawing there.
+        const double theta0 = soilwater.swo.theta[0];
+        const double balanceSlope = (soilsurfaceEB(soilpc, Rabs, ga.T, c.tground - 0.05, climdata.pk, ga.relhum, ga.R, theta0)
+            - soilsurfaceEB(soilpc, Rabs, ga.T, c.tground + 0.05, climdata.pk, ga.relhum, ga.R, theta0)) / 0.1;
+        const double heatNow = soilHeatContent(soilpc, theta0, c.tground, 0);
+        const double span = soilTemperatureFromHeat(soilpc, theta0, heatNow + 100.0, 0) - soilTemperatureFromHeat(soilpc, theta0, heatNow - 100.0, 0);
+        const double capacity = (span > 0.0) ? 200.0 / span : 1e12;
+        double ice = theta0 - unfrozenTheta(soilpc, theta0, c.tground, 0);
+        if (ice < 0.0) ice = 0.0;
+        const double conductivity = thermalConductivityFrom(soilConductivityFixedOf(soilpc.Vq[0], soilpc.Vm[0], soilpc.Vo[0], theta0, soilpc.Mc[0]),
+            theta0, ice, c.tground, climdata.pk);
+        const double soilUptake = std::sqrt(conductivity * capacity / 3600.0);
+        follower.rhocp = phairCpp(climdata.tref, climdata.pk) * cpairCpp(climdata.tref);
+        const double toAir = follower.rhocp / ga.R;
+        follower.share = toAir / std::max(balanceSlope + soilUptake, toAir);
+        follower.rToRef = rHa;
+        follower.topShare = (zref > vegpc.hgt) ? (rhz / rhg) / (1.0 + rhz / rhg) : 0.0;
+        eBefore.resize(na);
+        for (size_t i = 0; i < na; ++i) eBefore[i] = satvapCpp2(onestepin.tair[i]) * onestepin.rh[i] / 100.0;
+    }
     LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
-        (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, col, rz_soil); // updates onestepin.tair/rh in place
+        (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, col, rz_soil, groundFollows ? &follower : nullptr); // updates onestepin.tair/rh in place
+    if (groundFollows) {
+        // Leaves and their sources as the solved air leaves them: each layer's
+        // sources by their response to its air, and its foliage by how far it
+        // follows that air.
+        for (size_t i = 0; i < na; ++i) {
+            if (!(vegpc.paii[i] > 0.0)) continue;
+            const double dT = onestepin.tair[i] - tair[i];
+            const double de = satvapCpp2(onestepin.tair[i]) * onestepin.rh[i] / 100.0 - eBefore[i];
+            const double perLeaf = onestepin.dSTdT[i] / vegpc.paii[i];
+            onestepin.Hz[i] += perLeaf * dT;
+            onestepin.Lz[i] += onestepin.dSLde[i] * de;
+            const double toLeaf = phairCpp(tair[i], climdata.pk) * cpairCpp(tair[i]) / (0.5 * onestepin.rLB[i]);
+            onestepin.tleaf[i] += (1.0 + perLeaf / toLeaf) * dT;
+        }
+        // The ground against the air those sources leave beneath them.
+        const groundair gaNow = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
+        const double theta0 = soilwater.swo.theta[0];
+        if (g_solver.groundRow == 1) {
+            onestepin.soilheatvars.oldTe = oldTe_fixed;
+            soilmod again = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, gaNow.T, gaNow.relhum, climdata.pk, gaNow.R, 3600);
+            MP_TALLY(7); MP_TALLYN(8, again.iters);
+            again.wc = soilwater.swo.theta;
+            c.tground = again.Te[0];
+            onestepin.soilheatvars = again;
+        }
+        else {
+            c.tground += follower.moved;
+            onestepin.soilheatvars.Te[0] = c.tground;
+        }
+        c.G_iter = soilsurfaceEB(soilpc, Rabs, gaNow.T, c.tground, climdata.pk, gaNow.relhum, gaNow.R, theta0);
+        onestepin.soilheatvars.Gflux = c.G_iter;
+        onestepin.H = gaNow.Hfoliage + (follower.rhocp / gaNow.R) * (c.tground - gaNow.T);
+        c.H_iter = onestepin.H;
+        onestepin.L = gaNow.Lfoliage + groundLatentFlux(soilpc, c.tground, gaNow.T, gaNow.relhum, climdata.pk, gaNow.R, theta0);
+    }
     MP_LAP(13);
     // Convergence is judged on canopy air: how far this pass's solution lies
     // from the air the pass started from.

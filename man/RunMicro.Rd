@@ -78,7 +78,7 @@ supplying it overrides that.}
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
 \item{accuracy}{Character. How closely the model is solved, and so how long
-it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details.}
+it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details.}
 }
 \value{
 A data.frame containing model outputs for each time step.
@@ -141,14 +141,18 @@ with twenty canopy layers.
   \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
   very high \tab under 0.1 K (usually 0.01 to 0.02) \tab under 1 K, usually under 0.5 \tab 9 to 24 s \cr
   high \tab under 0.4 K (usually 0.1 to 0.2) \tab 1 to 2 K, at most 3 \tab 7 to 12 s \cr
-  moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s
+  moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s \cr
+  fast \tab under 1.5 K (usually 0.3 to 0.5) \tab 3 to 6 K \tab 1.6 to 4 s
 }
 
 The larger figures of each range are for still, humid weather, in which the
 model settles least readily and its answer is least well defined: there even
 `"very high"` differs from the tightly solved model by up to 3 K in a few
 hours of a year. At `"moderate"` a run with more than ten canopy layers is
-made on ten and its results are returned at the height asked for. Bare
+made on ten, and at `"fast"`, which is meant for runs over many grid cells,
+on five; results are returned at the height asked for. In a very dense,
+tall forest in still weather `"moderate"` and `"fast"` are coarser than the
+table says, by a degree or two on average. Bare
 ground takes about a second at every level. Weather measured too close to
 the canopy is translated to the height the model needs at the same level.
 

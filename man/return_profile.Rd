@@ -82,7 +82,7 @@ moves air temperature by less than this (K). By default set by `accuracy`.}
 or `"radiation"`.}
 
 \item{accuracy}{Character. How closely the model is solved: `"high"` (the
-default), `"very high"` or `"moderate"`. See Details of [RunMicro()]. The
+default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()]. The
 hour returned is always solved on the canopy layers given.}
 }
 \value{

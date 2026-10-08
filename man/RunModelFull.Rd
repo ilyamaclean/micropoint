@@ -74,7 +74,7 @@ moves air temperature by less than this (K). By default set by `accuracy`.}
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
 \item{accuracy}{Character. How closely the model is solved, and so how long
-it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details
+it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details
 of [RunMicro()]. Profiles are returned on the layers given whatever the level.}
 }
 \value{

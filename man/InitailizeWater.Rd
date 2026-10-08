@@ -56,8 +56,8 @@ within each time step.}
 a single value or as a vector giving the fraction in each canopy layer.
 Required unless `vegp` is `NA`.}
 
-\item{accuracy}{Character. `"high"` (the default), `"very high"` or
-`"moderate"`: the accuracy at which weather measured too close to the
+\item{accuracy}{Character. `"high"` (the default), `"very high"`,
+`"moderate"` or `"fast"`: the accuracy at which weather measured too close to the
 canopy is translated up to the height the model needs (see Details of
 [RunMicro()]). The spin-up itself is a quick, simplified run and is the
 same at every level.}

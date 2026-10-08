@@ -46,7 +46,7 @@ If `NA`, it is estimated from the year of the first observation using [Cafromyea
 estimated from `climdata$temp`.}
 
 \item{accuracy}{Character. How closely the model is solved: `"high"` (the
-default), `"very high"` or `"moderate"`. See Details of [RunMicro()].}
+default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()].}
 
 \item{maxiter}{Optional integer. The most passes an hour may take. By default
 set by `accuracy`.}

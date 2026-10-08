@@ -209,7 +209,7 @@ Cafromyear <- function(year) {
 #' (°C) used to initialise the soil temperature profile. If `NA`, it is
 #' estimated from `climdata$temp`.
 #' @param accuracy Character. How closely the model is solved: `"high"` (the
-#'   default), `"very high"` or `"moderate"`. See Details of [RunMicro()].
+#'   default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()].
 #' @param maxiter Optional integer. The most passes an hour may take. By default
 #'   set by `accuracy`.
 #' @param tolerance Optional numeric. The iteration of an hour stops when a pass
@@ -362,8 +362,8 @@ asbareifshort <- function(vegp, zm = 0.004) {
 #' @param maxiter Integer. Maximum number of iterations used to achieve convergence
 #'   within each time step.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
-#' @param accuracy Character. `"high"` (the default), `"very high"` or
-#'   `"moderate"`: the accuracy at which weather measured too close to the
+#' @param accuracy Character. `"high"` (the default), `"very high"`,
+#'   `"moderate"` or `"fast"`: the accuracy at which weather measured too close to the
 #'   canopy is translated up to the height the model needs (see Details of
 #'   [RunMicro()]). The spin-up itself is a quick, simplified run and is the
 #'   same at every level.
@@ -454,7 +454,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param plotout Logical. If `TRUE`, plot the requested profile.
 #' @param accuracy Character. How closely the model is solved: `"high"` (the
-#'   default), `"very high"` or `"moderate"`. See Details of [RunMicro()]. The
+#'   default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()]. The
 #'   hour returned is always solved on the canopy layers given.
 #' @param varn Character. Variable to plot. One of `"temp"`, `"relhum"`,
 #'   or `"radiation"`.
@@ -697,7 +697,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   supplying it overrides that.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param accuracy Character. How closely the model is solved, and so how long
-#'   it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details.
+#'   it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details.
 #'
 #' @details
 #' \strong{Accuracy and run time.} Each hour is solved by repeated passes through
@@ -714,14 +714,18 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
 #'   very high \tab under 0.1 K (usually 0.01 to 0.02) \tab under 1 K, usually under 0.5 \tab 9 to 24 s \cr
 #'   high \tab under 0.4 K (usually 0.1 to 0.2) \tab 1 to 2 K, at most 3 \tab 7 to 12 s \cr
-#'   moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s
+#'   moderate \tab under 1 K (usually 0.3 to 0.5) \tab 3 to 5 K \tab 2 to 5 s \cr
+#'   fast \tab under 1.5 K (usually 0.3 to 0.5) \tab 3 to 6 K \tab 1.6 to 4 s
 #' }
 #'
 #' The larger figures of each range are for still, humid weather, in which the
 #' model settles least readily and its answer is least well defined: there even
 #' `"very high"` differs from the tightly solved model by up to 3 K in a few
 #' hours of a year. At `"moderate"` a run with more than ten canopy layers is
-#' made on ten and its results are returned at the height asked for. Bare
+#' made on ten, and at `"fast"`, which is meant for runs over many grid cells,
+#' on five; results are returned at the height asked for. In a very dense,
+#' tall forest in still weather `"moderate"` and `"fast"` are coarser than the
+#' table says, by a degree or two on average. Bare
 #' ground takes about a second at every level. Weather measured too close to
 #' the canopy is translated to the height the model needs at the same level.
 #'
@@ -844,7 +848,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   # Each hour is solved by iteration, and so is the soil's water balance within
   # it; say so, once for the run, if either did not settle in some hours
   warn_unsettled(mout$error, st)
-  stuck <- sum(mout$witers >= st$maxiter)
+  stuck <- sum(mout$witers >= max(st$maxiter, 50))
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   # Rename variables if below ground
   if (reqhgt <= 0) {
@@ -892,7 +896,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   moves air temperature by less than this (K). By default set by `accuracy`.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param accuracy Character. How closely the model is solved, and so how long
-#'   it takes: `"high"` (the default), `"very high"` or `"moderate"`. See Details
+#'   it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details
 #'   of [RunMicro()]. Profiles are returned on the layers given whatever the level.
 #'
 #' @details
@@ -1038,7 +1042,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
   # Each hour is solved by iteration, and so is the soil's water balance within
   # it; say so, once for the run, if either did not settle in some hours
   warn_unsettled(mout$error, st)
-  stuck <- sum(mout$witers >= st$maxiter)
+  stuck <- sum(mout$witers >= max(st$maxiter, 50))
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   mout$theta <- reportedtheta(mout$theta, soiluser)
   return(mout)

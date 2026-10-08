@@ -11,15 +11,18 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // SolverSettingsCpp
-void SolverSettingsCpp(int minpass, int leafsteps, double soilheatloosening, double toptolerance);
-RcppExport SEXP _micropoint_SolverSettingsCpp(SEXP minpassSEXP, SEXP leafstepsSEXP, SEXP soilheatlooseningSEXP, SEXP toptoleranceSEXP) {
+void SolverSettingsCpp(int minpass, int leafsteps, double soilheatloosening, double toptolerance, int groundrow, bool nearlocal, bool leafclosed);
+RcppExport SEXP _micropoint_SolverSettingsCpp(SEXP minpassSEXP, SEXP leafstepsSEXP, SEXP soilheatlooseningSEXP, SEXP toptoleranceSEXP, SEXP groundrowSEXP, SEXP nearlocalSEXP, SEXP leafclosedSEXP) {
 BEGIN_RCPP
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< int >::type minpass(minpassSEXP);
     Rcpp::traits::input_parameter< int >::type leafsteps(leafstepsSEXP);
     Rcpp::traits::input_parameter< double >::type soilheatloosening(soilheatlooseningSEXP);
     Rcpp::traits::input_parameter< double >::type toptolerance(toptoleranceSEXP);
-    SolverSettingsCpp(minpass, leafsteps, soilheatloosening, toptolerance);
+    Rcpp::traits::input_parameter< int >::type groundrow(groundrowSEXP);
+    Rcpp::traits::input_parameter< bool >::type nearlocal(nearlocalSEXP);
+    Rcpp::traits::input_parameter< bool >::type leafclosed(leafclosedSEXP);
+    SolverSettingsCpp(minpass, leafsteps, soilheatloosening, toptolerance, groundrow, nearlocal, leafclosed);
     return R_NilValue;
 END_RCPP
 }
@@ -568,7 +571,7 @@ END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_micropoint_SolverSettingsCpp", (DL_FUNC) &_micropoint_SolverSettingsCpp, 4},
+    {"_micropoint_SolverSettingsCpp", (DL_FUNC) &_micropoint_SolverSettingsCpp, 7},
     {"_micropoint_zeroplanedisCpp2", (DL_FUNC) &_micropoint_zeroplanedisCpp2, 2},
     {"_micropoint_roughlengthCpp2", (DL_FUNC) &_micropoint_roughlengthCpp2, 5},
     {"_micropoint_dpsimCpp2", (DL_FUNC) &_micropoint_dpsimCpp2, 1},

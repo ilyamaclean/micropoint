@@ -16,7 +16,13 @@
 #' * `leafsteps`: successive approximations in each solution of a leaf's energy
 #'   balance;
 #' * `soilheatloosening`, `toptolerance`: how closely the soil heat and
-#'   canopy-top balances inside each pass are closed.
+#'   canopy-top balances inside each pass are closed;
+#' * `groundrow`: whether the ground's surface temperature is found together
+#'   with the canopy air (2) or held while the air is solved (0);
+#' * `nearlocal`: the near field kept only for each layer's own foliage and
+#'   the layer either side;
+#' * `leafclosed`: how a leaf follows its air read from the balance solved,
+#'   not from a second solution of it.
 #'
 #' The levels were placed by comparing each with the model solved very tightly,
 #' for forest and grass in five kinds of year, against two targets each: the
@@ -25,11 +31,17 @@
 #' @noRd
 ACCURACY_LEVELS <- list(
   "very high" = list(tolerance = 0.003, minpass = 3, maxiter = 200, canopylayers = Inf, soillayers = Inf,
-                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8),
+                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8,
+                     groundrow = 0, nearlocal = FALSE, leafclosed = FALSE),
   "high"      = list(tolerance = 0.1, minpass = 3, maxiter = 75, canopylayers = Inf, soillayers = Inf,
-                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8),
+                     leafsteps = 4, soilheatloosening = 1, toptolerance = 1e-8,
+                     groundrow = 0, nearlocal = FALSE, leafclosed = FALSE),
   "moderate"  = list(tolerance = 0.3, minpass = 1, maxiter = 50, canopylayers = 10, soillayers = Inf,
-                     leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4))
+                     leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4,
+                     groundrow = 0, nearlocal = FALSE, leafclosed = FALSE),
+  "fast"      = list(tolerance = 0.5, minpass = 1, maxiter = 50, canopylayers = 5, soillayers = Inf,
+                     leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4,
+                     groundrow = 2, nearlocal = TRUE, leafclosed = TRUE))
 #' Settings for a run from its accuracy level
 #'
 #' @param accuracy one of `"high"`, `"very high"` or `"moderate"`. A list of
@@ -53,7 +65,9 @@ accuracy_settings <- function(accuracy = "high", tolerance = NULL, maxiter = NUL
 #' Hands the engine the parts of a level that are not arguments of a run
 #' @noRd
 set_solver <- function(st) {
-  SolverSettingsCpp(st$minpass, st$leafsteps, st$soilheatloosening, st$toptolerance)
+  o <- function(k, d) if (is.null(st[[k]])) d else st[[k]]
+  SolverSettingsCpp(st$minpass, st$leafsteps, st$soilheatloosening, st$toptolerance,
+                    as.integer(o("groundrow", 0L)), o("nearlocal", FALSE), o("leafclosed", FALSE))
   invisible(NULL)
 }
 #' One warning for a run in which some hours did not settle
