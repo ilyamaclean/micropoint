@@ -38,7 +38,7 @@ ACCURACY_LEVELS <- list(
                      groundrow = 0, nearlocal = FALSE, leafclosed = FALSE),
   "moderate"  = list(tolerance = 0.3, minpass = 1, maxiter = 50, canopylayers = 10, soillayers = Inf,
                      leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4,
-                     groundrow = 0, nearlocal = FALSE, leafclosed = FALSE),
+                     groundrow = 2, nearlocal = FALSE, leafclosed = FALSE),
   "fast"      = list(tolerance = 0.5, minpass = 1, maxiter = 50, canopylayers = 5, soillayers = Inf,
                      leafsteps = 2, soilheatloosening = 100, toptolerance = 1e-4,
                      groundrow = 2, nearlocal = TRUE, leafclosed = TRUE))
