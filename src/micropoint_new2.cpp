@@ -536,8 +536,16 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
     std::vector<double> Rlwdown(n);
     std::vector<double> Rlwup(n);
     std::vector<double> leafLW(n);
-    for (int i = 0; i < n; ++i) leafLW[i] = vegem * sb * radem(tleaf[i]);
-    double groundLW = groundem * sb * radem(tground);
+    // Longwave leaving each layer's foliage, and the ground, towards the other
+    // surfaces. A surface that is not black emits less than a black one would
+    // and reflects the rest of what falls on it; among foliage and ground at
+    // much the same temperature the two together make up what a black surface
+    // at that temperature would emit, and that is what its neighbours receive.
+    // Counting the emission alone would have every surface absorb less from
+    // its neighbours than it emits to them even when all are at one
+    // temperature, and the canopy would cool without limit in still air.
+    for (int i = 0; i < n; ++i) leafLW[i] = sb * radem(tleaf[i]);
+    double groundLW = sb * radem(tground);
     for (int i = 0; i < n; ++i) {
         double lwsky = lwdown * wgts.trh[i];
         double lwgro = groundLW * wgts.trg[i];
@@ -3182,10 +3190,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // Far-field concentration at canopy top: the above-canopy air
     // temperature/vapour pressure expressed in the same flux-like units
     // (enthalpy/latent-heat-flux equivalent) as the source terms below.
-    const double lah = latentHeat(th);
     const double phh = phairCpp(th, pk);
     const double CfTh = phh * cpairCpp(th) * th;
-    const double CfLh = eh * phh * lah / pk;
     // Response of the scalar at each node to each layer's source, W[i][j]:
     // Raupach's near-field/far-field superposition about the canopy-top value.
     //
@@ -3260,12 +3266,17 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     // solution, not the solution. A node inside the soil's own roughness takes
     // the soil's temperature and vapour pressure, as it should.
     //
+    // Vapour is counted in moles: each layer's latent heat source over the
+    // latent heat at its own leaves is the vapour it releases, and one density
+    // of air, canopy top's, turns that into vapour pressure throughout, so
+    // that a canopy releasing no vapour holds the vapour pressure of the air
+    // above it and of the ground at every height.
+    //
     // Canopy-top air responds to the sources too: it lies between the
     // reference air and the ground, reached across rTop, their resistances in
     // parallel, so a change in any layer's source moves it by that change times
     // rTop, and every node with it. Where the reference height is at canopy top
     // its air is fixed and rTop is zero.
-    const double la = latentHeat(tground);
     MP_LAP(10);
     std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
     // Each node's air as the pass found it: vapour pressure, density, heat
@@ -3281,22 +3292,21 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         const double Rup = col.Rh - Rz[i];
         const double ph = phAir[i];
         const double cp = cpAir[i];
-        const double la_i = laLeaf[i];
-        double sT = CfTh, sL = CfLh;
+        double sT = CfTh, sL = 0.0;
         for (size_t j = 0; j < nn; ++j) {
             const double w = W[i * nn + j];
             const double t0 = tair[j];
             const double e0 = eAir[j];
             const double wr = w + rTop;
             sT += w * ST[j] - wr * onestepin.dSTdT[j] * t0;
-            sL += w * SL[j] - wr * onestepin.dSLde[j] * e0;
+            sL += (w * SL[j] - wr * onestepin.dSLde[j] * e0) / laLeaf[j];
             AT[i * nn + j] = -Rz[i] * wr * onestepin.dSTdT[j];
-            AL[i * nn + j] = -pk * Rz[i] * wr * onestepin.dSLde[j];
+            AL[i * nn + j] = -pk * Rz[i] * wr * onestepin.dSLde[j] / laLeaf[j];
         }
         AT[i * nn + i] += ph * cp * col.Rh;
-        AL[i * nn + i] += ph * (la_i * Rz[i] + la * Rup);
+        AL[i * nn + i] += phh * col.Rh;
         bT[i] = Rz[i] * sT + ph * cp * Rup * tground;
-        bL[i] = pk * Rz[i] * sL + la * ph * Rup * esg;
+        bL[i] = Rz[i] * (phh * eh + pk * sL) + phh * Rup * esg;
     }
     // The ground following the air: each layer's air, through the change it
     // makes to that layer's source, warms the air the ground exchanges with by
@@ -3334,21 +3344,19 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     onestepin.tfar.assign(nn, 0.0); onestepin.tnear.assign(nn, 0.0);
     onestepin.efar.assign(nn, 0.0); onestepin.enear.assign(nn, 0.0);
     for (size_t i = 0; i < nn; ++i) {
-        const double Rup = col.Rh - Rz[i];
         const double ph = phAir[i];
         const double cp = cpAir[i];
-        const double la_i = laLeaf[i];
         double tn = 0.0, tf = 0.0, en = 0.0, ef = 0.0;
         for (size_t j = 0; j < nn; ++j) {
             const double sTj = ST[j] + onestepin.dSTdT[j] * (tnew[j] - tair[j]);
-            const double sLj = SL[j] + onestepin.dSLde[j] * (enew[j] - eAir[j]);
+            const double sLj = (SL[j] + onestepin.dSLde[j] * (enew[j] - eAir[j])) / laLeaf[j];
             const double wn = Wnear[i * nn + j], wf = W[i * nn + j] - wn;
             tn += wn * sTj; tf += wf * sTj; en += wn * sLj; ef += wf * sLj;
         }
         onestepin.tnear[i] = Rz[i] * tn / (ph * cp * col.Rh);
         onestepin.tfar[i] = Rz[i] * tf / (ph * cp * col.Rh);
-        onestepin.enear[i] = pk * Rz[i] * en / (ph * (la_i * Rz[i] + la * Rup));
-        onestepin.efar[i] = pk * Rz[i] * ef / (ph * (la_i * Rz[i] + la * Rup));
+        onestepin.enear[i] = pk * Rz[i] * en / (phh * col.Rh);
+        onestepin.efar[i] = pk * Rz[i] * ef / (phh * col.Rh);
     }
     for (size_t i = 0; i < nn; ++i) {
         tair[i] = tnew[i];
