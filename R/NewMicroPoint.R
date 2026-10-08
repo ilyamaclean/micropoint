@@ -548,18 +548,26 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     zref2 <- zref
   }  else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
+    # A canopy given as one layer is returned as its two halves
+    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
     # The hours leading up to the one returned are run on twenty layers, or on
-    # as many as the accuracy level allows if that is fewer
+    # as many as the accuracy level allows if that is fewer. A canopy given on
+    # too few layers to fit a curve through is run through those hours as given.
     n <- length(paii)
     nlead <- min(20, st$canopylayers)
-    paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = nlead),
-                     method = "natural")$y
-    paii20 <- pmax(paii20, 0)
-    mu <- sum(paii) / sum(paii20)
-    paii20 <- paii20 * mu
-    Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = nlead),
-                      method = "natural")$y
-    Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
+    if (n >= 4) {
+      paii20 <- spline(x = seq_len(n), y = paii, xout = seq(1, n, length.out = nlead),
+                       method = "natural")$y
+      paii20 <- pmax(paii20, 0)
+      mu <- sum(paii) / sum(paii20)
+      paii20 <- paii20 * mu
+      Lfrac20 <- spline(x = seq_len(n), y = Lfrac, xout = seq(1, n, length.out = nlead),
+                        method = "natural")$y
+      Lfrac20 <- pmin(pmax(Lfrac20, 0), 1)
+    } else {
+      paii20 <- paii
+      Lfrac20 <- Lfrac
+    }
     # Forcing measured too close to the canopy is translated up to the height the model needs
     fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata2 <- fr$climdata; zref2 <- fr$zref
@@ -569,7 +577,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                      st$maxiter, st$tolerance, -1, 1.25, C3)
   }
   if (class(vegp) != "logical") {
-    na <- round((2 / vegp$h) * length(paii), 0)
+    na <- max(2, round((2 / vegp$h) * length(paii), 0))
     za <- seq(vegp$h, zref2, length.out = na)
     # get canopy top values
     Th <- mout$tcanopy
@@ -828,6 +836,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     # were given. The engine reads the result at the height asked for.
     cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
     if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
+    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
     set_solver(st)
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, st$maxiter, st$tolerance, -1, 1.25, C3)
@@ -1015,6 +1024,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     nuser <- length(paii)
     cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
     if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
+    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
     set_solver(st)
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, st$maxiter, st$tolerance,

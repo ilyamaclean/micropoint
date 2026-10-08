@@ -8,8 +8,11 @@
 #' * `maxiter`: the most, set at about five times what one hour in a hundred
 #'   needs at the level's tolerance, so that an hour reaching it is one that is
 #'   not settling;
-#' * `canopylayers`, `soillayers`: the most layers the run itself is made with,
-#'   results being returned on the layers the user gave;
+#' * `canopylayers`: the number of canopy layers the run itself is made with
+#'   where the user gives `CANOPY_LAYERS_REDUCED_FROM` or more, results being
+#'   returned on the layers the user gave. A canopy given on fewer layers is
+#'   run as given, at every level, however few;
+#' * `soillayers`: the most soil layers the run is made with;
 #' * `leafsteps`: successive approximations in each solution of a leaf's energy
 #'   balance;
 #' * `soilheatloosening`, `toptolerance`: how closely the soil heat and
@@ -71,19 +74,32 @@ warn_unsettled <- function(error, st) {
 #' its depth on either side; total plant area and its distribution with height
 #' are kept. The live fraction of a new layer is that of the plant area in it.
 #' @param paii,Lfrac plant area and live fraction of each layer, from the ground up.
-#' @param nmax the most layers wanted.
-#' @return `NULL` if the canopy has no more than `nmax` layers, otherwise a
-#'   list of `paii` and `Lfrac` on `nmax` layers.
+#' @param nmax the number of layers the level runs a finely layered canopy on.
+#' @return `NULL` if the canopy is to be run as given, otherwise a list of
+#'   `paii` and `Lfrac` on `nmax` layers.
 #' @noRd
+CANOPY_LAYERS_REDUCED_FROM <- 20
 coarsen_canopy <- function(paii, Lfrac, nmax) {
   n <- length(paii)
-  if (!is.finite(nmax) || n <= nmax) return(NULL)
+  if (!is.finite(nmax) || n < CANOPY_LAYERS_REDUCED_FROM || n <= nmax) return(NULL)
   below <- function(x) stats::approx((0:n) / n, c(0, cumsum(x)), xout = (0:nmax) / nmax)$y
   p <- pmax(diff(below(paii)), 0)
   live <- diff(below(paii * Lfrac))
   centre <- stats::approx((seq_len(n) - 0.5) / n, Lfrac, xout = (seq_len(nmax) - 0.5) / nmax, rule = 2)$y
   L <- ifelse(p > 0, live / p, centre)
   list(paii = p, Lfrac = pmin(pmax(L, 0), 1))
+}
+#' A canopy given as a single layer, as the two halves of that layer
+#'
+#' Each layer exchanges longwave radiation, heat and vapour with the others, so
+#' the canopy equations need at least two. One layer is taken as two of half
+#' its depth and half its plant area, which describes the same canopy.
+#' @param paii,Lfrac plant area and live fraction of each layer.
+#' @return a list of `paii` and `Lfrac`, unchanged if there are two layers or more.
+#' @noRd
+at_least_two_layers <- function(paii, Lfrac) {
+  if (length(paii) > 1) return(list(paii = paii, Lfrac = Lfrac))
+  list(paii = rep(paii / 2, 2), Lfrac = rep(Lfrac, 2))
 }
 #' Canopy profiles through time, from the layers a run was made with to those the user gave
 #'

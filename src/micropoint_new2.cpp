@@ -863,7 +863,6 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
 // rather than every hour.
 static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
     int n = static_cast<int>(vegp.paii.size());
-    if (n < 10) Rcpp::stop("Wind profile requires at least 10 layers");
     const double dz = vegp.hgt / n;
     const double beta = frictionVelocityRatio(vegp.hgt, vegp.pai, z0);
 
