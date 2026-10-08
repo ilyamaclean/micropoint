@@ -8,10 +8,10 @@
 #' * `maxiter`: the most, set at about five times what one hour in a hundred
 #'   needs at the level's tolerance, so that an hour reaching it is one that is
 #'   not settling;
-#' * `canopylayers`: the number of canopy layers the run itself is made with
-#'   where the user gives `CANOPY_LAYERS_REDUCED_FROM` or more, results being
-#'   returned on the layers the user gave. A canopy given on fewer layers is
-#'   run as given, at every level, however few;
+#' * `canopylayers`: the most canopy layers the run itself is made with. A
+#'   canopy given on more is run on that many and its results returned on the
+#'   layers the user gave; one given on that many or fewer is run as given,
+#'   however few;
 #' * `soillayers`: the most soil layers the run is made with;
 #' * `leafsteps`: successive approximations in each solution of a leaf's energy
 #'   balance;
@@ -74,14 +74,13 @@ warn_unsettled <- function(error, st) {
 #' its depth on either side; total plant area and its distribution with height
 #' are kept. The live fraction of a new layer is that of the plant area in it.
 #' @param paii,Lfrac plant area and live fraction of each layer, from the ground up.
-#' @param nmax the number of layers the level runs a finely layered canopy on.
+#' @param nmax the most layers the level runs a canopy on.
 #' @return `NULL` if the canopy is to be run as given, otherwise a list of
 #'   `paii` and `Lfrac` on `nmax` layers.
 #' @noRd
-CANOPY_LAYERS_REDUCED_FROM <- 20
 coarsen_canopy <- function(paii, Lfrac, nmax) {
   n <- length(paii)
-  if (!is.finite(nmax) || n < CANOPY_LAYERS_REDUCED_FROM || n <= nmax) return(NULL)
+  if (!is.finite(nmax) || n <= nmax) return(NULL)
   below <- function(x) stats::approx((0:n) / n, c(0, cumsum(x)), xout = (0:nmax) / nmax)$y
   p <- pmax(diff(below(paii)), 0)
   live <- diff(below(paii * Lfrac))
