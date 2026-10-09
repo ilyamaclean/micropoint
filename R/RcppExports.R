@@ -85,6 +85,10 @@ RunBelowFull <- function(obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, 
     .Call(`_micropoint_RunBelowFull`, obstime, climdata, soilc, vegp, paii, Lfrac, zref, Ca, lat, lon, SoilTempIni, SoilThetaIni, maxNrIterations, tolerance, a0, a1, C3)
 }
 
+AboveCanopyCpp <- function(za, zref, tcanopy, rhcanopy, ucanopy, tref, rhref, uref, hgt, pai, LL, z0, fade) {
+    .Call(`_micropoint_AboveCanopyCpp`, za, zref, tcanopy, rhcanopy, ucanopy, tref, rhref, uref, hgt, pai, LL, z0, fade)
+}
+
 clearskyradCpp2 <- function(obstime, climdata, lat, lon) {
     .Call(`_micropoint_clearskyradCpp2`, obstime, climdata, lat, lon)
 }

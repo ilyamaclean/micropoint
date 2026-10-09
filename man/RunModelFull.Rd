@@ -81,10 +81,10 @@ for all time steps and all canopy heights (above ground) or soil nodes
 (below ground). Rows correspond to time steps and columns correspond to
 canopy heights or soil nodes.
 
-For vegetated runs each column is one canopy layer, counted from the ground:
-with `n` layers under a canopy of height `h`, column `i` is at height
-`(i - 0.5) h / n`. For bare-ground runs the columns are twenty equally
-spaced heights up to `zref`.
+The heights (m) of the columns are returned as `z` and the depths (m) of the
+soil nodes as `zsoil`. For vegetated runs `z` gives the middle of each canopy
+layer; the air between canopy top and `zref` is returned separately at
+heights `za`.
 
 For **bare-ground runs** (`vegp = NA`) the returned elements are:
 \describe{
@@ -119,6 +119,9 @@ For **vegetated runs** the returned elements are:
   \item{tcanopy}{Air temperature at canopy top (°C). A vector.}
   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector.}
   \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector.}
+  \item{tair_above}{Air temperature profile above the canopy (°C).}
+  \item{relhum_above}{Relative humidity profile above the canopy (\%).}
+  \item{windspeed_above}{Wind speed profile above the canopy (m s^-1).}
   \item{iters}{Number of iterations in each time step. A vector.}
   \item{error}{Final convergence error in each time step (K). A vector.}
 }

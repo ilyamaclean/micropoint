@@ -785,10 +785,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' (below ground). Rows correspond to time steps and columns correspond to
 #' canopy heights or soil nodes.
 #'
-#' For vegetated runs each column is one canopy layer, counted from the ground:
-#' with `n` layers under a canopy of height `h`, column `i` is at height
-#' `(i - 0.5) h / n`. For bare-ground runs the columns are twenty equally
-#' spaced heights up to `zref`.
+#' The heights (m) of the columns are returned as `z` and the depths (m) of the
+#' soil nodes as `zsoil`. For vegetated runs `z` gives the middle of each canopy
+#' layer; the air between canopy top and `zref` is returned separately at
+#' heights `za`.
 #'
 #' For **bare-ground runs** (`vegp = NA`) the returned elements are:
 #' \describe{
@@ -823,6 +823,9 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{tcanopy}{Air temperature at canopy top (°C). A vector.}
 #'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector.}
 #'   \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector.}
+#'   \item{tair_above}{Air temperature profile above the canopy (°C).}
+#'   \item{relhum_above}{Relative humidity profile above the canopy (\%).}
+#'   \item{windspeed_above}{Wind speed profile above the canopy (m s^-1).}
 #'   \item{iters}{Number of iterations in each time step. A vector.}
 #'   \item{error}{Final convergence error in each time step (K). A vector.}
 #' }
@@ -868,6 +871,7 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     z <- (c(1:20)/ 20) * zref
     mout <- RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, long,
                              SoilTempIni, ThetaIni, st$maxiter, st$tolerance)
+    mout$z <- z
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     fr <- .forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
@@ -882,7 +886,15 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                          lat, long, SoilTempIni, ThetaIni, st$maxiter, st$tolerance,
                          -1, 1.25, C3)
     mout <- .canopy_to_user(mout, nuser, vegp$h, zm)
+    # Air between canopy top and the height of the weather data, at about the spacing of the canopy layers
+    mout$z <- (seq_len(nuser) - 0.5) * vegp$h / nuser
+    mout$za <- seq(vegp$h, zref, length.out = min(max(2, ceiling((zref - vegp$h) * nuser / vegp$h) + 1), 50))
+    above <- AboveCanopyCpp(mout$za, zref, mout$tcanopy, mout$rhcanopy, mout$ucanopy, climdata$temp,
+                            climdata$relhum, climdata$windspeed, vegp$h, vegp$pai, mout$LL, zm, mout$fade)
+    mout$tair_above <- above$tair; mout$relhum_above <- above$relhum; mout$windspeed_above <- above$windspeed
+    mout$LL <- NULL; mout$fade <- NULL
   }
+  mout$zsoil <- .soil_depths(soiluser)
   if (!is.null(cs)) {
     mout$tsoil <- .soil_to_user(mout$tsoil, cs)
     mout$theta <- .soil_to_user(mout$theta, cs)

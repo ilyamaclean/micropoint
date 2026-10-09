@@ -407,6 +407,29 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
+// AboveCanopyCpp
+List AboveCanopyCpp(std::vector<double> za, double zref, std::vector<double> tcanopy, std::vector<double> rhcanopy, std::vector<double> ucanopy, std::vector<double> tref, std::vector<double> rhref, std::vector<double> uref, double hgt, double pai, std::vector<double> LL, double z0, std::vector<double> fade);
+RcppExport SEXP _micropoint_AboveCanopyCpp(SEXP zaSEXP, SEXP zrefSEXP, SEXP tcanopySEXP, SEXP rhcanopySEXP, SEXP ucanopySEXP, SEXP trefSEXP, SEXP rhrefSEXP, SEXP urefSEXP, SEXP hgtSEXP, SEXP paiSEXP, SEXP LLSEXP, SEXP z0SEXP, SEXP fadeSEXP) {
+BEGIN_RCPP
+    Rcpp::RObject rcpp_result_gen;
+    Rcpp::RNGScope rcpp_rngScope_gen;
+    Rcpp::traits::input_parameter< std::vector<double> >::type za(zaSEXP);
+    Rcpp::traits::input_parameter< double >::type zref(zrefSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type tcanopy(tcanopySEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type rhcanopy(rhcanopySEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type ucanopy(ucanopySEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type tref(trefSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type rhref(rhrefSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type uref(urefSEXP);
+    Rcpp::traits::input_parameter< double >::type hgt(hgtSEXP);
+    Rcpp::traits::input_parameter< double >::type pai(paiSEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type LL(LLSEXP);
+    Rcpp::traits::input_parameter< double >::type z0(z0SEXP);
+    Rcpp::traits::input_parameter< std::vector<double> >::type fade(fadeSEXP);
+    rcpp_result_gen = Rcpp::wrap(AboveCanopyCpp(za, zref, tcanopy, rhcanopy, ucanopy, tref, rhref, uref, hgt, pai, LL, z0, fade));
+    return rcpp_result_gen;
+END_RCPP
+}
 // clearskyradCpp2
 std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon);
 RcppExport SEXP _micropoint_clearskyradCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP latSEXP, SEXP lonSEXP) {
@@ -592,6 +615,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_WeatherhgtCpp2", (DL_FUNC) &_micropoint_WeatherhgtCpp2, 15},
     {"_micropoint_RunBelowFullBare", (DL_FUNC) &_micropoint_RunBelowFullBare, 12},
     {"_micropoint_RunBelowFull", (DL_FUNC) &_micropoint_RunBelowFull, 17},
+    {"_micropoint_AboveCanopyCpp", (DL_FUNC) &_micropoint_AboveCanopyCpp, 13},
     {"_micropoint_clearskyradCpp2", (DL_FUNC) &_micropoint_clearskyradCpp2, 4},
     {"_micropoint_difpropCpp", (DL_FUNC) &_micropoint_difpropCpp, 4},
     {"_micropoint_solaltCpp", (DL_FUNC) &_micropoint_solaltCpp, 3},

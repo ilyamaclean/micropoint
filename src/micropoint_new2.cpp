@@ -4956,6 +4956,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     std::vector<int> iters(n, 0); // passes the hour took
     std::vector<double> error(n, 0.0); // change in air temperature over the last pass (K)
     std::vector<double> tcanopy(n), rhcanopy(n), ucanopy(n); // air temperature, humidity and wind at canopy top
+    std::vector<double> LL(n), fade(n); // Obukhov length and canopy turbulence weight
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
     NumericMatrix tsoil(n, nb);
@@ -4981,6 +4982,8 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         tcanopy[hr] = onestepin.tcanopy;
         rhcanopy[hr] = onestepin.rhcanopy;
         ucanopy[hr] = onestepin.ucanopy * onestepin.windscale;
+        LL[hr] = onestepin.LL;
+        fade[hr] = onestepin.fade;
         FillMyMatrix(Rdirdown, onestepin.Rdirdown, hr);
         FillMyMatrix(Rdifdown, onestepin.Rdifdown, hr);
         FillMyMatrix(Rswup, onestepin.Rswup, hr);
@@ -5000,7 +5003,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         onestepin.soilwatervars.oldtheta = onestepin.soilwatervars.theta;
         onestepin.soilwatervars.oldvapor = onestepin.soilwatervars.vapor;
     }
-    return List::create(
+    List out = List::create(
         // Radiation streams
         Named("Rdirdown") = Rcpp::wrap(Rdirdown),
         Named("Rdifdown") = Rcpp::wrap(Rdifdown),
@@ -5027,6 +5030,30 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         Named("iters") = Rcpp::wrap(iters),
         Named("error") = Rcpp::wrap(error)
     );
+    out["LL"] = Rcpp::wrap(LL);
+    out["fade"] = Rcpp::wrap(fade);
+    return out;
+}
+// Air temperature, relative humidity and wind speed at heights za between canopy top and the
+// height of the weather data, for every hour of a run.
+// [[Rcpp::export]]
+List AboveCanopyCpp(std::vector<double> za, double zref, std::vector<double> tcanopy, std::vector<double> rhcanopy,
+    std::vector<double> ucanopy, std::vector<double> tref, std::vector<double> rhref, std::vector<double> uref,
+    double hgt, double pai, std::vector<double> LL, double z0, std::vector<double> fade)
+{
+    const size_t n = tcanopy.size(), na = za.size();
+    NumericMatrix tair(n, na), rh(n, na), uz(n, na);
+    for (size_t hr = 0; hr < n; ++hr) {
+        const double eh = satvapCpp2(tcanopy[hr]) * rhcanopy[hr] / 100.0;
+        const double eref = satvapCpp2(tref[hr]) * rhref[hr] / 100.0;
+        for (size_t i = 0; i < na; ++i) {
+            const double f = aboveCanopyFraction(za[i], zref, hgt, pai, LL[hr], z0, fade[hr]);
+            tair(hr, i) = tcanopy[hr] + (tref[hr] - tcanopy[hr]) * f;
+            rh(hr, i) = std::min(100.0, 100.0 * (eh + (eref - eh) * f) / satvapCpp2(tair(hr, i)));
+            uz(hr, i) = Uabove(za[i], zref, ucanopy[hr], uref[hr], hgt, pai, LL[hr]);
+        }
+    }
+    return List::create(Named("tair") = tair, Named("relhum") = rh, Named("windspeed") = uz);
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** Other useful functions *********************************************** //
