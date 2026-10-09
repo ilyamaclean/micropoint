@@ -3739,7 +3739,7 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double mlc = (la * confrac) / rv_contact; // latent heat exchange coefficient, contact-facing
     double DeV = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5); // slope of the saturation vapour pressure curve, air-facing
     double DeC = satvapCpp2(Tf + 0.5) - satvapCpp2(Tf - 0.5); // slope of the saturation vapour pressure curve, contact-facing
-    double top = (Rabs + M - mr * radem(Ta) - mrc * radem(Ta) - mc * dT - ml * Da - mlc * Dac);
+    double top = (Rabs + M - mr * radem(Ta) - mrc * radem(Ta) + mc * dT - ml * Da - mlc * Dac);
     double btm = 4.0 * mr * std::pow(Te + 273.15, 3.0) + 4.0 * mrc * std::pow(Tf + 273.15, 3.0) +
         mc + mv + ml * DeV + surfrh * mlc * DeC;
     Tbody = Ta + top / btm;
