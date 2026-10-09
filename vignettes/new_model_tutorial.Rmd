@@ -59,6 +59,7 @@ library(micropoint)
   + [Vegetation parameters](#vegetation-parameters)
   + [Soil parameters](#soil-parameters)
   + [Additional inputs](#additional-inputs)
+  + [Accuracy and run time](#accuracy-and-run-time)
 * [Running the microclimate model](#running-the-microclimate-model)
   + [Vertical profile](#vertical-profile)
   + [Time series](#time-series)
@@ -164,25 +165,14 @@ Additional parameters describe the numerical structure of the soil profile used 
 The easiest way to generate a consistent set of soil parameters is to use the inbuilt function `createsoilc`, which constructs a soil parameter list for a specified soil texture class:
 
 ```{r eval=FALSE}
-soilp <- createsoilc(soiltype = "Clay loam", nlayers = 15, totalDepth = 2)
+soilp <- createsoilc(soiltype = "Clay loam", nlayers = 15, totalDepth = 3)
 ```
 
 Available soil texture classes include sand, loamy sand, sandy loam, loam, silt loam, sandy clay loam, clay loam, silty clay loam, sandy clay, silty clay, and clay.
 
 ### Additional inputs
-Additionally, `lat` and `long` specify the latitude and longitude of the location in decimal degrees. Optional inputs include `zref`, the height above ground of the supplied meteorological forcing data (2 m by default); `SoilTempIni` and `ThetaIni`, vectors giving the initial soil temperature (°C) and soil water fraction for each soil layer, ordered from the soil surface downward and including the lower boundary node; `accuracy`, how closely the model is solved (see below); and `c3`, an optional logical flag indicating whether C3 photosynthesis is assumed.
 
-### Accuracy and run time
-Each hour is solved by repeated passes through the canopy and soil until a pass no longer changes the result by much. The `accuracy` argument of the run functions sets how closely that is done, and with it the run time. There are four levels. The figures compare each with the same model solved very tightly, for forest, crop and grass in a range of weather, and are a guide rather than a guarantee.
-
-| `accuracy` | typical error in temperature | worst hour of a year | one year of hourly data |
-|---|---|---|---|
-| `"very high"` | under 0.05 °C | under 1.5 °C, usually under 0.5 | 9 to 25 s |
-| `"high"` (default) | about 0.1 °C, at most 0.4 | 1 to 2.5 °C | 6 to 12 s |
-| `"moderate"` | about 0.2 °C, at most 0.9 | 2 to 4 °C | 2 to 5 s |
-| `"fast"` | about 0.3 °C, at most 1.1 | 2.5 to 5.5 °C | 1.6 to 4 s |
-
-`"high"` suits most uses. `"moderate"` is about three times faster and is intended for long runs, many sites or first looks: averages over days or months are little affected, but individual hours can be several degrees out. `"fast"` is meant for running the model over many grid cells: about 30% quicker again than `"moderate"`, on at most five canopy layers, and coarser in still, humid weather. `"very high"` is for work that depends on individual hours or on small differences between runs. Still, humid weather is the hardest case at every level. At `"moderate"`, a canopy described by more than ten layers is run on ten, with results returned at the heights requested. If some hours fail to settle, a single warning reports how many. The arguments `tolerance` and `maxiter` override the level's own settings but are not needed in ordinary use.
+`lat` and `long` specify the latitude and longitude of the location in decimal degrees. Other optional inputs include `zref`, the height above ground of the meteorological forcing data (2 m by default); `SoilTempIni` and `ThetaIni`, vectors giving the initial soil temperature (°C) and volumetric water content of each soil layer from the surface downward; `accuracy`, which controls the trade-off between run time and numerical accuracy (see below); and `c3`, which specifies whether C3 photosynthesis is assumed.
 
 The final inputs are `zm` - a measure of surface roughness evoked only when the ground surface is bare, and `CO2ppm`, the atmospheric CO₂ concentration (ppm) during the model run. This affects stomatal behaviour and hence evapotranspirative cooling. If not provided (`NA`), the model estimates CO₂ concentration from the simulation year using the function `Cafromyear`, which applies polynomial fits to historical observations and projections for the period 1750–2100 as in the example below.
 
@@ -190,6 +180,22 @@ The final inputs are `zm` - a measure of surface roughness evoked only when the 
 Cafromyear(1980)
 Cafromyear(2030)
 ```
+
+
+### Accuracy and run time
+
+The `accuracy` argument controls the trade-off between run time and numerical accuracy. Four levels are available. The figures below compare each with the same model solved very tightly across forest, crop and grass under a range of weather conditions, and should be treated as a guide rather than a guarantee.
+
+| `accuracy` | typical temperature error | worst hour of a year | one year of hourly data |
+|---|---|---|---|
+| `"very high"` | under 0.05 °C | 0.5 to 1.5 °C | 9 to 25 s |
+| `"high"` (default) | about 0.1 °C, at most 0.4 | 1 to 2.5 °C | 6 to 12 s |
+| `"moderate"` | about 0.2 °C, at most 0.9 | 2 to 4 °C | 2 to 5 s |
+| `"fast"` | about 0.3 °C, at most 1.1 | 2.5 to 5.5 °C | 1.6 to 4 s |
+
+`"high"` is suitable for almost all applications. `"moderate"` is around three times faster and is useful for long runs, many sites or exploratory work: averages over days or months are little affected, although individual hours can differ by several degrees. `"fast"` is intended primarily for running the model over many grid cells and is around 30% faster again than `"moderate"`. `"very high"` is most useful where individual hours or small differences between runs matter.
+
+At `"moderate"`, canopies described by more than ten layers are internally reduced to ten, while `"fast"` uses at most five. These reduced layer numbers are used only internally for the calculation: outputs are expanded back onto the layer structure supplied by the user before being returned. Still, humid conditions are the most difficult at all accuracy levels. If some hours fail to converge, a single warning reports how many. `tolerance` and `maxiter` can be used to override the settings associated with an accuracy level, but this is not normally necessary.
 
 ## Running the microclimate model
 
@@ -212,24 +218,25 @@ hr <- which.max(climdata$temp) # hottest hour (4094)
 mout <- return_profile(climdata, hr, vegp, soilc, paii, Lfrac, lat = 49.96807, 
                        long = -5.215668, varn = "temp")
 ```
+![](images/new/plot0.png)
 
-Here the blue line is the soil and air temperature profile. The green line is the temperature of canopy foliage. The model takes a while to run because of need to do height adjustment and to run the model up to the specified hour. One can instead do a pre-adjust on the input weather data. Once done, the `return_profile` if generating profiles for hours early in the time sequence. 
+The warning tells you that the weather was automatically height adjusted. Here the blue line is the soil and air temperature profile. The green line is the temperature of canopy foliage. The model takes a little while to run because of need to do height adjustment and to run the model up to the specified hour. One can instead do a pre-adjust on the input weather data. Once done, the `return_profile` if generating profiles for hours early in the time sequence. 
 
 ```{r eval=FALSE}
-climdata_adj <- weatherhgt_adjust(climdata, zin = 2, zout = 27, 
+climdata_adj <- weatherhgt_adjust(climdata, zin = 2, zout = 35, 
                                   lat = 49.96807, long = -5.215668)
 mout <- return_profile(climdata_adj, hr = 4, vegp, soilc, paii, Lfrac, 
-                       lat = 49.96807, long = -5.215668, zref = 27, varn = "temp")
+                       lat = 49.96807, long = -5.215668, zref = 35, varn = "temp")
 ```
 ![](images/new/plot1.png)
 Alternatively we can plot the humidity and radiation profiles
 
 ```{r eval=FALSE}
 mout <- return_profile(climdata_adj, hr = 13, vegp, soilc, paii, Lfrac, 
-                       lat = 49.96807, long = -5.215668, zref = 27, 
+                       lat = 49.96807, long = -5.215668, zref = 35, 
                        varn = "relhum")
 mout <- return_profile(climdata_adj, hr = 13, vegp, soilc, paii, Lfrac, 
-                       lat = 49.96807, long = -5.215668, zref = 27, 
+                       lat = 49.96807, long = -5.215668, zref = 35, 
                        varn = "radiation")
 ```
 ![](images/new/plot2.png)
@@ -267,7 +274,7 @@ Lfrac <- seq(0.5, 0.85, length.out = length(paii)) # Living vegetation fraction
 soilc <- createsoilc(soiltype = "Clay loam")
 # Run model for 25 cm above ground and compare to input forcing data
 mout <- RunMicro(climdata_adj, reqhgt = 0.25, vegp, soilc, paii, Lfrac, 
-                 lat = 49.96807, long = -5.215668, zref = 27)
+                 lat = 49.96807, long = -5.215668, zref = 35)
 # Plot results for temperature (grey = macroclimate, red = microclimate)
 tme <- as.POSIXct(climdata_adj$obs_time, tz = "UTC")
 par(mfrow =c (1, 1))
@@ -318,26 +325,22 @@ Lfrac <- seq(0.5, 0.85, length.out = length(paii)) # Living vegetation fraction
 soilc <- createsoilc(soiltype = "Clay loam")
 # Run model for all heights
 mout <- RunModelFull(climdata_adj, soilc, vegp, paii, Lfrac, 
-                     lat = 49.96807, long = -5.215668, zref = 27)
+                     lat = 49.96807, long = -5.215668, zref = 35)
 ```
 
-Here `mout` is a list in which each microclimate variable is stored as a matrix. These outputs can be manipulated to produce a continuous time–height plot. The function `expand_output`, supplied with the package, increases the vertical resolution of the profiles using spline interpolation. In the example below the soil temperature profile is appended to the air temperature profile and the combined matrix is interpolated to a finer vertical grid for plotting using the `terra` package.
+Here `mout` is a list in which each microclimate variable is stored as a matrix. These outputs can be manipulated to produce a continuous time–height plot. The function `expand_output`, supplied with the package, increases the vertical resolution of the profiles by interpolation. In the example below the soil temperature profile is appended to the air temperature profile and the combined matrix is interpolated to a finer vertical grid for plotting using the `terra` package.
 
 ```{r eval=FALSE}
 require(terra)
-# Air: transpose so rows are heights, then expand to 2500 pixels (25m)
-air <- t(mout$tair)
-air <- expand_output(air, 2500)
-# Soil: reverse columns first so they run deepest -> surface, then transpose,
-# then expand to 300 pixels, then flip so rows run surface -> depth (3m)
-soil <- t(mout$tsoil[, ncol(mout$tsoil):1])
-soil <- expand_output(soil, 300)
-soil <- soil[nrow(soil):1, ]
-# Combine so raster rows run from top (25 m) to bottom (-3 m)
-temp <- rbind(air[nrow(air):1, ], soil)
-# Convert to raster and set extent
-temp <- rast(temp)
-ext(temp) <- c(0, 8760, -3, 25)
+# Heights of every column, from the base of the soil to the height of the weather data
+zall <- c(-rev(mout$zsoil), mout$z, mout$za)
+temp <- cbind(mout$tsoil[, ncol(mout$tsoil):1], mout$tair, mout$tair_above)
+# Interpolate each hour to every cm
+zout <- seq(min(zall), max(zall), by = 0.01)
+temp <- apply(temp, 1, function(x) approx(zall, x, zout)$y)
+# Convert to raster, with rows running from top to bottom
+temp <- rast(temp[nrow(temp):1, ])
+ext(temp) <- c(0, nrow(mout$tair), min(zall), max(zall))
 plot(temp, asp = NA)
 ```
 ![](images/new/plot6.png)
@@ -369,10 +372,10 @@ mout <- RunMicro(climdata, reqhgt = 0.02, vegp = NA, soilc, paii = NA, Lfrac = N
 # plot temperature time series
 tme <- as.POSIXct(climdata$obs_time, tz = "UTC")
 plot(climdata$temp ~ tme, type = "l", col = rgb(0, 0, 0, 0.5),
-     xlab = "Month", ylab = "Temperature", ylim = c(-3, 32))
+     xlab = "Month", ylab = "Temperature", ylim = c(-3, 35))
 par(new = TRUE)
 plot(mout$tair ~ tme, type = "l", col = rgb(1, 0, 0, 0.5),
-     xlab = "", ylab = "", ylim = c(-3, 32))
+     xlab = "", ylab = "", ylim = c(-3, 35))
 ```
 ![](images/new/plot7.png)
 Alternatively we may wish to derive the volumetric soil water fraction near the surface. Here we use the ``InitailizeWater`, which sets up a sensible initial soil water profile.
@@ -433,7 +436,7 @@ To aid in generating this list, the function `create_ectop` can be used. This fu
 
 The inputs to `create_ectop` are the body height (`height`), width (`width`), and length (`len`) in centimetres, which define the overall body geometry. The shortwave reflectance of the body surface (`refl`) determines how much solar radiation is reflected rather than absorbed. The parameter `adir` specifies the orientation of the organism relative to north (in degrees) and is used to determine the angle of incidence of direct solar radiation. The argument `position` describes how the organism is oriented in the environment. This can assume a fixed orientation, random orientation - either with respect to both the direction in which it faces (`randomdir`) or with respect to both direction and vertical tilt (`random`), or behavioural postures that maximise or minimise absorbed radiation. The argument `type` specifies the broad ectotherm group (`"arthropod"`, `"reptile"`, `"amphibian"` or `"other"`), which determines default physiological parameter values.
 
-The function returns a list containing both the supplied inputs and several derived parameters required by the ectotherm model. These include the estimated body volume (`volume`) and surface area (`area`), longwave emissivity (`em`), thermal conductivity of body tissue (`k`), and the fraction of the body surface in conductive contact with the substrate (`confrac`). The parameter `rc` estimates the cutaneous resistance (s/m) which controls evaporative water loss. Values of `rc` for a given ectotherm type can nevertheless vary substantially among species, and may be lower in semi-aquatic taxa, so users may wish to modify the default returned parameter values where more appropriate species-specific information is available. 
+The function returns a list containing both the supplied inputs and several derived parameters required by the ectotherm model. These include the estimated body volume (`volume`) and surface area (`area`), longwave emissivity (`em`), thermal conductivity of body tissue (`k`), and the fraction of the body surface in conductive contact with the substrate (`confrac`). For reptiles this can be particularly variable, so it may be worth users adjusting this value post-hoc depending on their organism of interst. It defaults to 0.1. The parameter `rc` estimates the cutaneous resistance (s/m) which controls evaporative water loss. Values of `rc` for a given ectotherm type can nevertheless vary substantially among species, and may be lower in semi-aquatic taxa, so users may wish to modify the default returned parameter values where more appropriate species-specific information is available. 
 
 The list also includes parameters controlling metabolic heat production. These are defined by the relationship $\small M = a_0 m^b Q_{10}^{(T-T_{ref})/10}$, where `a0` is a normalization constant, `b` is the mass-scaling exponent, `Q10` describes the temperature sensitivity of metabolic rate, and `Tref` is the reference temperature for metabolic scaling.
 
@@ -451,7 +454,7 @@ Each of the ectotherm model functions is designed is designed to match one of th
 ```{r eval=FALSE} 
 # ------------------------- Forest example ----------------------------------- #
 # Perform weather height adjustment
-climdata_adj <- weatherhgt_adjust(climdata, zin = 2, zout = 27, 
+climdata_adj <- weatherhgt_adjust(climdata, zin = 2, zout = 35, 
                                   lat = 49.96807, long = -5.215668)
 # Create vegetation parameters from Broadleaf Evergreen Tree (Temperate)
 n = 100
@@ -464,10 +467,10 @@ soilc <- createsoilc(soiltype = "Clay loam")
 hr <- which.max(climdata$temp) # hottest hour (4094)
 # return and plot profile
 mout <- return_profile(climdata_adj, hr = hr, vegp, soilc, paii, Lfrac, 
-                       lat = 49.96807, long = -5.215668, zref = 27, varn = "temp")
+                       lat = 49.96807, long = -5.215668, zref = 35, varn = "temp")
 # run ectotherm model using ectotherm variables previously created
 ecto_out <- profile_ecto(mout, climdata_adj, hr, vegp, soilc, ectop, 
-                         lat = 49.96807, long = -5.215668, zref = 27, 
+                         lat = 49.96807, long = -5.215668, zref = 35, 
                          maxiter = 100, tolerance = 1e-2)
 # plot profile
 plot(z ~ Tbody, data = ecto_out, type = "l", lwd = 2, 
@@ -476,6 +479,9 @@ abline(h = 0, lty = 2)
 abline(h = vegp$h, lty = 2)
 ```
 ![](images/new/plot8.png)
+
+The small step at the top of the canopy is the result of the ectotherm no longer being in direct contact with a physical surface. Obviously for some ectotherms, being suspended in the air is rather hypothetical!
+
 
 ### Ectotherm time series
 To generate a time-series of body temperatures, we just use the outputs from [RunMicro()] along with some of the other variables used when running this function:
@@ -487,7 +493,7 @@ paii <- PAIgeometry(vegp$pai, 7, 70, n = n) # pai of each layer
 Lfrac <- seq(0.5, 0.85, length.out = length(paii)) # Living vegetation fraction
 # return time series of microclimate 1m above ground
 mout <- RunMicro(climdata_adj, reqhgt = 1, vegp, soilc, paii, Lfrac, 
-                 lat = 49.96807, long = -5.215668, zref = 27)
+                 lat = 49.96807, long = -5.215668, zref = 35)
 # run ectotherm modelwith default maxiter and tolerence
 ecto_out <- timeseries_ecto(mout, climdata_adj, reqhgt = 1, vegp,
                             soilc, ectop, lat = 49.96807, 
@@ -506,29 +512,25 @@ To return values for all hours above and below ground we just use the outputs fr
 ```{r eval=FALSE} 
 # Run model for all heights and hours assuming inputs already created
 mout <- RunModelFull(climdata_adj, soilc, vegp, paii, Lfrac, 
-                     lat = 49.96807, long = -5.215668, zref = 27)
+                     lat = 49.96807, long = -5.215668, zref = 35)
 # Run ectotherm model with default maxiter and tolerence
 ecto_out <- full_ecto(mout, climdata_adj, vegp, soilc, ectop, 
                       lat = 49.96807, long = -5.215668)
 ```
 
-The function returns a list of two matrices: (1) `Tobodya` - the body temperature for very hour and height above ground, (2) `Tobodyb` - the body temperature for very hour and height below ground, assumed to be the same as the ground temperature. We can then produce a plot, which as we did for microclimate variables (see above)
+The function returns a list of two matrices: (1) `Tbodya` - the body temperature for every hour and height above ground, (2) `Tbodyb` - the body temperature for every hour and height below ground, assumed to be the same as the ground temperature. We can then produce a plot, which as we did for microclimate variables (see above)
 
 ```{r eval=FALSE} 
 require(terra)
-# Above ground: transpose so rows are heights, then expand to 2500 pixels (25m)
-Tabove <- t(ecto_out$Tbodya)
-Tabove <- expand_output(Tabove, 2500)
-# Below ground: reverse columns first so they run deepest -> surface, then transpose,
-# then expand to 300 pixels, then flip so rows run surface -> depth (3m)
-Tbelow <- t(ecto_out$Tbodyb[, ncol(ecto_out$Tbodyb):1])
-Tbelow <- expand_output(Tbelow, 300)
-Tbelow <- Tbelow[nrow(Tbelow):1, ]
-# Combine so raster rows run from top (25 m) to bottom (-3 m)
-Tbody <- rbind(Tabove[nrow(Tabove):1, ], Tbelow)
-# Convert to raster and set extent
-Tbody <- rast(Tbody)
-ext(Tbody) <- c(0, 8760, -3, 25)
+# Heights of every column, from the base of the soil to the height of the weather data
+zall <- c(-rev(mout$zsoil), mout$z, mout$za)
+Tbody <- cbind(ecto_out$Tbodyb[, ncol(ecto_out$Tbodyb):1], ecto_out$Tbodya, ecto_out$Tbody_above)
+# Interpolate each hour to every cm
+zout <- seq(min(zall), max(zall), by = 0.01)
+Tbody <- apply(Tbody, 1, function(x) approx(zall, x, zout)$y)
+# Convert to raster, with rows running from top to bottom
+Tbody <- rast(Tbody[nrow(Tbody):1, ])
+ext(Tbody) <- c(0, nrow(mout$tair), min(zall), max(zall))
 plot(Tbody, asp = NA)
 ```
 ![](images/new/plot10.png)
@@ -553,7 +555,7 @@ zCtr <- (zBtm + 0.5 * ectop$height) * 0.01
 soilc <- createsoilc(soiltype = "Loamy sand")
 # Run microclimate model with inbilt climate dataset
 mout <- RunMicro(climdata, reqhgt = zCtr, vegp = NA, soilc, paii = NA, Lfrac = NA, 
-                 lat = 49.96807, long = -5.215668, zref = 27)
+                 lat = 49.96807, long = -5.215668, zref = 2) 
  # Run ecotherm model time-series
 ecto_out <- timeseries_ecto(mout, climdata, zCtr, vegp = NA, soilc, ectop, 
                             lat = 49.96807, long = -5.215668)
@@ -563,6 +565,9 @@ plot(Tbody ~ tme, data = ecto_out, type = "l", col = "red",
      xlab = "Month", ylab = "Temperature")
 ```                      
 ![](images/new/plot11.png)
+
+The code gives a warning as it is a bit harder for the model to fully converge in sandy soil and it didn't do so in one hour. The effects are trivial.
+
 One can see from this plot, that if the ectotherm was forced to sun-bask continuously on bare ground, its body temperature would get excessively hot at times!
 
 ## Reference

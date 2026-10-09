@@ -55,6 +55,8 @@ knitr::opts_chunk$set(
   }
 </style>
 
+**Disclaimer:** this document is out of date while the package is in active development. It will be updated in due course.
+
 * [Overview](#overview)
 * [Radiation and albedo](#radiation-and-albedo)
   + [Downward direct radiation](#downward-direct-radiation)
