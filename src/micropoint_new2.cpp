@@ -8,10 +8,7 @@
 #include <stdexcept>
 #include <cstddef>
 
-// Where a run's time goes. Compiled in only when MP_PROFILE is defined (the
-// ordinary build defines nothing and these lines vanish): each MP_LAP adds the
-// time since the last one to a named part of the hour, and each MP_TALLY counts
-// one more of a kind of repeated work.
+// Optional timers and counters for profiling. Compiled in only with -DMP_PROFILE.
 #ifdef MP_PROFILE
 #include <chrono>
 static double g_profSeconds[20] = { 0 };
@@ -36,69 +33,37 @@ using namespace Rcpp;
 using namespace newmodel;
 
 constexpr double pi = 3.14159265358979323846;
-constexpr double sb = 5.67e-8;
-constexpr double ka = 0.41;
-constexpr double Mw = 0.018015; // kg/mol
-constexpr double RgasC = 8.314; // J/mol/K
-constexpr double g = 9.80665;
-constexpr double torad = 3.14159265358979323846 / 180.0;
-// Matric-potential offset used to measure how fast evaporation responds to
-// surface wetness. Taken as a fraction of the potential itself, which spans
-// orders of magnitude between saturation and the dry limit, with a floor for
-// the near-saturated end where the potential approaches zero.
+constexpr double sb = 5.67e-8;      // Stefan-Boltzmann constant (W/m2/K4)
+constexpr double ka = 0.41;         // von Karman constant
+constexpr double Mw = 0.018015;     // molar mass of water (kg/mol)
+constexpr double RgasC = 8.314;     // gas constant (J/mol/K)
+constexpr double g = 9.80665;       // gravity (m/s2)
+constexpr double torad = 3.14159265358979323846 / 180.0;   // degrees to radians
+// Step in soil water potential used to estimate how evaporation changes with
+// surface wetness: a fraction of the potential, but never less than the minimum.
 constexpr double PSI_SLOPE_FRAC = 1e-4;
 constexpr double PSI_SLOPE_MIN = 1.0;
-// Soil water potential of oven-dry soil (J/kg), the lower limit of the water
-// solve. Pore-air humidity there is below 0.001, far drier than any atmosphere,
-// so evaporation has limited itself long before a layer could reach it.
+// Water potential of oven-dry soil (J/kg): the driest the soil is allowed to get.
 constexpr double PSI_OVEN_DRY = -1.0e6;
-// The water available to roots runs from field capacity, the water a soil
-// holds against gravity, to the permanent wilting point, beyond which roots
-// draw nothing (both J/kg). They are plant-side potentials, the same in every
-// soil; each soil's retention curve turns them into water contents.
+// Water potentials (J/kg) between which roots can take up water: field capacity and wilting point.
 constexpr double PSI_FIELD_CAPACITY = -33.0;
 constexpr double PSI_WILTING_POINT = -1500.0;
-// Forward declaration: defined below (Bigleaf section), needed by several
-// earlier functions' damped iterates (the wind model's friction velocity, the
-// ground heat flux of the bare-ground and spin-up loops).
 inline double aitken1d(double oldv, double newv, Aitken1DState& st);
-// How closely the coupled hour is solved by default: the iteration stops when
-// a pass moves the air (the canopy air, or the ground surface where there is
-// no canopy) by less than this (K). Weather and vegetation inputs are rarely
-// known well enough to fix a temperature to better than a degree or two, so a
-// tenth of a degree is close enough for most uses and is the quickest; the
-// state is then typically within 0.05 to 0.15 K of the one no pass would move,
-// and in a few hours of a year a degree or more from it. The run functions
-// take a tolerance from the user and fall back on this value (exported
-// signatures must spell it as a number).
+// Default stopping tolerance (K): an hour is solved when one more pass changes
+// air temperature by less than this.
 constexpr double OUTER_TOLERANCE = 0.1;
-// How fully each hour of a vegetated run is solved, beyond its tolerance and
-// its limit on passes, which the run functions hand over directly. Set once
-// for a run from the accuracy level the user asks for, and held until set again.
-//   minPass: the least number of passes an hour takes before the stopping test
-//   may end it. The test asks only how far the last pass moved the canopy air,
-//   and an hour's first pass or two can move it little while leaves and ground
-//   are still far from settled; three passes guard against stopping there.
-//   leafSteps: successive approximations made to a leaf surface's temperature
-//   each time its energy balance is solved. Each takes the surface's emission
-//   and its saturation vapour pressure as linear about the last estimate; four
-//   leave nothing to gain, two leave about a hundredth of a degree.
-//   soilHeatLoosening, topTolerance: how closely the two balances solved
-//   inside every pass are closed, the soil's heat as a multiple of its usual
-//   closure and canopy-top air in K. Both are ordinarily closed far more
-//   closely than the hour, so that their stopping points do not show in it.
-//   nearLocal: the near field kept only for a layer's own foliage and the
-//   layer either side. The kernel reaches about one layer of ten, so these
-//   carry nearly all of it.
-//   leafClosed: how a leaf follows its air read from the balance just solved,
-//   not found by solving it again in warmer air.
-//   groundRow: whether the ground's surface temperature is found together
-//   with the canopy air (see groundfollow), and if so whether the soil is
-//   then solved again (1) or only its surface node moved (2).
+// Solver settings, fixed for a run by the accuracy level:
+//   minPass            fewest passes an hour takes
+//   leafSteps          refinements of each leaf temperature
+//   soilHeatLoosening  factor by which the soil heat tolerance is relaxed
+//   topTolerance       tolerance on canopy-top air temperature (K)
+//   groundRow          0: ground held while canopy air is solved; 1 or 2: ground
+//                      adjusted with the air (1 also re-solves soil heat)
+//   nearLocal          near field from a layer's own foliage and its two neighbours only
+//   leafClosed         leaf response to air temperature from a formula, not a second solve
 struct solversettings { int minPass = 3; int leafSteps = 4; double soilHeatLoosening = 1.0; double topTolerance = 1e-8; int groundRow = 0;
     bool nearLocal = false; bool leafClosed = false; };
-// The solves inside a pass (wind and stability, soil water, canopy-top air)
-// are allowed at least this many iterations however few passes the hour is.
+// Fewest iterations allowed to the wind, soil water and canopy-top solves.
 constexpr int INNER_ITERATIONS_LEAST = 50;
 
 static solversettings g_solver;
@@ -115,12 +80,9 @@ void SolverSettingsCpp(int minpass = 3, int leafsteps = 4, double soilheatloosen
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Solar model ***************************************** //
-// This section establishes solar geometry only.  It converts date/time and location into
-// sun position and local beam incidence; canopy interception itself is handled by the radiation model below.
+// Sun position and the angle of the beam on the ground.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// ** Calculates Astronomical Julian day ** //
-// Converts a calendar date to Julian day for the solar-geometry calculations.
-// This is purely astronomical bookkeeping; the meteorological timestep remains in local clock time.
+// Julian day from a calendar date.
 static int juldayCpp(int year, int month, int day)
 {
     double dd = day + 0.5;
@@ -131,9 +93,7 @@ static int juldayCpp(int year, int month, int day)
     int jd = static_cast<int>(j + (j > 2299160) * b);
     return jd;
 }
-// ** Calculates solar time ** //
-// Converts local clock time to apparent solar time using longitude and the equation of time.
-// Solar time is then used to place the sun correctly within the day.
+// Solar time (hours) from local time and longitude.
 static double soltimeCpp(int jd, double lt, double lond)
 {
     double m = 6.24004077 + 0.01720197 * (static_cast<double>(jd) - 2451545.0);
@@ -141,19 +101,18 @@ static double soltimeCpp(int jd, double lt, double lond)
     double st = lt + (4.0 * lond + eot) / 60.0;
     return st;
 }
-// Returns solar zenith and azimuth for the requested place, date and local time.
-// These angles drive slope illumination, direct-beam extinction and the animal radiation geometry.
+// Solar zenith and azimuth (radians).
 static solmodel solpositionCpp2(double latr, double lonr, int year, int month, int day, double lt)
 {
     solmodel solpos{};
     int jd = juldayCpp(year, month, day);
     double st = soltimeCpp(jd, lt, lonr * 180.0 / pi);
-    // Calculate solar zenith (degrees)
+    // Zenith
     double tt = 0.261799 * (st - 12.0);
     double dec = (pi * 23.5 / 180.0) * std::cos(2.0 * pi * ((jd - 159.5) / 365.25));
     double coh = std::sin(dec) * std::sin(latr) + std::cos(dec) * std::cos(latr) * std::cos(tt);
     solpos.zenr = std::acos(coh);
-    // Calculate solar azimuth (degrees)
+    // Azimuth
     double sh = std::sin(dec) * std::sin(latr) + std::cos(dec) * std::cos(latr) * std::cos(tt);
     double hh = std::atan(sh / std::sqrt(1.0 - sh * sh));
     double sazi = std::cos(dec) * std::sin(tt) / std::cos(hh);
@@ -168,9 +127,8 @@ static solmodel solpositionCpp2(double latr, double lonr, int year, int month, i
     }
     return solpos;
 }
-// ** Calculates solar index ** //
-// Projects the direct solar beam onto the local ground plane.
-// The result is zero when the sun is below the horizon or lies behind the slope.
+// Solar index: cosine of the angle between the beam and the ground surface.
+// Zero when the sun is below the horizon or behind the slope.
 static double solarindexCpp2(double sloper, double aspectr, double zenr, double azir)
 {
     double si;
@@ -190,17 +148,15 @@ static double solarindexCpp2(double sloper, double aspectr, double zenr, double 
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** Radiation model ****************************************************** //
-// Shortwave radiation is represented with a two-stream canopy model.  Static optical
-// coefficients are separated from the per-timestep evaluation so canopy geometry can be reused efficiently.
+// Shortwave radiation through the canopy, by a two-stream model.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// ** Calculate canopy extinction coefficient for sloped ground surfaces** //
-// Converts leaf-angle distribution and solar geometry into canopy beam-extinction coefficients.
-// k describes extinction normal to the beam; kd adjusts it for the illuminated ground-plane geometry used by the two-stream model.
+// Extinction coefficients for the direct beam: k over flat ground, kd for canopy
+// layers lying parallel to sloping ground. x is the leaf-angle parameter.
 static kstruct cankCpp(double zenr, double x, double si) {
     double k;
     if (zenr > (pi / 2.0)) zenr = pi / 2.0;
     if (si < 0.0) si = 0.0;
-    // Calculate normal canopy extinction coefficient
+    // Flat ground
     if (x == 1.0) {
         k = 1.0 / (2.0 * std::cos(zenr));
     }
@@ -214,10 +170,7 @@ static kstruct cankCpp(double zenr, double x, double si) {
         k = std::sqrt(x * x + (std::tan(zenr) * std::tan(zenr))) / (x + 1.774 * std::pow((x + 1.182), -0.733));
     }
     if (k > 6000.0) k = 6000.0;
-    // Extinction along the beam through canopy layers lying parallel to the
-    // ground. With the beam grazing the slope, or behind it, the path through
-    // the layers is unbounded and the beam is wholly intercepted: the same cap
-    // as above keeps that finite.
+    // Sloping ground. Capped where the beam grazes the slope or is behind it.
     double kd = (si > 0.0) ? k * std::cos(zenr) / si : 6000.0;
     if (kd > 6000.0) kd = 6000.0;
     kstruct kparams{};
@@ -225,13 +178,9 @@ static kstruct cankCpp(double zenr, double x, double si) {
     kparams.kd = kd;
     return kparams;
 }
-// Two-stream radiative transfer (Dickinson 1983 / Sellers 1985): canopy
-// optical parameters -- single-scattering albedo (om), backscatter (gma),
-// extinction (h) -- from leaf reflectance/transmittance and the leaf-angle
-// distribution (x). Feeds twostreamdifCpp/twostreamdirCpp below, which use
-// these to build the diffuse and direct-beam flux profiles through the canopy.
-// Builds the canopy optical state used by the two-stream shortwave solution.
-// Leaf reflectance/transmittance, PAI and leaf-angle distribution are reduced to the scattering, absorption and attenuation coefficients reused below.
+// Optical properties of the canopy for the two-stream model (Dickinson 1983;
+// Sellers 1985), from leaf reflectance and transmittance, leaf angle, plant area
+// and ground reflectance.
 static tsvegstruct twostreamvegCpp(double pai, double x, double lref, double ltra, double gref)
 {
     tsvegstruct params{};
@@ -254,11 +203,7 @@ static tsvegstruct twostreamvegCpp(double pai, double x, double lref, double ltr
     params.D2 = (params.u2 + params.h) * 1.0 / params.S1 - (params.u2 - params.h) * params.S1;
     return params;
 }
-// Closed-form two-stream coefficients (p1-p4) for the diffuse shortwave
-// flux profile through the canopy, from twostreamvegCpp's optical
-// parameters and the ground reflectance (gref).
-// Solves the boundary coefficients for diffuse shortwave transport through the canopy.
-// These coefficients are geometry-independent for a given canopy state and are subsequently evaluated at any cumulative PAI.
+// Two-stream coefficients for diffuse radiation.
 static tsdifstruct twostreamdifCpp(tsvegstruct& tsvegp)
 {
     tsdifstruct params{};
@@ -268,12 +213,7 @@ static tsdifstruct twostreamdifCpp(tsvegstruct& tsvegp)
     params.p4 = (-tsvegp.S1 / tsvegp.D2) * (tsvegp.u2 - tsvegp.h);
     return params;
 }
-// Closed-form two-stream coefficients (p5-p10) for the direct-beam
-// shortwave flux profile through the canopy, analogous to
-// twostreamdifCpp but driven by the beam extinction coefficient (kd)
-// instead of diffuse penetration.
-// Solves the direct-beam contribution to the two-stream canopy radiation field.
-// It combines beam extinction with scattering by foliage and reflection from the ground.
+// Two-stream coefficients for the direct beam.
 static tsdirstruct twostreamdirCpp(double pai, double kd, double gref, tsvegstruct tsvegp)
 {
     tsdirstruct params{};
@@ -287,37 +227,17 @@ static tsdirstruct twostreamdirCpp(double pai, double kd, double gref, tsvegstru
     params.p6 = (1.0 / tsvegp.D1) * ((v1 / tsvegp.S1) * (tsvegp.u1 - tsvegp.h) - (tsvegp.a + tsvegp.gma - tsvegp.h) * S2 * v2);
     params.p7 = (-1.0 / tsvegp.D1) * ((v1 * tsvegp.S1) * (tsvegp.u1 + tsvegp.h) - (tsvegp.a + tsvegp.gma + tsvegp.h) * S2 * v2);
     params.sig = -sig;
-    // Source of the downward beam-scattered stream: the beam scatters forward
-    // into it directly, and what it scatters upward is in turn scattered back
-    // down by the foliage above.
+    // Downward diffuse radiation produced by scattering of the direct beam.
     params.p8 = sstr * (tsvegp.a + tsvegp.gma + kd) + tsvegp.gma * ss;
     double v3 = (sstr + tsvegp.gma * gref - (params.p8 / params.sig) * (tsvegp.u2 - kd)) * S2;
     params.p9 = (-1.0 / tsvegp.D2) * ((params.p8 / (params.sig * tsvegp.S1)) * (tsvegp.u2 + tsvegp.h) + v3);
     params.p10 = (1.0 / tsvegp.D2) * (((params.p8 * tsvegp.S1) / params.sig) * (tsvegp.u2 - tsvegp.h) + v3);
     return params;
 }
-// Shortwave radiation absorbed by the ground, the whole canopy and each canopy
-// layer, from the two-stream solution evaluated for total shortwave and for PAR.
-// The beam is described by its irradiance normal to the sun (Rbeam) and by its
-// flux through the plane of the canopy layers (Rb): on a slope the layers are
-// taken to lie parallel to the ground, so that flux is the beam projected onto
-// the slope, which is what drives the direct-beam two-stream solution and what
-// the ground finally receives. Leaves intercept the beam according to their own
-// orientation, whatever the ground does, so their sunlit load is Rbeam times the
-// leaf-projection factor.
-//
-// A layer absorbs what enters it and does not leave: the difference between the
-// net downward flux at its top and at its bottom. Summed over the layers this is
-// exactly the canopy's absorption, so no energy is created or lost by the
-// discretisation, however coarse. The beam a layer intercepts is absorbed with the
-// leaf absorptance and the rest is scattered into the diffuse streams, whose
-// divergence carries it on; so the diffuse load on a leaf is the layer's
-// absorption less what it took directly from the beam. Sunlit leaves carry that
-// beam load in addition to the diffuse one, and the sunlit fraction is the
-// layer's mean, so that sunlit fraction times sunlit beam load times plant area
-// is the beam the layer intercepts. All leaf loads are per unit one-sided plant
-// area. Stream outputs are at each layer's top, the height of its air node; the
-// top layer's are the canopy-top boundary values.
+// Shortwave absorbed by the ground, the whole canopy and each layer, for total
+// shortwave and for PAR. A layer absorbs the difference between the net downward
+// flux at its top and at its bottom. Leaf values are per unit one-sided plant
+// area; sunlit leaves receive the direct beam as well as diffuse radiation.
 static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vector<double>& paii, double pai, double gref, double grefPAR, double lref, double lrefp, double Rswdown, double Rdif, double si, const solmodel& solp, const kstruct& kp, const tsvegstruct& tspveg, const tsvegstruct& tspvegPAR, const tsdifstruct& tspdif, const tsdifstruct& tspdifPAR, const tsdirstruct& tspdir, const tsdirstruct& tspdirPAR) {
     const int n = static_cast<int>(pia.size());
     radmodel out;
@@ -327,15 +247,13 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
     out.RswGabs = 0.0; out.RswCabs = 0.0;
     if (Rswdown <= 0.0) return out;
 
-    // The forcing is checked before any run (runchecks in R) so that the beam
-    // never exceeds what the sun can deliver; with the sun at or below the
-    // horizon, or behind the slope, there is no beam.
+    // Direct beam normal to the sun (Rbeam) and onto the ground surface (Rb).
     const double cosz = std::cos(solp.zenr);
     const double Rbeam = (cosz > 0.0) ? (Rswdown - Rdif) / cosz : 0.0;
     const double Rb = Rbeam * si;
 
-    // Beam-generated diffuse fluxes cannot exceed the largest reflectance in
-    // the vegetation-ground system, for total shortwave and for PAR.
+    // Upper limit on the fraction of the beam scattered: the larger of leaf and
+    // ground reflectance.
     double amx = gref; if (amx < lref) amx = lref;
     double amxp = grefPAR; if (amxp < lrefp) amxp = lrefp;
 
@@ -343,9 +261,7 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
     const double sil = kp.k * cosz;
     const double a = tspveg.a, ap = tspvegPAR.a;
 
-    // Diffuse streams at cumulative plant area p: downward and upward, from the
-    // diffuse two-stream solution driven by sky diffuse and from the direct-beam
-    // solution driven by the beam through the canopy plane.
+    // Downward and upward diffuse radiation at cumulative plant area p.
     auto streams = [&](double p, const tsvegstruct& tv, const tsdifstruct& td, const tsdirstruct& tb,
         double am, double& difd, double& up) {
         const double exp_mh = std::exp(-tv.h * p), exp_ph = std::exp(tv.h * p);
@@ -376,8 +292,7 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
         return Rb * std::exp(-kd * p) + difd - up;
     };
 
-    // Ground absorption: the beam that reaches the slope and the diffuse
-    // radiation arriving there, less the ground's reflection.
+    // Ground absorption: beam and diffuse radiation reaching the ground, less reflection.
     {
         double difd_g, up_g;
         streams(pai, tspveg, tspdif, tspdir, amx, difd_g, up_g);
@@ -386,8 +301,8 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
     // Whole-canopy absorption: what enters at the top and does not reach the ground.
     out.RswCabs = netdown(0.0, false) - netdown(pai, false);
 
-    // Each layer is a slab of foliage; pia is cumulative plant area to its bottom.
-    // The streams reported for a layer are those entering it from above.
+    // Each layer: pia is cumulative plant area to its bottom. The radiation reported
+    // for a layer is that entering its top.
     for (int i = 0; i < n; ++i) {
         const double pbot = pia[i];
         const double ptop = std::max(pbot - paii[i], 0.0);
@@ -406,10 +321,8 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
         if (sf > 1.0) sf = 1.0;
         out.sunfrac[i] = sf;
 
-        // Absorption of the layer, total shortwave and PAR, per unit ground area;
-        // then per unit plant area, split into the beam taken by sunlit leaves
-        // and the diffuse load shared by all leaves. A layer without foliage
-        // absorbs nothing, and its leaf loads are the local diffuse field.
+        // Absorption per unit plant area: diffuse radiation shared by all leaves (Dsw,
+        // Dpar), with the beam added for sunlit leaves.
         double Dsw, Dpar;
         if (paii[i] > 1e-9) {
             const double Asw = netdown(ptop, false) - netdown(pbot, false);
@@ -433,22 +346,15 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************** Longwave radiation model ***************************** //
-// Longwave exchange is treated as emission and absorption among sky, ground and canopy layers.
-// Geometry-dependent view weights are precomputed; temperatures then determine the changing emitted fluxes.
+// Longwave exchange between sky, ground and canopy layers.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Longwave view-factor weights between every canopy layer, the ground and
-// the sky, from Beer-Lambert attenuation through the cumulative PAI
-// between two points, then rescaled per layer so the total view factor
-// (weights to other layers + transmission to ground/sky) matches the
-// physical two-sided exchange each layer should see.
-// Precomputes the geometric coupling among canopy layers, ground and sky for longwave exchange.
-// The weights depend only on the vertical PAI distribution, so they can be reused while temperatures and emitted longwave change each timestep.
+// Weights giving how much of each other layer, the ground and the sky each layer
+// sees. They depend on plant area only, so are calculated once.
 static LWweights lwradweights(const std::vector<double>& paii) {
     int n = static_cast<int>(paii.size());
     double pait = 0.0;
     for (int i = 0; i < n; ++i) pait += paii[i];
-    // Plant area above and below the middle of each layer, where the layer's
-    // foliage is taken to sit: half its own plant area lies either side of it.
+    // Plant area above and below the middle of each layer.
     std::vector<double> paia(n);
     std::vector<double> paib(n);
     double below = 0.0;
@@ -457,9 +363,8 @@ static LWweights lwradweights(const std::vector<double>& paii) {
         paia[i] = pait - paib[i];
         below += paii[i];
     }
-    // Longwave exchange weight between layers i and j: leaf area of j,
-    // attenuated by Beer-Lambert transmission through the canopy gap
-    // between them.
+    // Weight between two layers: plant area of the other layer times transmission
+    // through the foliage between them.
     NumericMatrix wgts(n, n);
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) {
@@ -471,7 +376,7 @@ static LWweights lwradweights(const std::vector<double>& paii) {
             else wgts(i, j) = 0.0;
         }
     }
-    // Calculate transmission from ground and canopy
+    // Transmission from each layer to the sky (trh) and to the ground (trg).
     std::vector<double> trg(n);
     std::vector<double> trh(n);
     for (int i = 0; i < n; ++i) {
@@ -483,9 +388,7 @@ static LWweights lwradweights(const std::vector<double>& paii) {
         wgt[i] = 0.0;
         for (int j = 0; j < n; ++j) wgt[i] += wgts(i, j);
     }
-    // A leaf has two sides, so layer i's total view factor (weights to
-    // other layers, ground and sky) should sum to 2; rescale to correct
-    // for the exponential-attenuation approximation's discretisation error.
+    // Rescale so each layer's weights sum to 2: a leaf has two sides.
     std::vector<double> wsum(n);
     for (int i = 0; i < n; ++i) wsum[i] = wgt[i] + trh[i] + trg[i];
     std::vector<double> mu(n);
@@ -496,8 +399,7 @@ static LWweights lwradweights(const std::vector<double>& paii) {
     for (int i = 0; i < n; ++i) {
         for (int j = 0; j < n; ++j) wgts(i, j) = wgts(i, j) * mu[i];
     }
-    // Same rescaling for the ground's view of the canopy, which is
-    // one-sided: weights plus transmission to sky should sum to 1.
+    // The ground's weights, rescaled to sum to 1.
     std::vector<double> wgtg(n);
     for (int i = 0; i < n; ++i) {
         wgtg[i] = trg[i] * paii[i];
@@ -516,18 +418,12 @@ static LWweights lwradweights(const std::vector<double>& paii) {
     out.trsky = trsky;
     return out;
 }
-// Stefan-Boltzmann helper: returns absolute temperature to the fourth power from Celsius input.
+// Absolute temperature to the fourth power.
 static double radem(double tc)
 {
     return std::pow(tc + 273.15, 4.0);
 }
-// Longwave balance for each canopy layer and the ground, from
-// lwradweights' view-factor weights: downward flux at a layer is sky
-// emission attenuated to it plus emission from layers above; upward is
-// ground emission attenuated to it plus emission from layers below;
-// absorption is the emissivity-weighted mean of the two (both leaf faces).
-// Computes longwave exchange for the current ground and leaf temperatures.
-// Sky, ground and canopy emission are propagated with the precomputed view weights to give layer and ground absorption used by their energy balances.
+// Longwave absorbed by each canopy layer and by the ground, given their temperatures.
 static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double tground, double groundem, double vegem,
     const std::vector<double>& tleaf)
 {
@@ -536,14 +432,8 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
     std::vector<double> Rlwdown(n);
     std::vector<double> Rlwup(n);
     std::vector<double> leafLW(n);
-    // Longwave leaving each layer's foliage, and the ground, towards the other
-    // surfaces. A surface that is not black emits less than a black one would
-    // and reflects the rest of what falls on it; among foliage and ground at
-    // much the same temperature the two together make up what a black surface
-    // at that temperature would emit, and that is what its neighbours receive.
-    // Counting the emission alone would have every surface absorb less from
-    // its neighbours than it emits to them even when all are at one
-    // temperature, and the canopy would cool without limit in still air.
+    // Longwave leaving each layer and the ground: black-body emission, which
+    // includes the longwave a surface reflects as well as what it emits.
     for (int i = 0; i < n; ++i) leafLW[i] = sb * radem(tleaf[i]);
     double groundLW = sb * radem(tground);
     for (int i = 0; i < n; ++i) {
@@ -559,9 +449,7 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
         }
         Rlwdown[i] = lwsky + lwcand;
         Rlwup[i] = lwgro + lwcanu;
-        // The view weights sum to two, one for each face, so the two streams
-        // together are what both faces of a leaf receive per unit one-sided
-        // plant area, which is how every leaf load is expressed.
+        // Absorbed by both sides of the leaves, per unit one-sided plant area.
         RlwLabs[i] = vegem * (Rlwdown[i] + Rlwup[i]);
     }
     double lwgrfromcan = 0.0;
@@ -582,45 +470,32 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // *************************************************** Wind model ****************************************************** //
-// Wind is split into an above-canopy MOST solution and a dimensionless within-canopy attenuation profile.
-// Sensible heat feeds back on atmospheric stability, so friction velocity and Obukhov length are solved iteratively.
+// Wind above and within the canopy. Friction velocity and atmospheric stability
+// are solved together.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// ** Worker functions **
-// Estimates canopy zero-plane displacement from canopy height and total PAI.
-// This locates the effective momentum sink used by the above-canopy similarity profiles.
+// Zero-plane displacement height, from canopy height and plant area index.
 // [[Rcpp::export]]
 double zeroplanedisCpp2(double h, double pai)
 {
-    // A surface with no foliage has no displacement; the bound only keeps the
-    // expression defined there.
+    // Avoids division by zero when there is no foliage.
     if (pai < 1e-9) pai = 1e-9;
     double d = (1.0 - (1.0 - exp(-std::sqrt(7.5 * pai))) / std::sqrt(7.5 * pai)) * h;
     return d;
 }
-// Roughness length of bare soil where none is given, and the lower bound on any
-// vegetated surface, since no canopy presents the wind a smoother surface than
-// the ground it stands on. The soil's own value is supplied with the soil
-// parameters and carried to every place the ground's roughness matters.
+// Default roughness length of bare soil (m).
 constexpr double Z0_GROUND = 0.004;
-// Drag partition between the foliage and the ground beneath it, after Raupach
-// (1994) Eq. 7 with his C_R = 0.3. Denser foliage takes a larger share of the
-// momentum and so generates a larger friction velocity for a given wind at
-// canopy top -- but only until the elements begin to shelter one another, beyond
-// which further foliage adds no drag and the ratio stops rising. Raupach sets
-// that ceiling from measurements over canopies dense enough for sheltering to
-// have set in.
-//
-// The ground's share is its own drag coefficient referred to the wind at canopy
-// height, which is what a logarithmic profile over the soil gives there. It
-// therefore depends on how tall the canopy is, and a stand with no foliage is
-// exactly as rough as the soil it grows on, whatever its height.
+// Ratio of friction velocity to wind speed at canopy top (Raupach 1994, Eq. 7).
+// It rises with plant area up to a maximum (UF_UH_MAX). With no foliage it is the
+// ratio for bare soil at the same height.
 constexpr double DRAG_ELEMENT = 0.3;
 constexpr double UF_UH_MAX = 0.3;
+// Bare soil
 static double groundVelocityRatio(double h, double z0)
 {
     const double hh = std::max(h, 1.001 * z0);
     return std::min(ka / std::log(hh / z0), UF_UH_MAX);
 }
+// Soil and foliage
 static double frictionVelocityRatio(double h, double pai, double z0)
 {
     const double b0 = groundVelocityRatio(h, z0);
@@ -628,9 +503,7 @@ static double frictionVelocityRatio(double h, double pai, double z0)
     if (be > UF_UH_MAX) be = UF_UH_MAX;
     return be;
 }
-// How far the canopy has closed aerodynamically: nought over bare ground, one
-// once the foliage takes all the drag it can. The canopy's coherent eddies, and
-// the roughness sublayer they create above it, strengthen in step with it.
+// Canopy closure: 0 for bare ground, 1 when more foliage adds no more drag.
 static double canopyClosure(double h, double pai, double z0)
 {
     const double b0 = groundVelocityRatio(h, z0);
@@ -638,72 +511,48 @@ static double canopyClosure(double h, double pai, double z0)
     const double f = (frictionVelocityRatio(h, pai, z0) - b0) / (UF_UH_MAX - b0);
     return std::min(std::max(f, 0.0), 1.0);
 }
-// Convergence of the mixing depth against the wind profile that determines it.
-// Drag a leaf exerts on the air moving past it, per unit of leaf area.
+// Drag coefficient of a leaf.
 constexpr double LEAF_DRAG = 0.25;
+// Iteration limit, tolerance and relaxation for the mixing length of the canopy wind profile.
 constexpr int WIND_MAX_ITER = 60;
 constexpr double WIND_TOL = 1e-10;
 constexpr double WIND_RELAX = 0.6;
-// Coherent eddies shed at the canopy top stir the air through a layer one to two
-// canopy heights deep. Within it the wind is stronger, and its gradient weaker,
-// than surface-layer theory allows for, so the surface grips the air above more
-// firmly than its geometry alone suggests. Raupach (1992) sets the size of that
-// departure at the canopy top as ln(c_w) - 1 + 1/c_w, where c_w is the depth of
-// the sublayer in units of the canopy's own aerodynamic depth: 2 over a closed
-// canopy, falling to 1 (no sublayer) as the canopy opens to bare ground.
+// Strength of the roughness sublayer at canopy top (Raupach 1992):
+// ln(cw) - 1 + 1/cw, where cw is 2 over a closed canopy and 1 over bare ground.
 static double sublayerInfluence(double h, double pai, double z0, double fade)
 {
     const double cw = 1.0 + canopyClosure(h, pai, z0) * fade;
     return std::log(cw) - 1.0 + 1.0 / cw;
 }
-// Vegetation no taller than the soil beneath it is rough presents no canopy
-// profile for the sublayer description to apply to. This bounds the canopy-top
-// wind away from zero over such a surface.
+// Smallest value allowed for the log term that gives wind at canopy top.
 constexpr double LNTERM_MIN = 0.05;
-// ** Calculate roughness length ** //
-// The height at which a logarithmic wind profile extrapolated down from well
-// above the canopy reaches zero, and so the measure of how firmly the surface
-// grips the air passing over it. Raupach (1992) Eq. 27 builds it from the drag
-// partition and the roughness-sublayer influence. Both are properties of canopy
-// geometry alone and neither varies with atmospheric stability, so no diabatic
-// correction is passed in here.
+// Roughness length for momentum (Raupach 1992, Eq. 27), from canopy geometry.
 // [[Rcpp::export]]
 double roughlengthCpp2(double h, double pai, double d, double z0 = 0.004, double fade = 1.0)
 {
     double Be = frictionVelocityRatio(h, pai, z0);
     double zm = (h - d) * std::exp(-ka / Be + sublayerInfluence(h, pai, z0, fade));
-    // safety check to stop the roughness-sublayer correction reversing profile
+    // No more than 0.9 of the height of canopy top above the displacement height.
     if (zm > (0.9 * (h - d))) zm = 0.9 * (h - d);
-    // No canopy presents the wind a smoother surface than the ground it stands
-    // on. The drag partition already tends to the soil's roughness as foliage
-    // thins, so this bound binds only for vegetation of a few millimetres, where
-    // it and the cap above cannot both hold; it is applied second so it wins,
-    // since a surface whose soil is rougher than its plants are tall is bare
-    // ground. Canopies that short are turned away before reaching here.
+    // No less than the roughness length of the soil.
     if (zm < z0) zm = z0;
     return zm;
 }
-// ** Calculate molar density of air ** //
-// Returns molar density of air from temperature and pressure.
-// The model works with molar heat capacity/conductance in several energy-balance calculations.
+// Molar density of air (mol/m3).
 static double phairCpp(double tc, double pk)
 {
     double tk = tc + 273.15;
     double ph = 44.6 * (pk / 101.3) * (273.15 / tk);
     return ph;
 }
-// ** Calculate specific heat of air at constant pressure ** //
-// Returns molar heat capacity of air at constant pressure as a weak function of temperature.
+// Molar specific heat of air at constant pressure (J/mol/K).
 static double cpairCpp(double tc)
 {
     double cp = 2e-05 * tc * tc + 0.0002 * tc + 29.119;
     return cp;
 }
-// Computes the integrated diabatic stability correction for momentum
-// (Monin-Obukhov similarity theory) and adjusts the wind profile
-// accordingly.
-// Integrated Monin-Obukhov stability correction for momentum.
-// It modifies the logarithmic wind profile under unstable and stable stratification, with strong-stability behaviour deliberately bounded.
+// Integrated stability correction for momentum (ze is height over Obukhov length).
+// Bounded in both stable and unstable air.
 // [[Rcpp::export]]
 double dpsimCpp2(double ze)
 {
@@ -721,19 +570,8 @@ double dpsimCpp2(double ze)
     }
     return psim;
 }
-// **  Calculate integrated diabatic correction coefficient for heat ** //
-// Stable branch tapers the same way as dpsimCpp2 above, but with slope
-// 4.7/0.74 (heat) instead of 4.7 (momentum).
-// Integrated Monin-Obukhov stability correction for heat.
-// This is the heat-transfer counterpart of dpsimCpp2 and enters aerodynamic resistance and temperature/humidity profiles.
-//
-// Under strong convection the unstable correction is bounded, so that the
-// resistance of a layer cannot fall towards nothing. The bound is approached
-// smoothly rather than imposed as a cap: a cap leaves the correction flat above
-// the height where it bites, which makes the implied mixing collapse abruptly
-// there -- the diffusivity of a surface layer would drop several-fold in a
-// single step. Below the knee the correction is the usual one, unchanged, which
-// covers all but strongly convective conditions (z/L above about -1).
+// Integrated stability correction for heat. The unstable branch approaches its
+// limit (PSIH_CAP) smoothly from PSIH_KNEE; the stable branch is bounded.
 constexpr double PSIH_KNEE = 1.5;
 constexpr double PSIH_CAP = 3.0;
 constexpr double PSIH_STABLE_SLOPE = 4.7 / 0.74;
@@ -756,11 +594,8 @@ static double dpsihCpp2(double ze)
     }
     return psih;
 }
-// The dimensionless temperature gradient that the correction above implies,
-// phi = 1 - zeta*dpsi/dzeta. A surface layer's diffusivity is ka*u*(z-d)/phi,
-// so wherever this model joins a layer of its own to one described by the
-// integrated correction, it uses this gradient, so that diffusivity is
-// continuous at the join. Canopy mixing (makeColumn) uses it too.
+// Dimensionless temperature gradient (phi_h) matching the correction above.
+// Heat diffusivity in the surface layer is ka u* (z - d) / phi_h.
 static double phihStar(double ze)
 {
     if (ze < 0.0) {
@@ -768,8 +603,7 @@ static double phihStar(double ze)
         const double phi = 1.0 / y;   // unmodified branch: Businger-Dyer form
         const double psiraw = 2.0 * std::log((1.0 + y) / 2.0);
         if (psiraw <= PSIH_KNEE) return phi;
-        // Above the knee the correction's slope is reduced by the smooth
-        // saturation, and the gradient relaxes back towards its neutral value.
+        // Above the knee the gradient returns towards its neutral value.
         const double span = PSIH_CAP - PSIH_KNEE;
         const double c = std::cosh((psiraw - PSIH_KNEE) / span);
         return 1.0 + (phi - 1.0) / (c * c);
@@ -777,13 +611,9 @@ static double phihStar(double ze)
     const double c = std::cosh(ze / PSIH_STABLE_ZMAX);
     return 1.0 + PSIH_STABLE_SLOPE * ze / (c * c);
 }
-// Inverts psi_m(L) on the stable branch: finds the Obukhov length L whose
-// stability correction equals a given target. psi_m(L) is 0 at both
-// L->0+ and L->infinity with an interior peak, so it is not one-to-one --
-// a target beyond the peak has no exact solution and is taken as the
-// peak's L (the most stable case the profile can represent).
-// Maps a requested stable momentum correction back to an Obukhov length.
-// This is needed when the model caps the stable MOST correction: because the bounded correction is not one-to-one in L, the physically milder branch is selected and unattainable targets saturate at the peak.
+// Obukhov length, in stable air, that gives a stated stability correction for
+// momentum. The correction peaks at one length and falls either side: the length
+// returned is at or above the peak, and a target above the peak returns the peak.
 static double lStableFinalSearch(double psi_m, double zref, double d, double zm)
 {
     if (psi_m <= 1e-12) return std::numeric_limits<double>::infinity();
@@ -792,6 +622,7 @@ static double lStableFinalSearch(double psi_m, double zref, double d, double zm)
         return dpsimCpp2(zm / L) - dpsimCpp2((zref - d) / L);
     };
 
+    // Find the length at which the correction peaks: coarse scan, then golden-section search.
     const int NSCAN = 60;
     double bestL = 1.0, bestVal = psiOfL(1.0);
     double logLo = std::log(1e-4), logHi = std::log(1e6);
@@ -817,6 +648,7 @@ static double lStableFinalSearch(double psi_m, double zref, double d, double zm)
 
     if (psi_m >= psiPeak) return Lpeak;
 
+    // Bisect above the peak for the length that gives the target.
     double lo = Lpeak, hi = std::max(Lpeak * 100.0, 1e6);
     while (psiOfL(hi) > psi_m && hi < 1e12) hi *= 10.0;
     for (int i = 0; i < 80; ++i) {
@@ -825,10 +657,7 @@ static double lStableFinalSearch(double psi_m, double zref, double d, double zm)
     }
     return 0.5 * (lo + hi);
 }
-// The same, remembering its last answer. The length sought depends only on the
-// heights and the roughness, which stay as they are while an hour's wind and
-// stability are found, though the search is asked for at every step of that
-// iteration and takes several hundred evaluations of the stability function.
+// As above, reusing the last answer when the inputs are unchanged.
 static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
 {
     static double lastPsi = -1.0, lastZref = -1.0, lastD = -1.0, lastZm = -1.0, lastL = 0.0;
@@ -838,13 +667,9 @@ static double lStableFinalCpp(double psi_m, double zref, double d, double zm)
     }
     return lastL;
 }
-// Caps the stability correction psi_m(L) at a fraction (beta) of the
-// neutral log-law term ln((zref-d)/zm), on both the unstable (L<0) and
-// stable (L>=0) branches. Aerodynamic resistance uses ln(...) - psi_m, so
-// an unbounded psi_m under strong instability/stability would drive
-// resistance toward zero or negative -- an unphysical result.
-// Keeps the diagnosed Obukhov length within the range for which the aerodynamic profile remains usable.
-// Rather than clipping fluxes afterwards, it limits the corresponding MOST correction and returns a consistent L for subsequent wind and heat calculations.
+// Limits the Obukhov length so that the stability correction for momentum is no
+// more than a fraction (beta) of the log term ln((zref - d)/zm). This keeps
+// resistances positive in very stable or very unstable air.
 static double clipMOlength(double L, double zref, double d, double zm, double beta = 0.9)
 {
     const double ln_z = std::log((zref - d) / zm);
@@ -852,7 +677,7 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
     const double tol = 1e-4;
     double psim = dpsimCpp2(zm / L) - dpsimCpp2((zref - d) / L);
     if (L < 0.0 && psim < psim_min) {
-        // Bisect for the L giving psim = psim_min, between -500 and the original L.
+        // Unstable: bisect for the length at which the correction equals the limit.
         double L_low = -500.0;
         double L_high = L;
         double L_mid;
@@ -869,9 +694,8 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
         return L_high;  // corrected L that satisfies psim > min
     }
     if (L >= 0.0) {
-        // Compares L itself against a bound, not psi_m(L) against a bound:
-        // psi_m(L) is not monotonic on this branch (see lStableFinalCpp),
-        // so an over-stable L can still show a small psi_m.
+        // Stable: the length itself is compared with its limit, because the correction
+        // is not monotonic in the length.
         const double psim_max = beta * ln_z;
         const double L_bound = lStableFinalCpp(psim_max, zref, d, zm);
         if (L < L_bound) {
@@ -880,23 +704,15 @@ static double clipMOlength(double L, double zref, double d, double zm, double be
     }
     return L;
 }
-// ** Calculate scaled wind profile ** //
-// How far into the canopy wind penetrates, as a fraction of the speed at canopy
-// top. Only the shape of the canopy sets it, so it is fixed for a given stand
-// and the weather scales it afterwards -- which is why it is worked out once
-// rather than every hour.
+// Wind in each canopy layer as a fraction of wind at canopy top. It depends on
+// the canopy only, so is calculated once.
 static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
     int n = static_cast<int>(vegp.paii.size());
     const double dz = vegp.hgt / n;
     const double beta = frictionVelocityRatio(vegp.hgt, vegp.pai, z0);
 
-    // Wind is bled out of the canopy by drag on the foliage it passes, and the
-    // depth over which that happens is set by the size of the eddies doing the
-    // mixing. Where foliage is dense the momentum is taken from the air quickly
-    // and the wind falls away sharply; through an open trunk space it survives
-    // almost unchanged. The cube root is what the balance between drag and
-    // mixing yields -- doubling the foliage in a layer does not double the
-    // slowing, because the wind reaching it has already been reduced.
+    // Wind falls with the foliage passed on the way down: the cube root of foliage
+    // density, summed from canopy top.
     std::vector<double> a(n), a13(n), cumA(n), ui(n);
     for (int i = 0; i < n; ++i) {
         a[i] = vegp.paii[i] / dz;
@@ -908,14 +724,9 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
         cumA[i] = running;              // foliage encountered between here and canopy top
     }
 
-    // The eddies are as deep as the foliage that generates them, so the mixing
-    // depth and the wind profile settle on each other: foliage carried high in
-    // the canopy shortens the mixing depth, which in turn concentrates the
-    // slowing higher up. The foliage density that sets it is the one the wind
-    // actually meets -- weighted towards where momentum is being removed, not a
-    // plain average over a depth much of which the wind may never reach. For a
-    // canopy of uniform foliage that weighting returns the plain average, and
-    // the profile is then the single exponential of Harman and Finnigan (2007).
+    // The mixing length depends on the foliage density where momentum is absorbed,
+    // which depends on the wind profile, so the two are iterated. For uniform foliage
+    // the result is the exponential profile of Harman and Finnigan (2007).
     double aeff = vegp.pai / vegp.hgt;
     double lmix = 2.0 * beta * beta * beta / (LEAF_DRAG * aeff);
     for (int iter = 0; iter < WIND_MAX_ITER; ++iter) {
@@ -933,17 +744,8 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
         lmix += WIND_RELAX * (lnew - lmix);
     }
 
-    // Foliage drag alone would leave the air still moving where it meets the
-    // soil. Nearest the ground it is the soil surface rather than the foliage
-    // that brings the wind to rest, and the shear this leaves is what ventilates
-    // the litter and the soil below it. How deep that reaches is a judgement
-    // rather than a result, taken here as a tenth of the canopy; the wind is
-    // carried across the join unbroken, so the choice shifts where the two
-    // descriptions meet without putting a step in the profile.
-    // Vegetation short enough that its lowest layers sit among the soil's own
-    // roughness elements has no such near-ground layer to resolve: there the
-    // ground is not a surface the wind runs over but part of the roughness
-    // itself, and the foliage description holds all the way down.
+    // In the lowest tenth of the canopy the wind follows a logarithmic profile down
+    // to the soil. Not applied if the lowest layer lies within the soil's roughness.
     int nground = n / 10;
     const double zLowest = 0.5 * dz;
     if (nground >= 1 && zLowest > z0) {
@@ -956,16 +758,9 @@ static std::vector<double> windprofileCpp(const vegpstruct& vegp, double z0) {
     }
     return ui;
 }
-// Strength of the vertical gusts at the forest floor, as a fraction of the
-// friction velocity. The turbulence near the ground is delivered from the shear
-// layer at canopy top and is worn down on its way through the foliage, so it
-// decays with the drag area it has to pass (Massman and Weil 1999). In dense
-// foliage elements shelter one another and add less drag than their area
-// suggests (Massman 1997), so the floor never becomes wholly still. With no
-// foliage the gusts reach the ground undiminished, as over bare soil. The decay
-// rate corresponds to Massman and Weil's closure constant at 0.042, inside the
-// range they calibrated, and returns the floor value of the standard canopy
-// gust profile for a moderately dense canopy (plant area index 4).
+// Vertical gust strength at the ground as a fraction of friction velocity. It
+// decays with the drag area of the foliage above, reduced for sheltering
+// (Massman and Weil 1999; Massman 1997).
 constexpr double GUST_DECAY = 4.18;   // per unit of sheltered drag area
 constexpr double SHELTER = 0.4;       // Massman's sheltering factor
 static double floorGustRatio(const vegpstruct& vegp, double a1)
@@ -973,30 +768,20 @@ static double floorGustRatio(const vegpstruct& vegp, double a1)
     const size_t n = vegp.paii.size();
     double zeta = 0.0;
     for (size_t i = 0; i < n; ++i) {
-        // Sheltering grows with how closely the layer's foliage is packed: its plant
-        // area per unit height, expressed relative to the canopy's height.
+        // Drag area of the layer, reduced by sheltering where foliage is dense.
         zeta += LEAF_DRAG * vegp.paii[i] / (1.0 + SHELTER * static_cast<double>(n) * vegp.paii[i]);
     }
     return a1 * std::exp(-GUST_DECAY * zeta);
 }
-// How much more effectively the air at canopy top mixes heat than surface-layer
-// similarity allows there. Over a closed canopy the coherent eddies shed by the
-// canopy's shear layer raise heat diffusivity two to three times (Raupach,
-// Finnigan and Brunet 1996), and the upper end of that range is taken. No such
-// shear layer forms over open ground, where eddies are attached to the soil, so
-// the enhancement fades to none as the canopy opens.
+// Factor by which heat diffusivity at canopy top exceeds the surface-layer value:
+// 3 over a closed canopy (Raupach et al. 1996), 1 over bare ground.
 constexpr double CANOPY_TOP_ENHANCEMENT = 3.0;
 static double canopyEnhancement(double h, double pai, double z0, double fade)
 {
     return 1.0 + (CANOPY_TOP_ENHANCEMENT - 1.0) * canopyClosure(h, pai, z0) * fade;
 }
-// Lowest height at which weather forcing can be referred to this canopy. The
-// model finds friction velocity from the wind there by the logarithmic law, and
-// reaches canopy top from there through the diffusivity column, so the height
-// must lie above the layer in which the canopy's eddies distort the wind
-// profile. It is taken as the height at which a surface layer's diffusivity
-// would equal the canopy-top value, which is always above that layer. Over bare
-// ground it is the ground itself.
+// Lowest height at which the weather data may be measured: the height at which
+// surface-layer diffusivity equals the diffusivity at canopy top.
 // [[Rcpp::export]]
 double referenceheightCpp(double h, double pai, double z0 = 0.004)
 {
@@ -1004,21 +789,13 @@ double referenceheightCpp(double h, double pai, double z0 = 0.004)
     const double d = zeroplanedisCpp2(h, pai);
     return d + canopyEnhancement(h, pai, z0, 1.0) * (h - d);
 }
-// Height above the displacement plane at which stability acts on the air at
-// canopy top: the canopy's eddies there are larger than their height above the
-// displacement plane would allow in a surface layer, and buoyancy acts on an
-// eddy according to its size (see stretchedHeight below).
+// Height above the displacement height used for stability at canopy top.
 static double canopyTopStabilityHeight(double h, double d, double enhancement)
 {
     return 0.5 * (1.0 + enhancement) * (h - d);
 }
-// Resistance between the level at which a canopy treated as one big leaf gives
-// up its heat and canopy top. A surface exchanges heat less readily than
-// momentum, which is expressed by a roughness length for heat a fifth of the one
-// for momentum; the big leaf sits that far above the displacement plane and the
-// path from it to canopy top is a surface layer's. The roughness length here
-// carries no roughness-sublayer term, because the air the sublayer occupies lies
-// above canopy top and is accounted for there by the diffusivity column.
+// Resistance to heat between the canopy treated as one big leaf (the spin-up
+// model) and canopy top. Its roughness length for heat is a fifth of that for momentum.
 static double bigLeafToCanopyTop(double h, double pai, double d, double uf, double LL, double z0)
 {
     const double dt = h - d;
@@ -1028,30 +805,9 @@ static double bigLeafToCanopyTop(double h, double pai, double d, double uf, doub
     const double r = (std::log(dt / zh0) + dpsihCpp2(zh0 / LL) - dpsihCpp2(dt / LL)) / (ka * uf);
     return std::max(r, 0.0);
 }
-// A guard against still air. Every exchange in the model scales with the
-// friction velocity, and so with the wind; as the wind dies a fixed source of
-// heat demands an ever larger temperature difference to carry it away, and the
-// solved air ends up pinned to its plausibility bounds with its vertical
-// structure lost. Two pieces of physics already keep exchange going in light
-// wind: convection driven by a heated surface, which adds its own velocity to
-// the wind, and free convection at the leaf. Neither acts on a calm, stable
-// night, and that is the case this guard is for: the friction velocity used to
-// build resistances and canopy mixing is never less than this wind would give
-// over the same surface. It is a guard, not a description of how still air
-// behaves; its value was found by trial as the least that prevents the
-// collapse. Expressing it as a wind lets one value mean the same weather over
-// forest, grass and bare soil, and combining in quadrature leaves ordinary
-// winds untouched with no threshold at which anything jumps.
-//
-// The stability of the air is found from the same guarded friction velocity.
-// The Obukhov length goes as its cube, so in near-calm air the unguarded value
-// is so small that any heat flux at all, however slight, drives the stability
-// correction to its limit: the air is then either fully stable or fully
-// unstable according to the sign of a heat flux that may be a fraction of a
-// watt, mixing differs severalfold between the two, and each state produces a
-// heat flux of the opposite sign to the one that led to it, so the hour has
-// no consistent state. With the guard the correction passes smoothly through
-// neutral as the heat flux changes sign.
+// Guard against still air; not physics. Friction velocity is never less than a
+// wind of U_MIN_MIXING (m/s) would give over the same surface, the two combined
+// in quadrature. Used for resistances, canopy mixing and stability.
 constexpr double U_MIN_MIXING = 0.5;
 static double guardedFrictionVelocity(double uf, double ufPerUnitWind)
 {
@@ -1062,24 +818,10 @@ static double mixingFrictionVelocity(const windmodel& windvars)
 {
     return guardedFrictionVelocity(windvars.uf, windvars.ufratio);
 }
-// Whether the canopy sheds eddies of its own size. The enhanced mixing at canopy
-// top, the roughness sublayer above it and the near-field imprint of nearby
-// foliage on the air all come from coherent eddies generated by the shear layer
-// at canopy top. A shear layer only does that when it is turbulent, which depends
-// on its Reynolds number: the wind at canopy top times canopy height over the
-// viscosity of air. Shrinking a canopy shrinks its eddies, but the air's
-// viscosity does not shrink with it, so through very short vegetation, or any
-// short vegetation in light wind, the flow is closer to laminar and those
-// canopy-scale effects are absent. This returns their weight, falling smoothly
-// from one in a fully turbulent canopy to nought.
-//
-// The Reynolds number at which the weight is one half is placed by order of
-// magnitude, not measured in canopies: shear layers in general become turbulent
-// at Reynolds numbers of several hundred to a few thousand, and the wind-tunnel
-// canopies on which the theory of canopy turbulence rests ran at about ten
-// thousand. The canopy-top wind used is the neutral one a logarithmic profile
-// gives from the driving wind, so that the weight is known before friction
-// velocity and stability are solved.
+// Weight (0 to 1) given to canopy-scale turbulence, from the canopy's Reynolds
+// number: wind at canopy top times canopy height over the viscosity of air. It is
+// 0.5 at CANOPY_RE_TRANSITION, an order-of-magnitude value. It scales the
+// canopy-top enhancement, the roughness sublayer and the near field.
 constexpr double CANOPY_RE_TRANSITION = 1000.0;
 constexpr double AIR_VISCOSITY = 1.5e-5;   // kinematic, m2/s
 static double canopyTurbulence(double uDrive, double h, double pai, double d, double zref, double z0)
@@ -1091,11 +833,9 @@ static double canopyTurbulence(double uDrive, double h, double pai, double d, do
     const double Re = uh * h / AIR_VISCOSITY;
     return Re * Re / (Re * Re + CANOPY_RE_TRANSITION * CANOPY_RE_TRANSITION);
 }
-// Friction velocity (uf) and Monin-Obukhov length (LL) above the canopy,
-// solved jointly since each depends on the other (uf sets LL via the
-// sensible heat flux H, LL's stability correction feeds back into uf).
-// Links reference-height wind and sensible heat flux to the canopy wind field.
-// It jointly solves friction velocity and Obukhov length, derives canopy-top wind, and scales the within-canopy profile; these quantities control both turbulent transport and leaf boundary layers.
+// Friction velocity, Obukhov length, wind at canopy top and wind in each layer,
+// from wind at the reference height and sensible heat flux (H). Friction velocity
+// and Obukhov length depend on each other, so are iterated.
 static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double hgt, double pai,
     double zref, double H = 0.0, double tc = 15, double pk = 101.3, int maxiter = 100,
     double a1 = 1.25, double psi_h = 0.0, double psi_m = 0.0, double phi_h = 1.0,
@@ -1110,11 +850,7 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     double d = zeroplanedisCpp2(hgt, pai);
     double zm = roughlengthCpp2(hgt, pai, d, z0);
     double zh = 0.2 * zm;
-    // Under free convection (H > 0), shear alone can't sustain the implied
-    // friction velocity: combine uref with a Beljaars (1994) free-convective
-    // velocity scale in quadrature so uf stays bounded as uref -> 0. Covers
-    // the unstable/daytime case; LangrangianOne's TL floor covers
-    // stable/calm-night instead.
+    // With an upward heat flux, convection adds to the wind (Beljaars 1994).
     double Ueff = uref;
     if (H > 0.0) {
         double wstar = std::cbrt((g / Tk) * zi * (H / (ph * cp)));
@@ -1124,16 +860,13 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     zm = roughlengthCpp2(hgt, pai, d, z0, fade);
     zh = 0.2 * zm;
     double uf = (ka * Ueff) / (std::log((zref - d) / zm) + psi_m);
-    // Monin-Obukhov length; stays at the neutral sentinel until the loop
-    // below (H != 0) computes a real value.
+    // Obukhov length: effectively infinite (neutral) when there is no heat flux.
     double LL = 1e99;
-    // Derive diabatic coefficients iteratively
+    // Iterate friction velocity and Obukhov length.
     double dif = 10.0;
     double olduf = -100.00;
     int iter = 1;
-    // Aitken-damps uf feeding into LL to stabilise the self-referential
-    // uf<->LL coupling. The raw, undamped uf (not uf_iter) is still what's
-    // returned in windmodel.uf and used for the convergence check below.
+    // The friction velocity used for the Obukhov length is damped between iterations.
     Aitken1DState st_uf;
     double uf_iter = uf;
     if (H != 0.0) {
@@ -1155,19 +888,16 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
             iter += 1;
         }
     }
-    // Captured before psi_m is re-expressed for the canopy-top profile below,
-    // so it matches the momentum profile that actually produced uf.
+    // Friction velocity per unit wind speed.
     double ufratio = ka / (std::log((zref - d) / zm) + psi_m);
+    // Stability correction for momentum between the roughness height and canopy top.
     if (H != 0.0) {
         double ln1 = std::log((zref - d) / zm);
         if (psi_m < -0.9 * ln1) psi_m = -0.9 * ln1;
         if (psi_m > 0.9 * ln1) psi_m = 0.9 * ln1;
         psi_m = dpsimCpp2(zm / LL) - dpsimCpp2((hgt - d) / LL);
     }
-    // Canopy top lies inside the roughness sublayer, where wind exceeds what a
-    // surface-layer profile gives. Reading it from such a profile understates the
-    // wind driving leaf exchange, and overstates in the same proportion the drag
-    // the canopy exerts on the air above.
+    // Wind at canopy top, including the effect of the roughness sublayer.
     double lnterm = std::log((hgt - d) / zm) + sublayerInfluence(hgt, pai, z0, fade) + psi_m;
     if (lnterm < LNTERM_MIN) lnterm = LNTERM_MIN;
     double uh = (uf / ka) * lnterm;
@@ -1185,20 +915,17 @@ static windmodel windmodelCpp(const std::vector<double>& wc, double uref, double
     out.psi_h = psi_h;
     out.phi_h = phi_h;
     out.ufratio = ufratio;
-    // The profile is built on the wind that drives exchange, which includes the
-    // velocity convection adds over a heated surface. What is reported to the
-    // user is the wind itself, so every wind returned is scaled back by this.
+    // Factor converting the effective wind (with convection) back to the actual wind, for output.
     out.windscale = (Ueff > 0.0) ? uref / Ueff : 1.0;
     out.fade = fade;
     return out;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ************************************************** Plant model ****************************************************** //
-// The plant model closes leaf-scale energy, water and carbon exchange within each canopy layer.
-// Local radiation and canopy air conditions determine leaf temperature, stomatal conductance and heat/moisture source terms.
+// Leaf energy balance and stomatal conductance, and the heat and vapour each
+// canopy layer gives to the air.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// ** Calculate saturated vapour pressure * * //  
-// Saturation vapour pressure over water or ice, used throughout humidity and evaporation calculations.
+// Saturated vapour pressure (kPa): over water above 0 degC, over ice below.
 // [[Rcpp::export]]
 double satvapCpp2(double tc)
 {
@@ -1211,38 +938,26 @@ double satvapCpp2(double tc)
     }
     return es;
 }
-// ** Saturated water vapour density (kg/m^3) at temperature Tk (Kelvin),
-// via the ideal gas law applied to satvapCpp2's saturation vapour
-// pressure: rho_vs = Mw * es / (RgasC * Tk). * //
-// Converts saturation vapour pressure to saturation water-vapour density.
-// This is used where the soil/water model represents vapour in mass rather than pressure units.
+// Saturated vapour density (kg/m3) at temperature Tk (K).
 static double satVapDensityCpp2(double Tk)
 {
     double tc = Tk - 273.15;
     double es_Pa = 1000.0 * satvapCpp2(tc); // kPa -> Pa
     return Mw * es_Pa / (RgasC * Tk);
 }
-// Leaf boundary-layer resistance to heat transfer, from forced and free
-// convection Nusselt-number correlations (mixed by cube-summing, Nu =
-// (Nuf^3 + Nun^3)^(1/3)) over the leaf's characteristic dimension.
-// Boundary-layer resistance between a leaf surface and its surrounding canopy air.
-// Forced convection from local wind and free convection from leaf-air temperature difference are combined, making this the leaf-scale aerodynamic link in the energy balance.
-// Characteristic dimension of a leaf for its boundary layer (m): its size,
-// adjusted for how its inclination presents it to the wind. A property of the
-// foliage, the same in every layer and hour.
+// Characteristic dimension of a leaf (m), from its length, width and leaf-angle parameter.
 static double leafDimension(double len, double wid, double x)
 {
     double y = 1.0 / x;
     double Gy = std::sqrt(y * y + (1.0 - y * y)) / (y + 1.774 * std::pow((y + 1.182), -0.733));
     return std::sqrt(len * wid) * Gy;
 }
+// Leaf boundary-layer resistance to heat (s/m): forced and free convection combined.
 static double leafrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
 {
     double Tk = tair + 273.15;
     double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6); // thermal diffusivity
     double v = 1.326 * std::pow(10.0, -5.0) * std::pow(Tk / 273.15, 1.5) * (393.55 / (Tk + 120.0)); // kinematic viscosity
-    // Leaf area projected in the wind direction, from the leaf-angle
-    // distribution parameter x (same G-function form as cankCpp).
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
     double Nuf; // Nusselt number, forced convection
@@ -1263,57 +978,43 @@ static double leafrHa(double tair, double dT, double uz, double d, double rHmax 
     if (rHa > rHmax) rHa = rHmax;
     return rHa;
 }
-// Compute minimum resistances for stomatal model
-// Derives the minimum whole-plant hydraulic resistance used by the stomatal optimisation model.
-// Plant height and xylem conductivity are translated through the branching/taper assumptions into the hydraulic cost seen by a leaf.
+// Minimum hydraulic resistance of the plant, from its height, Huber value (hv)
+// and maximum xylem conductivity (Eller et al. 2020).
 static double rpmin_calc(double h, double hv, double Kxmx)
 {
-    // Parameters (constants for this model)
+    // Constants
     const double n_ext = 2.0;      // number of daughter branches per parent
     const double Lpet = 0.04;     // petiole length (m)
     const double r_intpet = 10.0;  // petiole conduit radius (micrometres)
     const double r_intref = 22.0;  // terminal branch conduit radius (micrometres)
-    // ---- Nh calculation (matches: Nh <- (3*log(arg))/log(n_ext); Nh[Nh<1] <- 1 ) ----
+    // Number of branching levels (at least 1)
     const double n_ext_13 = std::pow(n_ext, 1.0 / 3.0);
     const double arg = 1.0 - (h / Lpet) * (1.0 - n_ext_13);
     double Nh;
     if (arg <= 0.0 || !std::isfinite(arg)) {
-        // R would give NaN here; choose a stable fallback consistent with Nh[Nh<1] <- 1
         Nh = 1.0;
-        // Alternative (stricter): return NAN to expose the issue
-        // return std::numeric_limits<double>::quiet_NaN();
     }
     else {
         Nh = (3.0 * std::log(arg)) / std::log(n_ext);
-        if (!std::isfinite(Nh) || Nh < 1.0) Nh = 1.0;  // R clamp
+        if (!std::isfinite(Nh) || Nh < 1.0) Nh = 1.0;
     }
-    // ---- Tapering factor ----
-    // R: Chi_h <- (6.6e-13*Nh^1.85)/(7.2e-13*Nh^1.32) = (6.6/7.2)*Nh^0.53
+    // Conduit taper factor
     const double Chi_1 = 2.888503;
     const double Chi_h = (6.6e-13 / 7.2e-13) * std::pow(Nh, 0.53);
     const double Chi_tap = Chi_h / Chi_1;
-    // ---- Maximum petiole hydraulic conductivity ----
+    // Maximum petiole hydraulic conductivity
     const double ratio = r_intpet / r_intref;
     const double Kpmx = Kxmx * (ratio * ratio);
-    // ---- rpmin ----
-    // Guard against zeros to avoid blow-ups
+    // Minimum resistance (infinite if any input is not positive)
     if (hv <= 0.0 || Kpmx <= 0.0 || Chi_tap <= 0.0 || !std::isfinite(Chi_tap)) {
         return std::numeric_limits<double>::infinity();
     }
     const double rpmin = h / (Kpmx * hv * Chi_tap);
     return rpmin;
 }
-// Leaf stomatal conductance from the Eller et al. (2020) hydraulic-
-// optimisation scheme: photosynthesis (Jacobs 1994 co-limitation of
-// light/carbon/transport-limited assimilation, C3 or C4) traded off
-// against the whole-plant hydraulic cost of transpiration at the leaf's
-// height (z), via the plant's vulnerability curve (psi50-based).
-// Predicts stomatal conductance by balancing carbon gain against hydraulic cost.
-// Photosynthetic demand, VPD, plant water status and height-dependent hydraulic vulnerability combine to determine how open stomata can profitably remain.
-// What a leaf's stomatal conductance depends on apart from the light it absorbs:
-// its biochemistry at its temperature, the vapour pressure deficit it sees, and
-// how freely water reaches it from the soil. The sunlit and shaded leaves of a
-// layer share all of it.
+// Everything stomatal conductance depends on except light (Eller et al. 2020):
+// photosynthetic capacity at leaf temperature, vapour pressure deficit and water
+// supply from the soil. Shared by the sunlit and shaded leaves of a layer.
 struct stomatalState {
     double Vcmax, Rd, Oa, photocomp, DD, ca, ci;
     double Kc, Ko, Wc, We, Wc_ca;   // C3 only
@@ -1331,10 +1032,7 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     double Q10rs = 0.57;
     double Oa = 0.2095 * envdata.pk * 1000;
     double photocomp = Oa / (2.0 * 2600.0 * std::pow(Q10rs, 0.1 * (envdata.tleaf - 25.0)));
-    // Vapour pressure deficit between leaf and air. A leaf at or below the
-    // air's dew point loses no water through its stomata and has nothing
-    // to save by closing them, so the deficit is taken as nil there and
-    // the stomata stand fully open, as they do just above it.
+    // Vapour pressure deficit between leaf and air; nil for a leaf at or below the dew point.
     double ea = satvapCpp2(envdata.tair) * (envdata.rh / 100.0);
     double es = satvapCpp2(envdata.tleaf);
     double DD = std::max(es - ea, 1e-9);
@@ -1342,15 +1040,13 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     double ci = vegp.f0 * (1.0 - DD / vegp.Dcrit) * (ca - photocomp); // in Pa
     st.Vcmax = Vcmax; st.Rd = Rd; st.Oa = Oa; st.photocomp = photocomp; st.DD = DD; st.ca = ca; st.ci = ci;
     if (C3) {
-        // Gross assimilation limited by carbon and by transport, evaluated at
-        // ci (Jacobs 1994) and, for carbon, at ca with stomata fully open
-        // (Eqn S2.1, Eller et al. 2020, New Phytologist 226:1622-1637).
+        // Carbon-limited and transport-limited assimilation (Jacobs 1994; Eller et al. 2020, Eq. S2.1).
         double Q10Kc = 2.1;
         double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tair - 25.0));
         double Q10Ko = 1.2;
         double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tair - 25.0));
-        double Wc = Vcmax * ((ci - photocomp) /(ci + Kc * (1 + Oa / Ko))); // Limitating rate due to carbon
-        double We = 0.5 * Vcmax; // Limiting rate due to transport
+        double Wc = Vcmax * ((ci - photocomp) /(ci + Kc * (1 + Oa / Ko))); // carbon-limited rate
+        double We = 0.5 * Vcmax; // transport-limited rate
         if (Wc < 0.0) Wc = 0.0;
         if (We < 0.0) We = 0.0;
         double Wc_ca = Vcmax * ((ca - photocomp) / (ca + Kc * (1 + Oa / Ko)));
@@ -1368,42 +1064,34 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     double K_50f = 0.5 / (1.0 + std::pow((psi_pd + vegp.psi50) / vegp.psi50, vegp.apsi));
     double psi_50f = (psi_pd + vegp.psi50) / 2.0;
     double dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
-    // rpmin depends only on hgt/hv/Kxmx (fixed for a run); cached on
-    // vegp, like apsi above, rather than recomputed every call.
+    // Minimum plant resistance is fixed for a run, so is calculated once.
     if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
     double rp = vegp.rpmin / K_psi_pd;
     double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
     st.zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
     return st;
 }
-// Stomatal conductance of leaves absorbing a given amount of light, in a state
-// already found for their layer.
+// Stomatal conductance of leaves absorbing PARabs, given the state above.
 static double leafgsLight(const stomatalState& st, double PARabs, double pk, const vegpstruct& vegp, bool C3)
 {
     if (!(PARabs > 0.0)) return 0.0;
     const double Vcmax = st.Vcmax, Rd = st.Rd, Oa = st.Oa, photocomp = st.photocomp, ca = st.ca, ci = st.ci;
-    double IPAR = PARabs * (0.48 / 0.219) * 1e-6; // PAR converstion to(mol photons / m ^ 2 / s)
+    double IPAR = PARabs * (0.48 / 0.219) * 1e-6; // PAR in mol photons/m2/s
     double Aca;
     double Acol;
     double cicol;
     if (C3) { // C3 photosynthetic pathway
         const double Kc = st.Kc, Ko = st.Ko, We = st.We;
-        // Light-limited assimilation at ci (Jacobs 1994): retains the
-        // ci-response that shapes the light-response curve, feeding the
-        // co-limitation smoothing (Wcol/cicol) below.
-        double Wl = vegp.alpha * IPAR * ((ci - photocomp) / (ci + 2.0 * photocomp)); // Limitating rate due to light
+        // Light-limited assimilation (Jacobs 1994).
+        double Wl = vegp.alpha * IPAR * ((ci - photocomp) / (ci + 2.0 * photocomp)); // light-limited rate
         if (Wl < 0.0) Wl = 0.0;
         double Wcol = ((We + Wl) - std::sqrt(std::pow(We + Wl, 2.0) - 4.0 * 0.93 * (We * Wl)))
-            / (2.0 * 0.93);  // Point at which no longer limited by ci
+            / (2.0 * 0.93); // co-limited rate
         Acol = Wcol - Rd;
         // Co-limiting CO2 concentration
         cicol = (-Vcmax * photocomp - Kc * (1.0 + Oa / Ko) * Wcol)
             / (Wcol - Vcmax);
-        // A(ca): the limiting rates evaluated at ca instead of ci, representing
-        // assimilation with stomata fully open. Feeds only dadc's numerator
-        // below -- substituting into Wcol/cicol would remove Wl's
-        // light-response shape and risk a ca==cicol singularity near
-        // ambient CO2.
+        // Assimilation with stomata fully open: internal CO2 equal to ambient.
         double Wl_ca = vegp.alpha * IPAR * ((ca - photocomp) / (ca + 2.0 * photocomp));
         double We_ca = We;
         if (Wl_ca < 0.0) Wl_ca = 0.0;
@@ -1426,9 +1114,8 @@ static double leafgsLight(const stomatalState& st, double PARabs, double pk, con
         Acol = Wcol - Rd;
         cicol = (Wcol * pk * 1000.0) / (k * Vcmax);
     }
-    // dadc: finite difference of assimilation w.r.t. ci between A(ca)
-    // and A(ci,col) (Eqn S2.1). Acol is already A at ci,col by
-    // construction, so only the A(ca) term is evaluated separately.
+    // Change in assimilation per unit CO2 between the co-limited point and fully
+    // open stomata (Eq. S2.1).
     double dadc = (Aca - Acol) / (ca - cicol);
     if (dadc < 1e-99) dadc = 1e-99;
     double mu = 1.0 + (4.0 * st.zeta) / dadc;
@@ -1438,33 +1125,22 @@ static double leafgsLight(const stomatalState& st, double PARabs, double pk, con
     gs = std::fmin(gs, gsmax);
     return gs;
 }
+// Stomatal conductance in one call.
 static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool C3 = true)
 {
     if (!(envdata.PARabs > 0.0)) return 0.0;
     return leafgsLight(leafgsState(envdata, vegp, z, C3), envdata.PARabs, envdata.pk, vegp, C3);
 }
-// Share of a plant surface covered by intercepted water: all of it while rain
-// falls, and afterwards a share that shrinks as the film held on it (mm)
-// evaporates. Where it is wet, vapour leaves across the boundary layer alone;
-// where it is dry, a leaf transpires through its stomata as well. The two parts
-// of the surface exchange vapour side by side, so their conductances add.
+// Fraction of a plant surface that is wet: all of it during rain, otherwise
+// rising with the water held (mm). The wet part evaporates freely; the dry part
+// of a leaf transpires.
 static double wetFraction(double surfwater, double precip)
 {
     if (precip > 0.0) return 1.0;
     return 1.0 - std::exp(-surfwater * 30.0);
 }
-// Solves surface temperature from a Penman-Monteith-style energy balance.
-// Given absorbed radiation and heat/vapour resistances, it iterates radiative and latent-heat terms to obtain the temperature at which the surface energy budget closes.
-// The air's side of a surface's energy balance, which is the same for every
-// surface standing in that air: the longwave a surface at air temperature would
-// emit, the air's heat capacity and density, and its vapour pressure deficit.
-// Latent heat taken up by water vapour leaving a surface at temperature Tc
-// (J/mol): that of vaporisation from liquid water above freezing and of
-// sublimation from ice below it. Water on a leaf, in a leaf and in soil does
-// not all freeze at 0 degC; it does so over the first degree or so below, and
-// the one latent heat passes into the other across that degree. A sudden
-// change at 0 degC would leave an energy balance with a step in it, and no
-// temperature at which it closes whenever the answer fell there.
+// Latent heat of water vapour leaving a surface at Tc (J/mol): vaporisation above
+// 0 degC, sublimation below -1 degC, and a linear blend between.
 static inline double latentHeat(double Tc)
 {
     const double vaporisation = 45068.7 - 42.8428 * Tc;
@@ -1472,6 +1148,8 @@ static inline double latentHeat(double Tc)
     const double sublimation = 51078.69 - 4.338 * Tc - 0.06367 * Tc * Tc;
     return vaporisation + std::min(1.0, -Tc) * (sublimation - vaporisation);
 }
+// The air's part of a surface energy balance: longwave emitted at air temperature
+// (Rema), heat capacity, molar density and vapour pressure deficit (Da).
 struct surfaceAir { double Ta, pk, Rema, cp, ph, Da; };
 static surfaceAir surfaceAirOf(double Ta, double pk, double rh, double em)
 {
@@ -1483,6 +1161,9 @@ static surfaceAir surfaceAirOf(double Ta, double pk, double rh, double em)
     air.Da = satvapCpp2(Ta) * (1.0 - rh / 100.0);
     return air;
 }
+// Surface temperature from the Penman-Monteith energy balance, given absorbed
+// radiation (Rabs), resistances to heat (rHa) and vapour (rV) and ground heat
+// flux (G). Iterated, as emission and latent heat depend on the answer.
 static double PenmanMonteithCpp2(const surfaceAir& air, double Rabs, double em,
     double rHa, double rV, double G = 0.0, int iters = 4)
 {
@@ -1498,19 +1179,13 @@ static double PenmanMonteithCpp2(const surfaceAir& air, double Rabs, double em,
     }
     return (Ts);
 }
-// How much rain passes each canopy depth. Wind tilts the path of falling drops,
-// so they cross more foliage than drops falling straight down, and the
-// extinction geometry used for the sun's beam is applied along that path. The
-// canopy is taken as level for this: a canopy follows the slope it grows on,
-// but its foliage does not present itself to slanting rain as the ground
-// presents itself to a slanting beam, and neither the direction of the wind
-// relative to the slope nor the slope itself enters.
+// Fraction of rain reaching each canopy depth. Wind tilts the rain so that it
+// passes more foliage; the beam extinction coefficient is applied along its path.
 static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector<double>& pia,
     double uh, double rain, double x)
 {
-    // calculate rain downward velocity
+    // Fall speed of rain (m/s)
     double vr = 3.78 * std::pow(rain, 0.067);
-    // create output variables
     int n = static_cast<int>(wcm.size());
     std::vector<double> kd(n);
     std::vector<double> raintr(n);
@@ -1523,7 +1198,7 @@ static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector
         const double si = std::cos(rainZ);
         kstruct kp = cankCpp(rainZ, x, si);
         kd[i] = kp.kd;
-        // Calculate tranmission
+        // Fraction transmitted
         raintr[i] = std::exp(-kd[i] * pia[i]);
     }
     rainmodel out;
@@ -1531,27 +1206,19 @@ static rainmodel rainintercept(const std::vector<double>& wcm, const std::vector
     out.kd = kd;
     return out;
 }
-// Resistance that the canopy's own mixing offers between the ground and height
-// z, the integral of one over its eddy diffusivity. This is the canopy
-// component only; the full resistance, with the ground's limit on eddy size and
-// the air above the canopy, is soilToZ below.
+// Resistance of canopy mixing between the ground and height z: the integral of
+// one over eddy diffusivity.
 static double rhcanopy(double a2, double uf, double h, double z, double a0, double a1)
 {
-    // Resistance is the integral of one over the eddy diffusivity, and the
-    // diffusivity follows from the gust profile: sigma_w rises from a0*uf at the
-    // ground to a1*uf at canopy top as a raised cosine, so in terms of its mean
-    // and half-range it is uf*(Aw - Bw*cos(pi*z/h)). The integral has a closed
-    // form in those two numbers, which is what is evaluated here -- the ground
-    // energy balance needs an analytic resistance, not a quadrature.
+    // Gust strength rises from a0*uf at the ground to a1*uf at canopy top as a raised
+    // cosine, which gives the integral in closed form.
     const double Aw = 0.5 * (a1 + a0);
     const double Bw = 0.5 * (a1 - a0);
-    const double D = Aw * Aw - Bw * Bw;   // positive whenever the gust profile
-                                          // does not reach zero at the ground
+    const double D = Aw * Aw - Bw * Bw; // positive unless gusts at the ground are nil
     const double mu = 1.0 / (a2 * h * uf);
     double inth;
     if (z == h) {
-        // At canopy top the oscillatory part integrates away and only the
-        // secular term survives.
+        // Canopy top
         inth = Aw * h / std::pow(D, 1.5);
     }
     else {
@@ -1560,8 +1227,7 @@ static double rhcanopy(double a2, double uf, double h, double z, double a0, doub
         const double c1 = std::cos(x) + 1.0;
         const double r = std::sqrt((Aw + Bw) / (Aw - Bw));
         const double sqrtD = std::sqrt(D);
-        // Half-angle form of the tangent, so the argument stays well behaved
-        // over the canopy rather than diverging at mid-height.
+        // Below canopy top. The half-angle form stays finite at mid-height.
         const double I1 = (2.0 / sqrtD) * std::atan(r * s / c1);
         const double I2 = Bw * s / (D * (Aw - Bw * std::cos(x))) + (Aw / D) * I1;
         inth = (h / pi) * I2;
@@ -1569,37 +1235,17 @@ static double rhcanopy(double a2, double uf, double h, double z, double a0, doub
     return inth * mu;
 }
 // ~~~~~~~~~~~~~~ Diffusivity from the soil surface to the reference height ~~~~~~~~~~~~~~~ //
-// Heat and vapour travel from the soil to the reference height through one
-// continuous profile of eddy diffusivity, and every resistance in the model is
-// the integral of its inverse between two heights, in closed form:
+// One profile of eddy diffusivity runs from the soil to the reference height.
+// Every resistance is the integral of its inverse between two heights, in closed
+// form. It has three parts:
+//   - inside the canopy: gust strength squared times a time scale;
+//   - above the canopy: a surface layer with mixing enhanced near canopy top;
+//   - near the soil: a surface layer driven by the gusts that reach the ground,
+//     wherever that gives the lower diffusivity.
+// With no foliage it is the surface layer over bare ground.
 //
-//   - inside the canopy, mixing by the canopy's own gusts: the square of their
-//     strength, which rises from the floor to canopy top, times the time a
-//     parcel keeps its vertical motion;
-//   - above the canopy, a surface layer in which the air mixes as if it were
-//     further from the surface than it is. The canopy's coherent eddies are
-//     larger than a surface layer's would be at that height, which enhances
-//     mixing at canopy top; the enhancement dies away upward with no definite
-//     top, leaving the ordinary surface layer;
-//   - near the soil, wherever it is the tighter limit, a surface layer in which
-//     eddies are no larger than their distance from the ground. It is the
-//     bare-ground surface layer, driven by the gusts that reach the floor rather
-//     than by the friction velocity above the canopy, since the turbulence there
-//     is delivered from canopy top. Under a dense canopy it is a thin layer at
-//     the soil; under a sparse one it reaches canopy top or beyond.
-//
-// With no foliage the ground's layer is all there is and the enhancement is
-// none, so what remains is the bare-ground surface layer from soil to reference
-// height -- the same description bare ground uses, so the two meet.
-// Height above the soil at which the soil surface layer begins, for heat and
-// vapour. A rough surface exchanges heat less readily than momentum, expressed
-// by a roughness length for heat a fifth of the one for momentum. In light wind
-// the thin layer of air against the surface, across which heat crosses by
-// molecular diffusion alone, grows thicker than the soil's roughness elements
-// and governs instead: the surface then behaves as a smooth one, whose
-// roughness length for heat is the molecular diffusivity over the velocity
-// scale of the turbulence above it. The larger of the two applies, which keeps
-// the resistance next to the soil bounded as the wind drops.
+// Roughness height of the soil for heat: a fifth of that for momentum or, if
+// larger, the height below which molecular diffusion exceeds turbulent diffusion.
 constexpr double AIR_HEAT_DIFFUSIVITY = 2.1e-5;   // m2/s, near 20 deg C
 static double heatRoughness(double z0, double ufloor)
 {
@@ -1616,50 +1262,45 @@ struct aerocolumn {
     double Rc0;   // canopy integral to the soil's roughness height
     double Rh;    // resistance from the soil to canopy top
 };
-// Resistance of the soil surface layer between the soil's roughness height and
-// z, and its rate of increase with height, from the integrated stability
-// correction and the gradient it implies.
+// Resistance of the soil surface layer from the soil's roughness height to z.
 static double soilLayerR(double z, double ug, double L, double zh)
 {
     return (std::log(z / zh) + dpsihCpp2(zh / L) - dpsihCpp2(z / L)) / (ka * ug);
 }
+// Its rate of increase with height: one over diffusivity.
 static double soilLayerSlope(double z, double ug, double L)
 {
     return phihStar(z / L) / (ka * ug * z);
 }
+// Diffusivity of canopy mixing at height z.
 static double canopyK(const aerocolumn& c, double z)
 {
     const double sw = c.uf * (0.5 * (c.a1 + c.a0) - 0.5 * (c.a1 - c.a0) * std::cos(pi * z / c.h));
     return sw * sw * c.a2 * c.h / c.uf;
 }
-// Above the canopy the air mixes as a surface layer does, but at a stretched
-// height: the height above the displacement plane at which a surface layer would
-// hold eddies as large as the canopy's. Just above the canopy it exceeds the
-// true height, by enough to give the canopy-top enhancement; far above, the two
-// are the same. Diffusivity, stability and resistance all follow from treating
-// the stretched height as the height in surface-layer similarity, which is what
-// keeps the resistance in closed form under any stability.
+// Above the canopy, surface-layer theory is applied at a stretched height. Near
+// canopy top this exceeds the true height above the displacement height, which
+// gives the enhanced mixing there; far above, the two are equal.
 static double stretchedHeight(const aerocolumn& c, double z)
 {
     const double zp = z - c.d;
     return 0.5 * (zp + std::sqrt(zp * zp + c.b * c.b));
 }
+// Diffusivity above the canopy.
 static double airK(const aerocolumn& c, double z)
 {
     const double zp = z - c.d;
     return ka * c.uf * std::sqrt(zp * zp + c.b * c.b) / phihStar(stretchedHeight(c, z) / c.LL);
 }
+// Resistance between two heights above the canopy.
 static double airR(const aerocolumn& c, double z1, double z2)
 {
     const double s1 = stretchedHeight(c, z1), s2 = stretchedHeight(c, z2);
     return (std::log(s2 / s1) - dpsihCpp2(s2 / c.LL) + dpsihCpp2(s1 / c.LL)) / (ka * c.uf);
 }
-// The ground limits eddy size up to the height where the surface layer's
-// diffusivity reaches the canopy's own floor value. The surface layer's
-// diffusivity increases strictly with height, so there is one such height or
-// none: none if the canopy is already less diffusive at the soil's roughness
-// height (very short, dense vegetation). Under sparse vegetation it lies above
-// canopy top, and the ground's layer continues into the air above.
+// Height up to which the ground limits eddy size: where the diffusivity of the
+// soil surface layer equals canopy diffusivity at the ground. It lies above
+// canopy top under sparse vegetation.
 static double groundHandOver(double h, double ug, double L, double Kc0, double zh)
 {
     const double target = 1.0 / Kc0;
@@ -1680,10 +1321,8 @@ static double soilToZ(const aerocolumn& c, double z)
     double r = (zc <= c.h) ? rhcanopy(c.a2, c.uf, c.h, zc, c.a0, c.a1) - c.Rc0
         : rhcanopy(c.a2, c.uf, c.h, c.h, c.a0, c.a1) - c.Rc0 + airR(c, c.h, zc);
     const double zz = std::min(zc, c.zw);
-    // The surface layer is added where the ground is the tighter limit, less
-    // the canopy's own contribution over the same depth so it is not counted
-    // twice; with uniform gusts (no foliage) that contribution is exactly the
-    // subtracted term and the bare-ground resistance is recovered.
+    // Add the soil surface layer, less the canopy mixing already counted over the
+    // same depth.
     if (zz > c.zh) r += soilLayerR(zz, c.ug, c.LL, c.zh) - (zz - c.zh) / c.Kc0;
     return r;
 }
@@ -1694,25 +1333,19 @@ static double columnK(const aerocolumn& c, double z)
     if (z < c.zw) inv += std::max(0.0, soilLayerSlope(z, c.ug, c.LL) - 1.0 / c.Kc0);
     return 1.0 / inv;
 }
-// Builds the column for the current friction velocity and stability, for a
-// canopy whose top mixes heat `enhancement` times as well as a surface layer
-// would there.
+// Builds the diffusivity profile for the current friction velocity and stability.
 static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0, double a1,
     double enhancement, double z0)
 {
     aerocolumn c{};
     c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1;
-    // The soil surface layer is driven by the gusts that reach the floor.
+    // The soil surface layer is driven by the gusts that reach the ground.
     c.ug = (a0 / a1) * uf;
     c.zh = heatRoughness(z0, c.ug);
     const double dt = h - d;
     c.b = dt * std::sqrt(std::max(enhancement * enhancement - 1.0, 0.0));
-    // The canopy's mixing takes its canopy-top value from the air just above,
-    // so the profile is continuous there under any stability. Expressed as a
-    // time scale, the squared gust constant cancels the value the gust profile
-    // reaches at canopy top. The dimensionless temperature gradient divides,
-    // because it measures how steep a gradient a given heat flux must sustain:
-    // convection strengthens canopy mixing and stable stratification suppresses it.
+    // Time scale of canopy mixing, set so that diffusivity at canopy top equals that
+    // of the air just above. Stability enters through phi_h.
     c.a2 = ka * enhancement * (dt / h)
         / (a1 * a1 * phihStar(canopyTopStabilityHeight(h, d, enhancement) / LL));
     c.Kc0 = a0 * a0 * uf * c.a2 * h;
@@ -1721,12 +1354,10 @@ static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0
     c.Rh = soilToZ(c, h);
     return c;
 }
-// Closes the energy and water balance of every canopy layer for the current
-// atmospheric state. Woody, sunlit and shaded surfaces are solved separately,
-// then area-weighted to give the layer's foliage temperature, stomatal
-// conductance, transpiration, evaporation of intercepted water, the sensible
-// and latent heat it releases into the canopy air (Hz per unit plant area, Lz
-// per unit ground area) and its intercepted water.
+// Energy and water balance of every canopy layer. Woody, sunlit and shaded
+// surfaces are solved separately and combined to give leaf temperature, stomatal
+// conductance, transpiration, evaporation of intercepted water, and the heat and
+// vapour given to the air.
 static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& vegp, const rainmodel& rainvars, const radmodel& swout,
     const radmodel2& lwout, const std::vector<double>& z, const std::vector<double>& dTs, double timestep = 3600.0, bool C3 = true)
 {
@@ -1739,27 +1370,14 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     std::vector<double> Lz(n);
     std::vector<double> rLB(n);
     std::vector<double> dSTdT(n), dSLde(n);
-    // Rain is followed down through the canopy as the layers are solved, from
-    // the top. Each layer intercepts a share of the water arriving from above,
-    // set by its own plant area along the rain's path. Rain arrives through
-    // the step while the film evaporates and makes room for more, so all of
-    // the rain a layer intercepts, with the film it began with, is available
-    // to evaporate; the maximum film limits only what is left at the end.
-    // Whatever then exceeds it drips to the layer below, which may intercept
-    // it in turn, so a layer's evaporation must be known before the layer
-    // beneath it is reached. What leaves the lowest layer reaches the ground,
-    // so every drop is accounted for.
+    // Rain is followed down from the top layer. Each layer intercepts part of what
+    // arrives, and what it cannot hold at the end of the hour drips to the layer below.
     std::vector<double> Efilm(n);
     double arriving = envdata.precip; // water still falling, per unit ground area
     const double kdrip = cankCpp(0.0, vegp.x, 1.0).kd;
     const double leafSize = leafDimension(vegp.len, vegp.wid, vegp.x);
-    // Every load and flux on a plant surface is per unit one-sided plant area.
-    // Both faces exchange heat with the air across the same boundary layer, so
-    // the surface's heat conductance is twice the single-face value, and both
-    // faces emit, so its emissivity counts twice; the radiation it absorbs is
-    // likewise the sum over both faces. A leaf's stomata are described by one
-    // conductance for the whole leaf, so transpiration passes through it and
-    // one boundary layer in series.
+    // All values are per unit one-sided plant area. Both sides of a leaf exchange
+    // heat and emit longwave, so heat conductance and emissivity are doubled.
     for (int i = n - 1; i >= 0; --i) {
         rLB[i] = leafrHa(onestepin.tair[i], dTs[i], onestepin.uz[i], leafSize);
         MP_TALLY(6);
@@ -1773,34 +1391,25 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         const double satvap_tair = satvapCpp2(onestepin.tair[i]);
         const double rH2 = 0.5 * rLB[i];      // both faces in parallel
         const double em2 = 2.0 * vegp.vegem;  // both faces emit
-        // Rain wets the upward-facing surface, one face's worth per unit plant
-        // area for a canopy of mixed leaf inclinations, and it is that film
-        // that evaporates across the boundary layer; the dry share of a leaf
-        // transpires through its stomata. Wood does not transpire. A surface
-        // colder than the dew point of the air instead gains water, condensing
-        // across the boundary layer over both faces whatever its stomata do.
-        // Vapour conductances (m/s) convert to water exchanged over the step
-        // (mm) through the vapour density difference; the surface's
-        // temperature comes from its energy balance with the conductance that
-        // applies.
+        // The wet part of a surface evaporates across the boundary layer; the dry part of
+        // a leaf transpires through its stomata. A surface colder than the dew point
+        // gains dew over both sides.
         const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
         double gwet = fw / rLB[i];
         double gtsun = 0.0, gtshade = 0.0;
+        // Converts conductance times vapour pressure difference to mm of water over the hour.
         const double tomm = (Mw / (RgasC * Tk)) * timestep;
-        // Each surface also reports how far its temperature follows its air
-        // (at fixed air vapour pressure) and the vapour conductance it used:
-        // together they give how strongly the layer's heat and vapour sources
-        // push back against a change in its own air, which the dispersion solve
-        // uses to find air and sources together (LangrangianOne).
+        // Each surface also returns how much its temperature changes per degree change in
+        // air temperature (follow), which the canopy air solve uses.
         const double eair = satvap_tair * onestepin.rh[i] / 100.0;
         const double dTa = 0.1;
         const double rh_warm = 100.0 * eair / satvapCpp2(onestepin.tair[i] + dTa);
         const surfaceAir airNow = surfaceAirOf(onestepin.tair[i], envdata.pk, onestepin.rh[i], em2);
         const surfaceAir airWarm = surfaceAirOf(onestepin.tair[i] + dTa, envdata.pk, rh_warm, em2);
-        // per degree of air, at fixed vapour pressure: longwave a surface at air
-        // temperature would emit, and the air's vapour pressure deficit
+        // Change per degree of air temperature in emission and in vapour pressure deficit.
         const double emitSlope = (airWarm.Rema - airNow.Rema) / dTa;
         const double deficitSlope = (airWarm.Da - airNow.Da) / dTa;
+        // Temperature (ts), evaporation (Ew) and transpiration (Et) of one surface.
         auto surface = [&](double Rabs, double gt, double& ts, double& Ew, double& Et,
             double& follow, double& gused) {
             const double g = gt + gwet;
@@ -1815,6 +1424,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
                 gused = g;
             }
             else {
+                // Below the dew point: condensation across the boundary layer.
                 rV = rH2;
                 ts = PenmanMonteithCpp2(airNow, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
                 MP_TALLY(1);
@@ -1824,17 +1434,13 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
                 gused = 1.0 / rH2;
             }
             if (!g_solver.leafClosed) {
+                // Response to air temperature from a second solve in warmer air.
                 const double tsw = PenmanMonteithCpp2(airWarm, Rabs, em2, rH2, rV, 0.0, g_solver.leafSteps);
                 MP_TALLY(2);
                 follow = (tsw - ts) / dTa;
             }
             else {
-                // The surface stands above or below its air by the load on it over
-                // its restoring strength: the heat it sheds per degree by radiation,
-                // convection and evaporation together. Warmer air of the same vapour
-                // pressure changes the load, since the surface would emit more at air
-                // temperature and the deficit grows, and changes the restoring
-                // strength, which is taken midway between surface and air.
+                // Response to air temperature from the linearised energy balance.
                 const double latent = latentHeat(ts);
                 const double vapourPath = (latent * airNow.ph) / (airNow.pk * rV);
                 auto restoring = [&](double Tmid) {
@@ -1848,9 +1454,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
                 follow = (1.0 + loadSlope / strength - lean) / (1.0 + lean);
             }
         };
-        // Stomatal conductance responds to the light each leaf class absorbs.
-        // Where the stomata are closed, in the dark or because the soil
-        // cannot supply the plant, the leaf transpires nothing.
+        // Stomatal conductance of sunlit and shaded leaves.
         double gssun = 0.0, gsshade = 0.0;
         if (swout.RPARsun[i] > 0.0 || swout.RPARshade[i] > 0.0) {
             const stomatalState stomata = leafgsState(envdata, vegp, vegp.hgt / 2.0, C3);
@@ -1860,22 +1464,14 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         }
         const double sf = swout.sunfrac[i];
         onestepin.gs[i] = sf * gssun + (1.0 - sf) * gsshade; // average stomatal conductance
-        // Water the layer can evaporate over the step, per unit plant area
-        // In a rainless step the only water falling is dew dripping from
-        // films already full, which falls vertically.
+        // Water the layer can evaporate over the hour, per unit plant area: the film it
+        // holds plus what it intercepts. Without rain only drip falls, vertically.
         const double kdfall = (envdata.precip > 0.0) ? rainvars.kd[i] : kdrip;
         const double intercepted = (vegp.paii[i] > 0.0 && arriving > 0.0) ? (1.0 - std::exp(-kdfall * vegp.paii[i])) * arriving : 0.0;
         const double avail = onestepin.swaterdepth[i] + ((vegp.paii[i] > 0.0) ? intercepted / vegp.paii[i] : 0.0);
-        // A film cannot evaporate more over the step than that. Where free
-        // evaporation would exhaust it, the wet share is wet only for the
-        // fraction of the step its water lasts and dry, and transpiring, for
-        // the rest: the wet conductance of woody, sunlit and shaded surfaces
-        // is scaled by that fraction and the transpiring conductance of the
-        // leaves takes up the remainder. The fraction is water available over
-        // water demanded; surfaces that evaporate less run warmer and demand
-        // a little more, so it is refined a few times. Temperature, sensible
-        // heat, latent heat, transpiration and the film then all describe the
-        // same evaporation. Condensation is not limited.
+        // If free evaporation would use more water than is available, the surface is wet
+        // for only part of the hour (phi) and transpires for the rest. phi is refined a
+        // few times, because a surface that evaporates less is warmer.
         double phi = 1.0;
         double twood, Ewwood, Etwood, fwood, gwood;
         double tsun, Ewsun, Etsun, fsun, gsun;
@@ -1885,29 +1481,22 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
             gwet = phi * fw / rLB[i];
             gtsun = (gssun > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gssun) : 0.0;
             gtshade = (gsshade > 0.0) ? (1.0 - phi * fw) / (rLB[i] + ph / gsshade) : 0.0;
-            // A layer that is all leaf has no woody surface; its share of every
-            // quantity below is nil whatever its temperature would have been.
+            // A layer that is all leaf has no woody surface.
             if (vegp.Lfrac[i] == 1.0) { twood = 0.0; Ewwood = 0.0; Etwood = 0.0; fwood = 0.0; gwood = 0.0; }
             else surface(swout.RswLav[i] + lwout.RlwLabs[i], 0.0, twood, Ewwood, Etwood, fwood, gwood);
             surface(swout.RswLsun[i] + lwout.RlwLabs[i], gtsun, tsun, Ewsun, Etsun, fsun, gsun);
-            // In the dark, and under wholly diffuse light, sunlit and shaded
-            // leaves absorb the same radiation and hold their stomata alike,
-            // and are one surface.
+            // Sunlit and shaded leaves are the same in the dark and under wholly diffuse light.
             if (swout.RswLshade[i] == swout.RswLsun[i] && gtshade == gtsun) {
                 MP_TALLY(4);
                 tshade = tsun; Ewshade = Ewsun; Etshade = Etsun; fshade = fsun; gshade = gsun;
             }
             else surface(swout.RswLshade[i] + lwout.RlwLabs[i], gtshade, tshade, Ewshade, Etshade, fshade, gshade);
-            // Layer averages. Each quantity is weighted once by the live share of
-            // the plant surface: sunlit and shaded leaves make up that share, wood the rest.
+            // Layer average: leaves weighted by the leaf fraction, wood by the rest.
             Ez[i] = vegp.Lfrac[i] * (sf * Ewsun + (1.0 - sf) * Ewshade) + (1.0 - vegp.Lfrac[i]) * Ewwood; // per unit plant area
             if (Ez[i] <= 1.01 * avail || pass == 3) break;
             phi *= avail / Ez[i];
         }
-        // Film carried to the next step, and the water passed down: what was
-        // available less what evaporated, or plus what condensed, stays on
-        // the layer up to its maximum film and the excess drips. The limit on
-        // evaporation here only absorbs what the refinement leaves unresolved.
+        // Water left on the layer, up to the maximum film; the excess drips to the layer below.
         Efilm[i] = std::min(Ez[i], avail);
         const double remaining = avail - Efilm[i];
         swaterdepthn[i] = std::min(remaining, vegp.mwft); // leaf surface water depth
@@ -1917,7 +1506,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         Ezt[i] = vegp.Lfrac[i] * vegp.paii[i] * (sf * Etsun + (1.0 - sf) * Etshade); // per unit ground area
         const double cp = cpairCpp(onestepin.tair[i]);
         Hz[i] = ((ph * cp) / rH2) * (tleafn[i] - onestepin.tair[i]);
-        // Response of the layer's sources to its own air, per unit ground area
+        // Change in the layer's heat and vapour sources per unit change in its air, per unit ground area.
         const double follow = vegp.Lfrac[i] * (sf * fsun + (1.0 - sf) * fshade) + (1.0 - vegp.Lfrac[i]) * fwood;
         const double gV = vegp.Lfrac[i] * (sf * gsun + (1.0 - sf) * gshade) + (1.0 - vegp.Lfrac[i]) * gwood;
         const double la_leaf = latentHeat(tleafn[i]);
@@ -1925,8 +1514,8 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         dSLde[i] = -vegp.paii[i] * la_leaf * gV * 1000.0 / (RgasC * Tk);
     }
     onestepin.precipground = arriving;
-    // Latent heat each layer releases into the canopy air, per unit ground
-    // area: its transpiration and the intercepted water it evaporates.
+    // Latent heat given to the air by each layer, per unit ground area:
+    // transpiration plus evaporation of intercepted water.
     for (int i = 0; i < n; ++i) {
         const double la = latentHeat(tleafn[i]);
         Lz[i] = (la / Mw) * (Ezt[i] + vegp.paii[i] * Efilm[i]) / timestep;
@@ -1945,13 +1534,10 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** Soil model *********************************************************** //
-// Soil heat and water are dynamic state variables carried from one timestep to the next.
-// The two solvers share temperature/moisture-dependent material properties and meet the atmosphere at the ground energy/water boundary.
+// Soil temperature and water content, carried from hour to hour.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Relative humidity of soil pore air from water content, via the Kelvin
-// equation applied to the Campbell retention curve's water potential.
-// Converts surface-soil water status and temperature to equilibrium relative humidity in the soil pore space.
-// This supplies the humidity boundary condition for evaporation from the ground surface.
+// Relative humidity of the air in the surface soil's pores, from its water
+// potential (Kelvin equation).
 static double soilrelhumCpp(const soilpstruct& soilp, double Tsoil, double theta)
 {
     double psiw = soilp.psie[0] * std::pow(theta / soilp.thetaS[0], -soilp.b[0]);
@@ -1959,10 +1545,7 @@ static double soilrelhumCpp(const soilpstruct& soilp, double Tsoil, double theta
     double hr = std::exp(Mw * psiw / (RgasC * Tk));
     return hr;
 }
-// Latent heat carried from the soil surface to the reference height: vapour
-// leaves the soil at the humidity its water potential allows and diffuses up
-// across the resistance between the two. Bare and vegetated ground share this,
-// so the ground's evaporation is the same description in both.
+// Latent heat flux from the soil surface to the air, across resistance rHa.
 static double groundLatentFlux(const soilpstruct& soilp, double Tsurface, double Tref,
     double relhum, double pk, double rHa, double theta)
 {
@@ -1972,11 +1555,8 @@ static double groundLatentFlux(const soilpstruct& soilp, double Tsurface, double
     const double la = latentHeat(Tsurface);
     return ((la * ph) / (rHa * pk)) * (es - ea);
 }
-// Ground surface energy balance residual (net radiation minus sensible
-// and latent heat) -- this residual is what the ground heat flux G is set
-// to, elsewhere, to close the surface energy budget.
-// Evaluates the residual of the soil-surface energy balance at a trial surface temperature.
-// Short/longwave input, sensible heat, latent heat and conduction into the soil are combined so SoilHeatCpp can solve for the temperature that closes the balance.
+// Energy available at the soil surface at temperature Tsurface: net radiation
+// less sensible and latent heat. It is the heat flux into the soil.
 static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
     double Tsurface, double pk, double relhum, double rHa, double theta)
 {
@@ -1989,9 +1569,7 @@ static double soilsurfaceEB(const soilpstruct& soilp, double Rabs, double Tref,
     double Ba = Rnet - H - L;
     return Ba;
 }
-// Calculate Kmean
-// Returns the requested mean of adjacent-layer conductivities for transport across a soil interface.
-// Different averaging rules can be selected without changing the heat/water solvers.
+// Geometric or logarithmic mean of the conductivities of two adjacent soil nodes.
 static double kMeanCpp(std::string meanType, double k1, double k2) {
     if (meanType == "GEOMETRIC") {
         return std::sqrt(k1 * k2);
@@ -2008,24 +1586,18 @@ static double kMeanCpp(std::string meanType, double k1, double k2) {
         stop("Unknown mean type. Use 'GEOMETRIC' or 'LOGARITHMIC'.");
     }
 }
-// Calculates soil thermal conductivity (W/m/K)
-// Calculates bulk soil thermal conductivity from mineral composition, porosity and water/ice content.
-// This makes heat transport respond to both soil texture and the evolving moisture/freezing state.
-// The part of a soil's thermal conductivity settled by what it is made of and
-// how much water it holds, which does not change while its temperature is being
-// found: the conductivity of its solids, the shape of its grains, its pore
-// space, and how far its water is connected enough to carry heat as vapour.
+// The parts of soil thermal conductivity that do not depend on temperature:
+// conductivity of the solids, grain shape factors, pore space, and how far
+// vapour contributes (wf).
 struct soilConductivityFixed { double Vsolid, kSolid, Ga, Gc, porosity, gasPorosity, wf, wetShareSq; };
 static soilConductivityFixed soilConductivityFixedOf(double Vq, double Vm, double Vo, double Vw, double Mc)
 {
     soilConductivityFixed f;
-    // Calculate thermal conductivity of solids
+    // Volume fraction of solids
     double Vsolid = Vq + Vm + Vo;
-    // Quartz conducts heat much better than other minerals (~8.8 vs ~2.5
-    // W/m/K); Vq and Vm must each be weighted by their own conductivity,
-    // not swapped with each other.
+    // Conductivity of solids: quartz 8.8, other minerals 2.5, organic matter 0.25 W/m/K.
     f.kSolid = std::pow(8.8, Vq / Vsolid) * std::pow(2.5, Vm / Vsolid) * std::pow(0.25, Vo / Vsolid);
-    // Calculate shape factor
+    // Shape factors
     f.Ga = 0.088 * ((Vq + Vm) / Vsolid) + 0.5 * (Vo / Vsolid);
     double Q = 7.25 * Mc + 2.52;
     double xwo = 0.33 * Mc + 0.078;
@@ -2043,14 +1615,13 @@ static soilConductivityFixed soilConductivityFixedOf(double Vq, double Vm, doubl
     f.wetShareSq = pow(Vw / porosity, 2);
     return f;
 }
-// Bulk thermal conductivity (W/m/K) of that soil at a given temperature and ice
-// content: water, ice, moist air and solids each conduct, weighted by how each
-// is arranged about the grains.
+// Soil thermal conductivity (W/m/K): water, ice, moist air and solids, each
+// weighted by how it is arranged around the grains (de Vries).
 static double thermalConductivityFrom(const soilConductivityFixed& f,
-    double Vw, // Volmetric water+ice fraction (m^3/m^3)
-    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
-    double Tc, // temperayure of air in air space
-    double pk) // pressure (kPa in air space
+    double Vw, // volumetric water plus ice (m3/m3)
+    double Vw_ice, // volumetric ice, part of Vw (m3/m3)
+    double Tc, // temperature (deg C)
+    double pk) // pressure (kPa)
 {
     const double Vsolid = f.Vsolid, kSolid = f.kSolid, Ga = f.Ga, Gc = f.Gc, gasPorosity = f.gasPorosity, wf = f.wf;
     double Tk = Tc + 273.15;
@@ -2062,9 +1633,7 @@ static double thermalConductivityFrom(const soilConductivityFixed& f,
     double stcor = 1.0 - svp / pk;
     if (stcor < 0.3) stcor = 0.3;
     double kWater = 0.56 + 0.0018 * Tc;
-    // Ice conducts heat ~4x better than liquid water (De Vries); blend the
-    // "fluid" phase conductivity by how much of Vw is actually frozen. Pure
-    // liquid (Vw_ice=0) reduces exactly to the original kWater.
+    // Conductivity of water and of ice, combined by the fraction frozen.
     double kIce = 2.18 - 0.0068 * Tc;
     double kWaterPhase = (Vw > 1e-9) ? (kWater * (Vw - Vw_ice) + kIce * Vw_ice) / Vw : kWater;
     double kGas = 0.0242 + 0.00007 * Tc + wf * Lv * rhoAir * Dv * slope / (pk * stcor);
@@ -2079,22 +1648,20 @@ static double thermalConductivityFrom(const soilConductivityFixed& f,
         / (kw * Vw + ka * gasPorosity + ks * Vsolid);
     return out;
 }
+// Soil thermal conductivity in one call.
 static double thermalConductivityCpp(
-    double Vq, // Volumetric quartz fraction (m^3/m^3
-    double Vm, // Volumetric mineral fraction (m^3/m^3)
-    double Vo, // Volumetric organic fraction (m^3/m^3)
-    double Vw, // Volmetric water+ice fraction (m^3/m^3)
-    double Vw_ice, // Volumetric ICE fraction, subset of Vw (m^3/m^3, 0 if unfrozen)
-    double Mc, // Mass fraction of clay (kg/kg
-    double Tc, // temperayure of air in air space
-    double pk) // pressure (kPa in air space
+    double Vq, // volumetric quartz (m3/m3)
+    double Vm, // volumetric other minerals (m3/m3)
+    double Vo, // volumetric organic matter (m3/m3)
+    double Vw, // volumetric water plus ice (m3/m3)
+    double Vw_ice, // volumetric ice, part of Vw (m3/m3)
+    double Mc, // mass fraction of clay (kg/kg)
+    double Tc, // temperature (deg C)
+    double pk) // pressure (kPa)
 {
     return thermalConductivityFrom(soilConductivityFixedOf(Vq, Vm, Vo, Vw, Mc), Vw, Vw_ice, Tc, pk);
 }
-// Thomas algorithm: direct solve of a tridiagonal linear system (aa/bb/cc
-// sub/main/super-diagonals, dd right-hand side) between layers first..last.
-// Solves the tridiagonal linear system generated by the one-dimensional soil diffusion equations.
-// The boundary rows are already assembled by the caller; this routine is only the numerical linear solver.
+// Solves a tridiagonal system between rows first and last (Thomas algorithm).
 static Thomas ThomasBoundaryCondition(std::vector<double> aa, std::vector<double> bb,
     std::vector<double> cc, std::vector<double> dd, std::vector<double> x,
     int first, int last)
@@ -2116,8 +1683,7 @@ static Thomas ThomasBoundaryCondition(std::vector<double> aa, std::vector<double
     out.x = x;
     return out;
 }
-// Calculate degree of saturation from water potential
-// Converts soil matric potential to effective saturation using the soil hydraulic retention curve.
+// Degree of saturation from water potential (Campbell retention curve).
 static double degreeOfSaturation(const soilpstruct& soilp, double psiw, int i) {
     if (psiw >= 0) return 1.0;
     double Se;
@@ -2129,8 +1695,7 @@ static double degreeOfSaturation(const soilpstruct& soilp, double psiw, int i) {
     }
     return Se;
 }
-// Calculate water potential from theta (in J/kg)
-// Converts volumetric water content to matric water potential for one soil layer.
+// Water potential (J/kg) from volumetric water content.
 static double waterPotential(const soilpstruct& soilp, double theta, int i)
 {
     double Se = 1.0;
@@ -2138,23 +1703,16 @@ static double waterPotential(const soilpstruct& soilp, double theta, int i)
     double psiw = soilp.psie[i] * std::pow(Se, -soilp.b[i]);
     return psiw;
 }
-// Calculate theta from water potential
-// Inverse retention relation: converts matric water potential back to volumetric water content.
+// Volumetric water content from water potential.
 static double thetaFromPsi(const soilpstruct& soilp, double psiw, int i)
 {
     double Se = degreeOfSaturation(soilp, psiw, i);
     double theta = Se * soilp.thetaS[i];
     return theta;
 }
-// Water potential of the root zone (J/kg), which tells the stomata how dry the
-// soil is. A plant draws on all the soil its roots reach, so what it senses is
-// the water held across the root zone: the water content of each layer weighted
-// by the share of roots in it, read as a potential through the retention curve.
-// Averaging the layers' potentials instead lets one dry layer speak for the
-// rest, because potential falls by orders of magnitude as soil dries while
-// water content does not: a parched surface layer holding a tenth of the roots
-// would close the stomata of a plant standing in moist soil. The retention
-// curve is that of the shallowest rooted layer.
+// Water potential of the root zone (J/kg), which the stomata respond to: the
+// potential at the mean liquid water content of the rooted layers, weighted by
+// root fraction.
 static double unfrozenTheta(const soilpstruct& soilp, double theta, double Tc, int i);
 static double rootZonePotential(const soilpstruct& soilp, const std::vector<double>& theta,
     const std::vector<double>& rootfrac, const std::vector<double>& Tc)
@@ -2164,8 +1722,7 @@ static double rootZonePotential(const soilpstruct& soilp, const std::vector<doub
     for (size_t i = 0; i < rootfrac.size() && i < theta.size(); ++i) {
         if (rootfrac[i] <= 0.0) continue;
         if (first < 0) first = static_cast<int>(i);
-        // Roots meet only the water that is liquid: in a layer holding ice,
-        // what its temperature leaves unfrozen.
+        // Only liquid water counts in a layer holding ice.
         const double liquid = (i < Tc.size() && Tc[i] < 0.0)
             ? std::min(theta[i], unfrozenTheta(soilp, theta[i], Tc[i], static_cast<int>(i))) : theta[i];
         sum += rootfrac[i] * liquid;
@@ -2174,11 +1731,9 @@ static double rootZonePotential(const soilpstruct& soilp, const std::vector<doub
     if (first < 0) return waterPotential(soilp, theta[0], 0);
     return waterPotential(soilp, sum / wgt, first);
 }
-// Unfrozen (liquid) water content below 0C: freezing-point depression
-// treated as extra suction through the same Campbell retention curve as
-// thetaFromPsi() (dev-notes/soil_freezing_design_notes.md). Capped at
-// theta; equilibrium curve, no hysteresis or persistent ice state.
-// Partitions total soil water into the liquid fraction that can remain unfrozen at the current temperature.
+// Liquid water content of soil below 0 degC. Freezing lowers the water potential
+// in proportion to degrees below zero (Clapeyron), and the retention curve gives
+// the water that stays liquid at that potential.
 static double unfrozenTheta(const soilpstruct& soilp, double theta, double Tc, int i)
 {
     if (Tc >= 0.0) return theta;
@@ -2190,23 +1745,20 @@ static double unfrozenTheta(const soilpstruct& soilp, double theta, double Tc, i
     if (theta_u < 0.0) theta_u = 0.0;
     return theta_u;
 }
-// Calculate hydraulic conductivity from theta
-// Returns unsaturated liquid-water conductivity from current soil water content.
+// Hydraulic conductivity from water content (Campbell).
 static double hydraulicConductivityFromTheta(const soilpstruct& soilp,
     double theta, int i) {
     double n = 2.0 * soilp.b[i] + 3.0;
     double k = soilp.Ksat[i] * std::pow(theta / soilp.thetaS[i], n);
     return k;
 }
-// Calculate vapour from water potential
-// Returns equilibrium pore-space water-vapour density from soil water potential and temperature.
+// Water vapour held in the pore air, from water potential and temperature.
 static double vaporFromPsi(const soilpstruct& soilp, double psiw, double theta, double Tk, int i) {
     double humidity = std::exp(Mw * psiw / (RgasC * Tk));
     double vapor = (soilp.thetaS[i] - theta) * satVapDensityCpp2(Tk) * humidity;
     return vapor;
 }
-// calculate change in theta with psi
-// Derivative of the soil water-retention curve, used to linearise Richards-equation updates.
+// Slope of the retention curve: change in water content per unit water potential.
 static double dTheta_dPsi(const soilpstruct& soilp, double psiw, int i)
 {
     double psie = soilp.psie[i]; // assumed negative
@@ -2215,9 +1767,7 @@ static double dTheta_dPsi(const soilpstruct& soilp, double psiw, int i)
     double theta = soilp.thetaS[i] * Se;
     return -theta / (soilp.b[i] * psiw);
 }
-// Calculate vapour conductivity from psi and theta
-// Effective vapour-phase conductivity through the soil pore space.
-// This provides the diffusive vapour component of vertical soil-water transport.
+// Conductivity of the soil for water vapour.
 static double vaporConductivityFromPsiTheta(const soilpstruct& soilp,
     double psiw, double theta, double Tk, int i)
 {
@@ -2227,8 +1777,7 @@ static double vaporConductivityFromPsiTheta(const soilpstruct& soilp,
     double k = 0.66 * (soilp.thetaS[i] - theta) * dv * vp * humidity * Mw / (RgasC * Tk);
     return k;
 }
-// Calculate change in vapour conductivity with psi
-// Derivative of equilibrium soil vapour density with respect to water potential for the implicit water solve.
+// Change in pore vapour per unit water potential.
 static double dvapor_dPsi(const soilpstruct& soilp, double psiw,
     double theta, double Tk, int i)
 {
@@ -2238,36 +1787,33 @@ static double dvapor_dPsi(const soilpstruct& soilp, double psiw,
         (Mw / (RgasC * Tk)) - dTheta_dPsi(soilp, psiw, i) * vp * humidity;
     return capacity_vapor;
 }
-// Calculates vapour loss from the soil surface to the atmosphere for the current surface state.
-// The flux is controlled jointly by soil vapour availability and the aerodynamic resistance above the ground.
+// Evaporation from the soil surface over time dT (mm).
 static double evaporation_flux(const soilpstruct& soilp, double theta, double Tsurface,
     double Tair, double relhum, double rHa, double dT)
 {
     double psiw = waterPotential(soilp, theta, 0); // J/kg
     double Tk = Tair + 273.15; // Temperature deg C -> K
-    double hs = std::exp(Mw * psiw / (RgasC * Tk));   // dimensionless soil effective relative humidity (0 to 1 range)
+    double hs = std::exp(Mw * psiw / (RgasC * Tk)); // relative humidity of soil air (0 to 1)
     double es = 1000.0 * satvapCpp2(Tsurface) * hs;            // kPa -> Pa
     double ea = 1000.0 * satvapCpp2(Tair) * (relhum / 100.0);  // kPa -> Pa
-    double Ev = (Mw / (rHa * RgasC * Tk)) * (es - ea) * dT; // Bare soil evaporation (kg m^-2 s^-1 -> mm)
+    double Ev = (Mw / (rHa * RgasC * Tk)) * (es - ea) * dT; // mm
     return Ev;
 }
-// Calculate transpiration
-// Wet-end soil-water stress factor used to reduce root uptake outside the favourable matric-potential range.
+// Reduction of root uptake in wet soil: 0 at saturation, 1 beyond air entry.
 static double alpha_wet(double psiw, double psie)
 {
     if (psiw >= 0) return(0.0); // saturated
     if (psiw <= psie) return(1.0); // beyond air entry to well aerated
     return std::abs(psiw) / std::abs(psie);
 }
-// Dry-end soil-water stress factor used to reduce root uptake as soil approaches wilting conditions.
+// Reduction of root uptake in dry soil: 1 above psi_dry, 0 at the wilting point.
 static double alpha_dry(double psiw, double psi_dry, double psi_wilt) {
     if (psiw <= psi_wilt) return(0.0);
     if (psiw >= psi_dry)  return(1.0);
     return (psiw - psi_wilt) / (psi_dry - psi_wilt); // linear ramp 0 to 1
 }
-// Distribute root water uptake according to root fraction and water potential
-// Partitions canopy transpiration demand among soil layers containing roots.
-// Root abundance and layer water potential jointly determine where uptake occurs, while preserving the requested whole-profile demand as far as water stress allows.
+// Shares transpiration among soil layers by root fraction, reduced where the
+// soil is too wet or too dry.
 static std::vector<double> transpiration_distribute(const soilpstruct& soilp, const std::vector<double>& rootfrac,
     double totalTransp_mm, double dT, const std::vector<double>& psiw, double p = 0.5)
 {
@@ -2277,9 +1823,8 @@ static std::vector<double> transpiration_distribute(const soilpstruct& soilp, co
         std::vector<double> w(n);
         double Trate = totalTransp_mm / dT;
         for (int i = 0; i < n; ++i) {
-            // Uptake from a layer starts to fall once the plant has drawn the
-            // share p of the water available between field capacity and the
-            // wilting point, and ceases at the wilting point.
+            // Uptake falls once the fraction p of the water between field capacity and
+            // the wilting point has been used, and stops at the wilting point.
             double theta_fc = thetaFromPsi(soilp, PSI_FIELD_CAPACITY, i);
             double theta_wilt = thetaFromPsi(soilp, PSI_WILTING_POINT, i);
             double psi_wilt = PSI_WILTING_POINT;
@@ -2290,9 +1835,7 @@ static std::vector<double> transpiration_distribute(const soilpstruct& soilp, co
             w[i] = rootfrac[i] * alpha;
         }
         double sumw = std::accumulate(w.begin(), w.end(), 0.0);
-        // Where every rooted layer is past wilting the water the canopy
-        // transpired must still come from the soil, so it is drawn in
-        // proportion to roots alone.
+        // If every rooted layer is past wilting, uptake is shared by root fraction alone.
         if (!(sumw > 0.0)) {
             for (int i = 0; i < n; ++i) w[i] = rootfrac[i];
             sumw = std::accumulate(w.begin(), w.end(), 0.0);
@@ -2312,12 +1855,9 @@ static std::vector<double> transpiration_distribute(const soilpstruct& soilp, co
     }
     return S;
 }
-// Soil node depths: a thin top layer, then geometrically widening with depth
-// (weighted by i^2), so that node n, the fixed-temperature lower boundary,
-// lies at totalDepth. Thin near-surface layers resolve rapid changes while
-// deeper layers reach the boundary with few cells. One further depth continues
-// the series below the boundary so that every node has a layer thickness
-// beneath it; no node sits there.
+// Depths of the soil nodes: thin layers near the surface, thickening with depth.
+// Node n, the lower boundary, is at totalDepth. One further depth is returned
+// below it.
 // [[Rcpp::export]]
 std::vector<double> geometricCpp(int n, double totalDepth) {
     std::vector<double> z(n + 2);
@@ -2327,23 +1867,15 @@ std::vector<double> geometricCpp(int n, double totalDepth) {
     }
     double dz_unit = totalDepth / weightSum;
     z[0] = 0.0;
-    z[1] = dz_unit;  // thin top layer to avoid zero thickness
+    z[1] = dz_unit; // thin top layer
     for (int i = 2; i <= n + 1; ++i) {
         z[i] = z[i - 1] + dz_unit * static_cast<double>(i) * static_cast<double>(i);
     }
     return z;
 }
-// Heat held by a unit volume of soil (J/m3), measured from the same soil at
-// 0 degC with all of its water liquid. Minerals, organic matter, air, liquid
-// water and ice each hold heat in proportion to their share and their own heat
-// capacity, and every kilogram of water that has turned to ice has given up its
-// latent heat of fusion, so frozen soil holds much less heat than its
-// temperature alone would suggest. How much of the water is ice comes from the
-// freezing curve (unfrozenTheta), so heat content rises smoothly with
-// temperature through the whole freezing range, steeply where most of the ice
-// forms, just below the temperature at which the soil's water begins to freeze.
-// The heat a layer gains over a step is the difference between two values of
-// this function, which is exact however much ice formed or melted on the way.
+// Heat content of soil (J/m3), relative to the same soil at 0 degC with all its
+// water liquid: sensible heat of solids, water, ice and air, less the latent heat
+// of fusion of the ice.
 static double soilHeatContent(const soilpstruct& soilp, double theta, double Tc, int i)
 {
     constexpr double waterDensity = 1000.0;     // kg/m3
@@ -2352,23 +1884,19 @@ static double soilHeatContent(const soilpstruct& soilp, double theta, double Tc,
     double Vq = soilp.Vq[i], Vm = soilp.Vm[i], Vo = soilp.Vo[i], Vw = theta;
     double ice = theta - unfrozenTheta(soilp, theta, Tc, i);
     if (ice < 0.0) ice = 0.0;
-    // Where the stated fractions more than fill the volume they are scaled to
-    // fill it exactly; otherwise air takes up what is left.
+    // Air fills the remaining volume. Fractions summing to more than 1 are rescaled.
     const double Vsum = Vq + Vm + Vo + Vw;
     double Va = 0.0;
     if (Vsum > 1.0) { Vq /= Vsum; Vm /= Vsum; Vo /= Vsum; Vw /= Vsum; ice /= Vsum; }
     else Va = 1.0 - Vsum;
-    // Sensible heat (MJ/m3). The heat capacity of ice falls a little as it
-    // cools, so its share is that capacity summed from 0 degC to Tc.
+    // Sensible heat (MJ/m3). The heat capacity of ice varies with temperature, so is
+    // integrated from 0 degC.
     const double sensible = (Vq * 2.13 + Vm * 2.31 + Vo * 2.50 + (Vw - ice) * 4.18 + Va * airHeatCapacity) * Tc
         + ice * (1.93 * Tc + 0.00335 * Tc * Tc);
     return sensible * 1e6 - waterDensity * fusionHeat * ice;
 }
-// Temperature of soil holding a given heat content (J/m3): soilHeatContent
-// read the other way. Heat content rises with temperature throughout, so there
-// is one answer. Unfrozen soil holds heat in simple proportion to temperature
-// and is read off directly; soil holding ice is found by closing in on the
-// temperature between a point certainly too cold and the freezing point.
+// Temperature of soil with a given heat content (J/m3): the inverse of
+// soilHeatContent. Direct for unfrozen soil; by iteration where there is ice.
 static double soilTemperatureFromHeat(const soilpstruct& soilp, double theta, double heat, int i)
 {
     const double perDegree = soilHeatContent(soilp, theta, 1.0, i);
@@ -2378,8 +1906,7 @@ static double soilTemperatureFromHeat(const soilpstruct& soilp, double theta, do
     double heatCold = soilHeatContent(soilp, theta, cold, i) - heat;
     double heatWarm = -heat; // heat content is nil at 0 degC
     if (heatCold >= 0.0) return cold;
-    // False position, halving the weight of an end that has stayed put so that
-    // the steep stretch just below the freezing point does not hold it up.
+    // False position, with the Illinois modification.
     int stuck = 0;
     double T = 0.5 * (cold + warm);
     for (int it = 0; it < 200; ++it) {
@@ -2399,47 +1926,22 @@ static double soilTemperatureFromHeat(const soilpstruct& soilp, double theta, do
     }
     return T;
 }
-// How closely the soil's heat balance is closed: the largest imbalance left at
-// any node between the heat it has gained and the heat that has flowed into it
-// (W/m2). A thousandth of a watt over an hour is a ten-thousandth of a degree
-// in the thinnest layer, far inside anything the rest of the model asks for.
+// Tolerance for the soil heat balance: the largest imbalance at any node (W/m2).
 constexpr double SOIL_HEAT_TOL = 1e-3;
-// Soil temperature profile after one time step, with the surface energy balance
-// as the upper boundary and a fixed temperature at the foot of the column.
-// Each node's equation says that the heat the soil around it has gained since
-// the start of the step equals the heat conducted in from its neighbours, and
-// at the surface also the net heat arriving from above. Conduction is taken at
-// the end-of-step temperatures in every row, so the flux across an interface
-// is the same in the equations of the two nodes it joins and the column
-// conserves energy; with hourly steps and a surface layer a few millimetres
-// thick that is also free of the overshoot a time-centred scheme produces.
-//
-// The heat a node gains is the difference between its heat content at the end
-// of the step and at the start, not a heat capacity times its change of
-// temperature. In freezing soil the two are very different. The heat needed to
-// warm a layer by a degree changes more than a hundredfold within a few
-// hundredths of a degree of the point where its water starts to freeze, so no
-// one heat capacity describes a step that crosses that point. With heat
-// content the energy that enters a layer is exactly what its change of
-// temperature and of ice requires, whatever happened on the way.
-//
-// The balances are closed by repeated correction. Each correction is worked
-// out as if every balance responded in proportion to it, which near freezing
-// holds only for small changes and only on one side of the point where a
-// node's water begins to freeze; most of what follows is there to keep the
-// corrections honest across that point.
+// Soil temperatures after one time step. The surface energy balance is the upper
+// boundary; the deepest node is held at a fixed temperature. At each node the
+// change in heat content over the step (which includes the latent heat of
+// freezing) equals the heat conducted in at end-of-step temperatures. Solved by
+// Newton iteration.
 static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs, double Tref, double relhum, double atmPressure,
     double rHa, double dT = 3600.0, double tolerance = SOIL_HEAT_TOL)
 {
-    // Nearly every solve takes a handful of changes. A freezing front crossing many thin
-    // layers within the step takes one or two for each layer it passes.
+    // Iteration limit
     constexpr int maxNrIterations = 500;
     const int n = state.n;
     const std::vector<double>& wc = state.wc;
     const std::vector<double>& dz = state.dz;
-    // Heat each node held at the start of the step, and a first guess at what
-    // it holds at the end: the last solution if there is one. The deepest node
-    // is the lower boundary and keeps its temperature.
+    // Heat content at the start of the step, and a first guess for the end.
     std::vector<double> heatAtStart(n + 1), heat(n + 1), heatTrial(n + 1), T(n + 1), Ttrial(n + 1);
     for (int i = 0; i <= n; ++i) {
         heatAtStart[i] = soilHeatContent(soilp, wc[i], state.oldTe[i], i);
@@ -2466,10 +1968,8 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
         if (ice < 0.0) ice = 0.0;
         return thermalConductivityFrom(conductivityFixed[i], wc[i], ice, Ti, atmPressure);
     };
-    // How far a trial profile is from closing every node's heat balance: the
-    // heat gained since the start of the step less the heat conducted in, and
-    // at the surface less the net heat from above (W/m2). Conductivity between
-    // nodes follows the trial profile's own temperatures and ice.
+    // Imbalance at each node (W/m2): heat gained over the step less heat conducted
+    // in, and at the top node less the surface energy balance. Returns the largest.
     auto heatImbalance = [&](const std::vector<double>& ht, const std::vector<double>& Tt, std::vector<double>& R, std::vector<double>& f,
         std::vector<double>& conductivity) -> double {
         double lambda0 = 0.0, lambda1 = 0.0;
@@ -2499,23 +1999,10 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     int nrIterations = 0;
     tolerance *= g_solver.soilHeatLoosening;
     while (worst > tolerance && nrIterations < maxNrIterations) {
-        // The change in heat contents that would close every balance if the
-        // imbalances varied in proportion to it. A node's imbalance grows with
-        // its own heat content directly, and through what that heat does to
-        // it: as it warms more is conducted away to its neighbours, and at the
-        // surface less arrives from above, because emitted longwave, sensible
-        // and latent heat all rise with surface temperature.
-        //
-        // Two things about a node enter: how much it warms per unit of heat
-        // gained, and how its conductivity changes as it gains heat, ice
-        // conducting four times better than water. Both differ greatly on the
-        // two sides of the point where the node's water begins to freeze, so
-        // they are found for a gain and for a loss of heat separately and
-        // taken on the side the node is moving to: the change is solved for,
-        // and solved again if any node turns out to move the other way from
-        // the one assumed. They are found from a small change of heat and not
-        // of temperature, because in freezing soil a great deal of heat goes
-        // with almost no change of temperature.
+        // Newton step in heat content. A node's temperature change per unit heat, and its
+        // change in conductivity, differ greatly either side of the temperature at which
+        // its water begins to freeze, so both are found separately for warming and
+        // cooling. The step is re-solved if a node moves the opposite way to that assumed.
         constexpr double probe = 100.0; // J/m3
         for (int i = 0; i < n; ++i) {
             const double warmer = soilTemperatureFromHeat(soilp, wc[i], heat[i] + probe, i);
@@ -2523,7 +2010,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             warmingPerHeat[i] = (warmer - T[i]) / probe;
             coolingPerHeat[i] = (T[i] - cooler) / probe;
             if (i == 0) {
-                // fall in the net heat from above per unit of heat gained by the surface node
+                // Change in the surface energy balance per unit heat gained by the surface node.
                 const double q = soilsurfaceEB(soilp, Rabs, Tref, T[0], atmPressure, relhum, rHa, wc[0]);
                 restoringWarming = (q - soilsurfaceEB(soilp, Rabs, Tref, warmer, atmPressure, relhum, rHa, wc[0])) / probe;
                 restoringCooling = (soilsurfaceEB(soilp, Rabs, Tref, cooler, atmPressure, relhum, rHa, wc[0]) - q) / probe;
@@ -2536,16 +2023,15 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             }
             warming[i] = (step[i] >= 0.0);
         }
-        // The conductance between the top two nodes depends on both of them,
-        // through the mean of their conductivities.
+        // Change in the mean conductivity of the top two nodes per unit change in each.
         const double lambda0 = lambdaNow[0], lambda1 = lambdaNow[1];
         const double meanPerTop = (kMeanCpp("LOGARITHMIC", lambda0 * (1.0 + 1e-6), lambda1) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda0 * 1e-6);
         const double meanPerSecond = (kMeanCpp("LOGARITHMIC", lambda0, lambda1 * (1.0 + 1e-6)) - kMeanCpp("LOGARITHMIC", lambda0, lambda1)) / (lambda1 * 1e-6);
         for (int round = 0; round < 4; ++round) {
             auto perHeat = [&](int i) { return (i >= n) ? 0.0 : (warming[i] ? warmingPerHeat[i] : coolingPerHeat[i]); };
-            // change of the conductance beneath node i per unit of heat gained by it
+            // Change in the conductance below node i per unit heat it gains.
             auto conductanceSlope = [&](int i) { return (warming[i] ? conductivityWarming[i] : conductivityCooling[i]) / dz[i]; };
-            // the conductance beneath the surface node responds to both of the top two nodes
+            // The conductance below the surface node depends on both of the top two nodes.
             const double topToOwn = meanPerTop * conductanceSlope(0);
             const double topToSecond = meanPerSecond * (warming[1] ? conductivityWarming[1] : conductivityCooling[1]) / dz[0];
             for (int i = 0; i < n; ++i) {
@@ -2575,28 +2061,16 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
             }
             if (sidesHold) break;
         }
-        // The same change can be applied to a node as a change of heat
-        // content or as the change of temperature that goes with it, and
-        // where the node's water is freezing the two are far from the same
-        // thing once the change is more than slight. Which is the truer guide
-        // depends on what dominates the node's balance. Where it is the heat
-        // the node stores, as in a thick layer, the balance is close to
-        // proportional in heat content, and the change is applied to that.
-        // Where it is exchange with its neighbours or the air, as in the thin
-        // layers near the surface, the balance is close to proportional in
-        // temperature, and the change is applied to temperature, the heat
-        // content following from it.
+        // The step is applied as a change in temperature where exchange with neighbours
+        // dominates a node's balance (thin layers), and as a change in heat content
+        // where storage dominates (thick layers).
         for (int i = 0; i < n; ++i) {
             const double perHeat = warming[i] ? warmingPerHeat[i] : coolingPerHeat[i];
             byTemperature[i] = (bb[i] - state.vol[i] / dT > state.vol[i] / dT);
             degreesStep[i] = perHeat * step[i];
         }
-        // A node behaves quite differently on the two sides of the
-        // temperature at which its water begins to freeze, and the change was
-        // worked out for the side it is on. So the change is cut back, for all
-        // nodes alike, to the point where the first of them reaches that
-        // temperature; that node is placed exactly on it, and the next change
-        // is worked out afresh with the node free to go either way from there.
+        // The step is shortened so that no node passes the temperature at which its
+        // water begins to freeze: the first to reach it is placed exactly there.
         double share = 1.0;
         int reaching = -1;
         for (int i = 0; i < n; ++i) {
@@ -2609,8 +2083,7 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
                 : (soilHeatContent(soilp, wc[i], freezingOnset[i], i) - heat[i]) / step[i];
             if (part < share) { share = part; reaching = i; }
         }
-        // What is left of the change is taken if it leaves the profile closer
-        // to balance, and half of it, then a quarter and so on, if not.
+        // The step is halved until the imbalance falls.
         double worstTrial = worst;
         for (int halvings = 0; halvings < 30; ++halvings) {
             for (int i = 0; i < n; ++i) {
@@ -2627,14 +2100,13 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
                     Ttrial[i] = soilTemperatureFromHeat(soilp, wc[i], heatTrial[i], i);
                 }
             }
-            reaching = -1;   // only the first trial, cut at that node's onset, places it there
+            reaching = -1; // on the first trial only
             heatTrial[n] = heat[n]; Ttrial[n] = T[n];
             worstTrial = heatImbalance(heatTrial, Ttrial, imbalanceTrial, ffTrial, lambdaTrial);
             if (worstTrial < worst) break;
             share *= 0.5;
         }
-        // A change that brings the profile no closer to balance at any size is
-        // not taken, and the solve stops where it is.
+        // Stop if no step reduces the imbalance.
         if (!(worstTrial < worst)) { nrIterations = maxNrIterations; break; }
         heat = heatTrial; T = Ttrial; imbalance = imbalanceTrial; ff = ffTrial; lambdaNow = lambdaTrial; worst = worstTrial;
         ++nrIterations;
@@ -2643,24 +2115,15 @@ static soilmod SoilHeatCpp(soilmod state, const soilpstruct& soilp, double Rabs,
     state.iters = nrIterations;
     return state;
 }
-// Share of the plant's roots, and hence of its water uptake, in each soil layer.
-// Cumulative root amount with depth follows the logistic dose-response curve
-// Schenk & Jackson (2002, Eq. 1) fitted to 475 profiles worldwide: the fraction
-// of roots above depth D is 1 / (1 + (D/D50)^c), fixed by the depths above
-// which half (D50) and 95% (D95) of roots lie, which is what their Table 4
-// tabulates by vegetation type. Roots are always densest near the surface; a
-// deeper D95 relative to D50 gives a longer tail. Each node takes the roots
-// lying within its own layer, bounded halfway to each neighbour as in the soil
-// water balance, so the shares are exact integrals of the curve and do not
-// depend on how finely the soil is divided. The deepest node is the lower
-// boundary, whose water content is prescribed rather than solved, so it holds
-// no roots; the deepest solved node takes every root below its upper bound,
-// including any beyond the modelled soil depth.
+// Fraction of roots in each soil layer. The fraction above depth D is
+// 1/(1 + (D/D50)^c) (Schenk and Jackson 2002, Eq. 1), where D50 and D95 are the
+// depths above which 50% and 95% of roots lie. The deepest solved node takes all
+// roots below it; the boundary node has none.
 static std::vector<double> root_distribute(const std::vector<double>& z, double D50, double D95)
 {
     int n = static_cast<int>(z.size()) - 2;   // nodes 0..n, plus one depth below the boundary
     std::vector<double> v(n + 1, 0.0);
-    // The shape exponent follows from the 95% point: (D95/D50)^c = 1/19.
+    // The exponent c follows from D95: (D95/D50)^c = 19.
     double p = std::log(19.0) / std::log(D95 / D50);
     auto cumulative = [&](double D) {
         if (D <= 0.0) return 0.0;
@@ -2675,44 +2138,27 @@ static std::vector<double> root_distribute(const std::vector<double>& z, double 
     }
     return v;
 }
-// Soil water potential profile for one time step: Richards' equation
-// (mixed liquid Darcy flow + vapour diffusion, Campbell retention curve),
-// linearised and solved implicitly (Newton-Raphson via a Thomas solve)
-// against surface evaporation, transpiration uptake (by root fraction)
-// and drainage.
-//
-// Frozen soil. Where a node holds ice, its liquid water is in balance with
-// that ice and stands at the potential its temperature sets (the same relation
-// that fixes how much of the water is frozen), far lower than the node's total
-// water would suggest; water is therefore drawn towards freezing soil, as it is
-// observed to be. That liquid conducts as the same soil would unfrozen at that
-// potential, and the ice in the pores obstructs it. Whatever a frozen node
-// gains or loses is taken up or given by its ice, so its total water changes
-// while the potential that drives flow does not.
-// Advances liquid water and water vapour through the soil profile for one timestep.
-// An implicit Richards-type solve handles vertical redistribution and phase-coupled vapour transport, while rainfall/evaporation set the surface boundary and transpiration removes water through the root profile.
-//
-// The solve is converged when the water unaccounted for, summed over the layers,
-// falls below 1e-6 kg/m2/s, about 0.004 mm an hour. Whatever is left at the
-// tolerance is a real imbalance, of consistent sign, that accumulates in the
-// surface layer from hour to hour and moves ground temperature with it, so the
-// bound is set by that carry-over rather than by the size of a single hour's
-// fluxes. With exact Newton steps it costs one or two further steps a call.
+// Tolerance for the soil water balance: water unaccounted for, summed over layers.
 constexpr double SOIL_WATER_TOL = 1e-6;   // kg m-2 s-1
-// Air-filled pore space (m3/m3) below which frozen soil begins to refuse more
-// water, refusing it altogether once ice and liquid fill the pores. A declared
-// placement: small enough to matter only in soil that is all but full.
+// Air-filled pore space (m3/m3) below which frozen soil takes in less and less
+// water, and none once full. A chosen value.
 constexpr double FROZEN_PORE_CLOSING = 0.01;
+// Soil water after one time step: liquid flow and vapour diffusion between layers
+// (Campbell 1985), with rain and evaporation at the surface, root uptake, and
+// drainage at the base. Solved by Newton iteration.
+// Where a node holds ice, its liquid water is at the potential set by its
+// temperature, conducts as unfrozen soil would at that potential, and is
+// obstructed by the ice.
 static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     const climforwaterstruct& climdata, double dT = 3600.0, double pTAW = 0.5,
     int maxNrIterations = 100, double tolerance = SOIL_WATER_TOL)
 {
     const double rho = 1000.0;
     const int n = soilp.nLayers;
-    // Freeze previous-timestep state
+    // State at the start of the step
     const std::vector<double> oldtheta = soilmod.oldtheta;
     const std::vector<double> oldvapor = soilmod.oldvapor;
-    // Working variables
+    // Working values
     std::vector<double> psiw = soilmod.psiw;
     std::vector<double> theta = soilmod.theta;
     std::vector<double> vapor = soilmod.vapor;
@@ -2723,9 +2169,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     std::vector<double> dFaceA(n, 0.0), dFaceB(n, 0.0);
     std::vector<double> psiFlow(n + 1, 0.0), ownFlow(n + 1, 1.0), passes(n + 1, 1.0), dpasses(n + 1, 0.0), room(n + 1, 1.0), droom(n + 1, 0.0);
     std::vector<double> obstructA(n, 0.0), obstructB(n, 0.0);
-    // Where the last full Newton step started and what it was, so that a step
-    // which leaves more water unaccounted for than before can be retraced at
-    // half the length.
+    // The last full Newton step, kept so that it can be halved if it increases the imbalance.
     std::vector<double> stepOrigin(n, 0.0), stepTaken(n, 0.0);
     double originResidual = 0.0, stepFraction = 1.0;
     bool haveStep = false;
@@ -2734,20 +2178,12 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
     double massBalance = 1.0;
     double Evapmmhr = 0.0;
     while (iter < maxNrIterations) {
-        // Surface flux from current state
+        // Evaporation less rain at the surface.
         Evapmmhr = evaporation_flux(soilp, theta[0], soilmod.Tc[0], climdata.Tair,
             climdata.relhum, climdata.rHa, dT);
         double surfaceFlux = (Evapmmhr - climdata.precip) / dT;
-        // Evaporation is set by how tightly the surface holds its water, so it
-        // is not independent of the wetness being solved for here. Its
-        // sensitivity to surface water potential joins the sensitivities of the
-        // internal flows in the surface layer's equation below. A wetter
-        // surface evaporates faster, so this too is a restoring strength, and
-        // it limits how far the layer may dry in one step; left out, the layer
-        // can dry past the wetness its own evaporation rate is consistent with
-        // and correct back the other way afterwards. Like the internal terms it
-        // vanishes once the profile stops changing, so it sets the path to the
-        // solution rather than the solution.
+        // Change in evaporation per unit surface water potential, included in the
+        // surface layer's equation.
         double dEvap_dpsi = 0.0;
         {
             double hp = PSI_SLOPE_FRAC * std::abs(psiw[0]);
@@ -2758,26 +2194,19 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             dEvap_dpsi = ((Evprobe - Evapmmhr) / hp) / dT;
             if (!(dEvap_dpsi > 0.0)) dEvap_dpsi = 0.0;
         }
-        // Transpiration outside Newton update, but based on current state.
-        // Roots draw on a layer by the potential of its liquid water, which
-        // where the layer holds ice is the one its temperature sets, so a
-        // frozen layer gives up little and a hard-frozen one nothing.
+        // Root uptake from each layer. In a layer holding ice, roots see the potential
+        // of the liquid water, which temperature sets.
         std::vector<double> psiRoot = psiw;
         for (size_t i = 0; i < psiRoot.size() && i < soilmod.Tc.size(); ++i)
             if (soilmod.Tc[i] < 0.0) psiRoot[i] = std::min(psiw[i], 334000.0 * soilmod.Tc[i] / 273.15);
         std::vector<double> STr = transpiration_distribute(soilp, soilmod.rootfrac,
             climdata.Et, dT, psiRoot, pTAW);
 
-        // Hydraulic properties
+        // Hydraulic properties of each node
         for (int i = 0; i < n; ++i) {
             double Tkelvin = soilmod.Tc[i] + 273.15;
-            // Ice is immobile: only the unfrozen water conducts, and it
-            // conducts as the soil would at that liquid content. The ice
-            // left in the pores obstructs the flow (Lundin 1990 / Zhao et al.
-            // form). Where ice and liquid together fill the pores no more
-            // water can enter, though it can still leave, so a frozen node
-            // also has a share of arriving water it has room for, which falls
-            // to nothing as the last of its pore space closes.
+            // Only liquid water conducts. Ice impedes the flow (passes; Lundin 1990), and a
+            // frozen node whose pores are full takes in no more water (room).
             double theta_u = unfrozenTheta(soilp, theta[i], soilmod.Tc[i], i);
             double theta_ice = theta[i] - theta_u;
             if (theta_ice < 0.0) theta_ice = 0.0;
@@ -2793,27 +2222,19 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
                 room[i] = std::min(1.0, std::max(0.0, airFilled / FROZEN_PORE_CLOSING));
                 droom[i] = (airFilled > 0.0 && airFilled < FROZEN_PORE_CLOSING) ? -Cw / FROZEN_PORE_CLOSING : 0.0;
             }
-            // The potential that drives flow to and from the node: that of its
-            // liquid, which where ice is present is set by temperature alone.
+            // Potential driving flow: that of the liquid water, set by temperature where
+            // ice is present.
             psiFlow[i] = holdsIce ? 334000.0 * soilmod.Tc[i] / 273.15 : psiw[i];
             ownFlow[i] = holdsIce ? 0.0 : 1.0;
             kv[i] = vaporConductivityFromPsiTheta(soilp, psiFlow[i], theta[i], Tkelvin, i);
             k[i] = kh[i] * passes[i] + kv[i];
             double Cv = dvapor_dPsi(soilp, psiw[i], theta[i], Tkelvin, i);
             Ca[i] = soilmod.vol[i] * (rho * Cw + Cv) / dT;
-            // How each conductivity responds to the node's water potential.
-            // Unfrozen, liquid conductivity varies as psi^-(2+3/b). Where
-            // freezing holds the liquid at the content set by temperature
-            // alone, extra water becomes ice and the liquid's conductivity does
-            // not change; only the obstruction does. Vapour conductivity
-            // responds through the Kelvin humidity, where the potential is the
-            // node's own, and through the air-filled pore space.
+            // Change in liquid and vapour conductivity per unit water potential.
             dkh[i] = holdsIce ? 0.0 : -(2.0 + 3.0 / soilp.b[i]) * kh[i] / psiw[i];
             dkv[i] = (holdsIce ? 0.0 : kv[i] * Mw / (RgasC * Tkelvin)) - ((airFilled > 0.0) ? kv[i] / airFilled * Cw : 0.0);
         }
-        // Lower boundary: a saturated fixed head, which holds no vapour
-        // pathway, or under free drainage a continuation of the deepest layer,
-        // so that only gravity drains the profile.
+        // Lower boundary: saturated at a fixed potential, or free drainage under gravity.
         if (!soilp.FreeDrain) {
             psiw[n] = soilp.psie[n - 1];
             theta[n] = soilp.thetaS[n - 1];
@@ -2830,19 +2251,10 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
         }
         ownFlow[n] = 0.0; dpasses[n] = 0.0; droom[n] = 0.0;
         k[n] = kh[n] * passes[n] + kv[n];
-        // Upward water flux across the face below each layer. Liquid water
-        // moves down the gradient of the matric flux potential, psi*kh/(1 - n)
-        // with n = 2 + 3/b the exponent of Campbell conductivity in potential,
-        // which integrates the conductivity exactly between the two nodes, and
-        // falls under gravity. The potentials and conductivities are those of
-        // each node's liquid, so the integration holds for frozen nodes too.
-        // Ice then obstructs the liquid flux by the share the more obstructed
-        // of the two nodes lets pass, so that a layer the ice has sealed
-        // passes nothing whatever stands above or below it, and by the room
-        // the node receiving the water has for it. Vapour diffuses
-        // down the gradient of the same potential with the mean of the two
-        // nodes' vapour conductivities, and is neither moved by gravity nor
-        // obstructed.
+        // Upward flux across the face below each layer. Liquid: Campbell's integration
+        // of conductivity between the two nodes, plus gravity, reduced by ice impedance
+        // and by the room in the receiving node. Vapour: diffusion along the potential
+        // gradient.
         for (int i = 0; i < n; ++i) {
             double nPsi = 2.0 + 3.0 / soilp.b[i];
             double sh = soilmod.dz[i] * (1.0 - nPsi);
@@ -2854,18 +2266,13 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             const double throughIce = upperLimits ? passes[i] : passes[i + 1];
             const double hasRoom = upperReceives ? room[i] : room[i + 1];
             const double pass = throughIce * hasRoom;
-            // response of the share passed to the potential of the node above and of the node below
+            // Change in the fraction passed per unit potential of the node above and of the node below.
             const double dpassA = (upperLimits ? dpasses[i] * hasRoom : 0.0) + (upperReceives ? throughIce * droom[i] : 0.0);
             const double dpassB = (upperLimits ? 0.0 : dpasses[i + 1] * hasRoom) + (upperReceives ? 0.0 : throughIce * droom[i + 1]);
             ff[i] = pass * liquid + kvFace * dpsiFace / soilmod.dz[i];
-            // How the flux responds through the obstruction alone, kept apart
-            // from the rest (below) because it can work against settling.
+            // Change in flux through the ice impedance alone, kept separate (see below).
             obstructA[i] = dpassA * liquid; obstructB[i] = (i + 1 < n) ? dpassB * liquid : 0.0;
-            // The flux's exact response to the potential of the node above the
-            // face (A) and the node below it (B). Beneath the deepest layer the
-            // node below is either held fixed or moves with the layer, so only
-            // the layer's own potential counts, and under free drainage only
-            // through gravity.
+            // Change in flux per unit potential of the node above the face (A) and below it (B).
             if (i == n - 1 && soilp.FreeDrain) {
                 dFaceA[i] = pass * (-g * dkh[i]);
                 obstructA[i] = dpasses[i] * room[i] * liquid; obstructB[i] = 0.0;
@@ -2877,19 +2284,13 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             dFaceB[i] = (i + 1 < n) ? pass * ((kh[i + 1] * ownFlow[i + 1] + psiFlow[i + 1] * dkh[i + 1]) / sh)
                 + kvFace * ownFlow[i + 1] / soilmod.dz[i] + 0.5 * dkv[i + 1] * dpsiFace / soilmod.dz[i] : 0.0;
         }
-        // Each layer's water balance: gained through the face below, lost
-        // through the face above, to roots, and into storage. What is left
-        // over is the water unaccounted for, and the rows' exact derivatives
-        // make the Newton step.
+        // Water balance of each layer: flow in from below, flow out above, root uptake
+        // and change in storage. What remains is the imbalance.
         massBalance = 0.0;
         aa[0] = 0.0;
         cc[0] = -dFaceB[0] - obstructB[0];
-        // As ice melts out of a node its pores open and it passes water more
-        // freely, so losing water can make it lose water faster. Allowed for
-        // in the step, that would send a node the wrong way; it is allowed for
-        // only where it steadies a node, and between nodes. The balances
-        // themselves are exact either way, so this sets the path to the
-        // solution and not the solution.
+        // The impedance terms enter the Newton step only where they are stabilising.
+        // This changes the path to the solution, not the solution.
         auto steadying = [](double v) { return (v > 0.0) ? v : 0.0; };
         bb[0] = -dFaceA[0] + Ca[0] + dEvap_dpsi + steadying(-obstructA[0]);
         dd[0] = surfaceFlux + STr[0] - ff[0]
@@ -2903,10 +2304,7 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
                 + soilmod.vol[i] * (rho * (theta[i] - oldtheta[i]) + (vapor[i] - oldvapor[i])) / dT;
             massBalance += std::abs(dd[i]);
         }
-        // A surface already at saturation can take no more water, however
-        // much arrives: its potential is held there, and the water it cannot
-        // pass to the layer below runs off. Without this the surface balance
-        // has no solution below saturation and the excess would vanish.
+        // A saturated surface takes no more water: its potential is held and the excess runs off.
         surplusRate = 0.0;
         if (psiw[0] >= soilp.psie[0] - 2e-8 && dd[0] < 0.0) {
             surplusRate = -dd[0];
@@ -2916,11 +2314,10 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
             cc[0] = 0.0;
             dd[0] = 0.0;
         }
-        // A profile that already balances takes no step.
+        // Stop when the balance is within tolerance.
         if (massBalance <= tolerance) break;
-        // A full step that left more water unaccounted for than before is
-        // retraced from where it started at half the length, down to 1/128 of
-        // it. The check comes from this assembly, which is needed anyway.
+        // If the last full step increased the imbalance, retake it at half the length
+        // (down to 1/128).
         if (haveStep && massBalance > originResidual && stepFraction > 1.0 / 128.0) {
             stepFraction *= 0.5;
             for (int i = 0; i < n; ++i) {
@@ -2966,24 +2363,19 @@ static soilwaterout SoilWaterCpp(soilwatermod soilmod, const soilpstruct& soilp,
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ******************************************* Below-canopy Langrangian model ********************************************** //
-// Distributed canopy sources do not directly prescribe air temperature/humidity.  This section
-// uses a Lagrangian dispersion representation of within-canopy turbulence to convert heat and vapour sources into vertical profiles.
+// Air temperature and humidity within the canopy from the heat and vapour sources
+// of each layer, by the Lagrangian dispersion theory of Raupach (1989).
 static constexpr double KN_C1 = -0.39894;   // fixes the kernel's logarithmic behaviour at zero separation
 static constexpr double KN_C2 = -0.15623;   // fixes its integral, and hence total scalar conservation
 static constexpr double PI_SQ_OVER_6 = 1.6449340668482264;
-// Raupach's (1989) near-field dispersion kernel: the fraction of a source's
-// scalar output still found at a separation of zeta, where zeta is the
-// source-to-observation distance measured in units of the distance an eddy
-// travels over one Lagrangian time scale. Even in zeta, and diverging
-// logarithmically at zero separation.
+// Near-field kernel of Raupach (1989). zeta is the distance between source and
+// observation height, in units of sigma_w times the Lagrangian time scale.
 static inline double nearFieldKernel(double zeta)
 {
     double e = std::exp(-std::abs(zeta));
     return KN_C1 * std::log(1.0 - e) + KN_C2 * e;
 }
-// Dilogarithm on (0,1), by its defining series with the reflection identity
-// applied on the upper half where that series converges too slowly. Needed only
-// to integrate the kernel in closed form below.
+// Dilogarithm on (0,1), needed to integrate the kernel.
 static inline double dilog01(double x)
 {
     if (x <= 0.0) return 0.0;
@@ -2994,43 +2386,19 @@ static inline double dilog01(double x)
     for (int k = 1; k <= 60; ++k) { sum += term / (static_cast<double>(k) * k); term *= y; }
     return reflect ? (PI_SQ_OVER_6 - std::log(x) * std::log(1.0 - x) - sum) : sum;
 }
-// Mean value of the near-field kernel across a canopy layer, the layer's
-// half-thickness expressed in the kernel's own units. Every layer's true
-// contribution is its source strength times this mean; the sum below estimates
-// it from the kernel at the layer's midpoint, which works everywhere except at
-// the observation height itself, where the kernel is infinite. There the mean
-// must be taken exactly, which the kernel's integral supplies in closed form.
+// Mean of the near-field kernel across a layer centred on the observation
+// height, where the kernel itself is infinite. halfthick is half the layer
+// thickness in kernel units.
 static inline double nearFieldLayerMean(double halfthick)
 {
     const double e = std::exp(-halfthick);
     const double integral = KN_C1 * (dilog01(e) - PI_SQ_OVER_6) + KN_C2 * (1.0 - e);
     return integral / halfthick;
 }
-// Every layer but the one holding the observation height is represented by the
-// kernel at its midpoint. That is exact where the kernel is straight and loses a
-// little where it curves, and it curves most sharply immediately either side of
-// the observation height, so nearly all the loss comes from the two adjacent
-// layers. It is always a loss, the kernel being convex there, so a midpoint
-// sample sits below the layer's true mean.
-//
-// What is lost is a fixed fraction of the observation layer's own source
-// strength, independent of wind, canopy and how vigorously the air is stirred.
-// Two dependences cancel to leave that: the sampling error grows as the cube of
-// layer thickness while the kernel's curvature beside the singularity falls as
-// its square, leaving a single power of thickness, which is what a layer's
-// source strength already carries.
-//
-// The term makes the accuracy of the sum improve with the square of the layer
-// count rather than in proportion to it, so a coarsely resolved canopy is not
-// penalised for its resolution. It is halved for the topmost node, which has
-// layers on one side only; the lowest node has the image of its own layer below
-// the ground as its other neighbour, and keeps the whole term.
-//
-// Canopy top is an observation height at the edge of the top layer, not at a
-// layer's centre. The top layer is then taken exactly, as its one-sided mean,
-// and the layers below it are sampled from half a layer further off than a
-// neighbour would be, where the kernel curves less; the same sum of sampling
-// losses, taken from an edge, gives the smaller fraction used there.
+// Corrections for sampling the kernel at layer midpoints, which underestimates
+// the layers next to the observation height. NF_NEIGHBOUR applies at a layer
+// centre (halved for the top node, which has a neighbour on one side only).
+// NF_EDGE applies at canopy top, the edge of the top layer.
 constexpr double LN_PI = 1.1447298858494002;
 constexpr double NF_NEIGHBOUR = -KN_C1 * (LN_PI - 1.0);
 constexpr double NF_EDGE = -KN_C1 * (1.5 * 0.6931471805599453 - 1.0);
@@ -3061,28 +2429,8 @@ static std::vector<double> solveDense(std::vector<double> A, std::vector<double>
     return x;
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Below-canopy air temperature and humidity at each layer, from a
-// localised near-field/far-field Lagrangian dispersion solution (Raupach
-// 1989): each layer's air state is the sum of a far-field contribution
-// (diffusive, from the cumulative source/sink strength of every layer
-// below or above it) and a near-field correction (non-diffusive, from the
-// small number of nearby source layers, via the kn() dispersion kernel).
-// Source/sink strengths (Hz/Lz, sensible/latent heat) come from the plant
-// and soil models; called repeatedly as OneStepBelow iterates the whole
-// coupled system to convergence.
-// Translates distributed canopy/ground heat and moisture sources into vertical air temperature and humidity profiles.
-// The Lagrangian dispersion kernel represents turbulent transport within the canopy; the resulting profiles provide the atmospheric state seen by leaves and the soil at the next coupling iteration.
-// How the ground's surface temperature follows the canopy air within the
-// dispersion solve. The ground exchanges heat with the air the foliage's
-// sources leave beneath them, and those sources change as the air the leaves
-// stand in is solved; held fixed while that is done, the ground is a pass
-// behind the air it answers to. Its surface balance says how far it moves per
-// degree that air warms: the share of everything restoring the surface
-// (emission, evaporation, exchange with the air, and the heat the soil takes
-// up over the step) that the exchange with the air makes up. With that the
-// ground enters the solve as a quantity that moves with every layer's air,
-// and canopy-top air, which lies between the ground and the reference air,
-// moves with it.
+// How the ground surface temperature responds to canopy air temperature, so that
+// the ground can be adjusted within the canopy air solve.
 struct groundfollow {
     double share = 0.0;      // ground's change per degree change in the air it exchanges with
     double rToRef = 0.0;     // resistance from the soil surface to the reference height (s/m)
@@ -3090,6 +2438,10 @@ struct groundfollow {
     double rhocp = 1.0;      // volumetric heat capacity of the reference air (J m-3 K-1)
     double moved = 0.0;      // set by the solve: how far the ground moved (K)
 };
+// Air temperature and humidity at each canopy node (Raupach 1989). A node's air
+// is the canopy-top value plus a far-field part (diffusion of heat and vapour
+// from all sources) and a near-field part (the extra effect of nearby foliage).
+// Air, and the sources that depend on it, are solved together as a linear system.
 static void LangrangianOne(onestep& onestepin, double pk, double tground, double soilrelhum,
     double th, double eh, const vegpstruct& vegp,
     const std::vector<double>& z, const windmodel& windvars,
@@ -3101,39 +2453,11 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     auto& rh = onestepin.rh;
     const size_t nn = rh.size();
     const double nnd = static_cast<double>(nn);
-    // Weakest wind the dispersion solution credits. In vanishing wind a fixed
-    // heat source demands an arbitrarily large temperature difference to carry
-    // it, and the solved profile ends up pinned across nearly every layer to
-    // the plausibility bounds imposed below, losing the vertical structure the
-    // multilayer solve exists to resolve.
-    //
-    // The threshold is a wind speed rather than a friction velocity, because
-    // the same friction velocity means very different weather over a forest
-    // and over a sward: converting through this canopy's own roughness lets
-    // one threshold stand for the same conditions everywhere. Combining in
-    // quadrature rather than clipping leaves ordinary winds essentially
-    // untouched while removing any threshold at which the solution would jump.
-    //
-    // The result is used for the gust velocity scale as well as the Lagrangian
-    // time scale. Those two are reciprocal in friction velocity, so their
-    // product -- the distance over which the near-field kernel acts -- is a
-    // property of the canopy alone, independent of wind. Deriving both from one
-    // value preserves that, and with it the balance between near-field and
-    // far-field transport on which the formulation rests.
+    // Friction velocity with the still-air guard applied.
     const double uf_mix = mixingFrictionVelocity(windvars);
     const double dz = vegp.hgt / nnd;
-    // The diffusivity column (col) is the one the ground's exchange uses, at the
-    // mixing friction velocity: canopy mixing, limited near the ground by the
-    // soil surface layer. Resistances between heights, among them that from the
-    // soil to each node (Rz), are exact integrals of it.
-    // The range the vapour pressure of canopy air can occupy. Vapour enters
-    // or leaves the air only at the ground, at the leaves and at canopy top,
-    // and at each it moves towards what that surface holds: the vapour
-    // pressure of the soil's pore air, saturation at a leaf's temperature, the
-    // air above. Air between them cannot be moister than the moistest of
-    // these or drier than the driest. The solve below is not bound to respect
-    // that, and in some hours steps a little outside the range; the result is
-    // held to it.
+    // Limits on the vapour pressure of canopy air: the driest and moistest of the
+    // ground, the leaves and the air above.
     double esg = satvapCpp2(tground) * soilrelhum;  // ground vapour pressure
     double emn = std::min(eh, esg);
     double emx = std::max(eh, esg);
@@ -3142,17 +2466,10 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         emn = std::min(emn, el);
         emx = std::max(emx, el);
     }
-    // ow: standard deviation of vertical velocity (sigma_w) at each layer,
-    // following Raupach's cosine profile between a0*uf near the ground and
-    // a1*uf at canopy top. The far-field eddy diffusivity is sigma_w^2*TL; the
-    // Lagrangian time scale TL is the canopy's, shortened near the ground where
-    // eddies are limited by their distance from it, so TL = K/sigma_w^2 from the
-    // column. inowTL is 1/(sigma_w*TL), the length scale used to
-    // non-dimensionalise distances in the near-field kernel below. ST/SL are each
-    // layer's sensible/latent heat source strength per unit ground area: the leaf
-    // model gives sensible heat per unit foliage area, weighted here by the
-    // layer's foliage, and latent heat already per unit ground area, as the
-    // layer's transpiration and evaporation of intercepted water.
+    // For each layer: gust strength sigma_w (ow), rising from a0*uf at the ground to
+    // a1*uf at canopy top; one over sigma_w times the Lagrangian time scale (inowTL),
+    // which scales distance in the near-field kernel; and the sensible and latent
+    // heat sources per unit ground area (ST, SL).
     std::vector<double> ow(nn), inowTL(nn), ST(nn), SL(nn);
     const double mu1 = (a1 + a0) * 0.5 * uf_mix;
     const double mu2 = (a1 - a0) * 0.5 * uf_mix;
@@ -3162,65 +2479,36 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         ST[i] = vegp.paii[i] * onestepin.Hz[i];
         SL[i] = onestepin.Lz[i];
     }
-    // Near-field weight of each layer's source at canopy top, the upper boundary
-    // of the canopy air. The solve works with each node's departure from
-    // canopy-top air, so this is taken from every layer's weight at each node.
+    // Near-field weight of each layer's source at canopy top.
     std::vector<double> cTop(nn, 0.0);
-    // source layers kept either side of a node
+    // Number of layers either side of a node that contribute to its near field.
     const size_t band = g_solver.nearLocal ? 1 : nn;
     for (size_t j = 0; j < (nn - 1); ++j) {
         if (nn - 1 - j > band) continue;
-        // Each source reaches the observation height by two paths: directly,
-        // and reflected at the ground, which imposes the no-flux condition
-        // there. Each path is attenuated by the kernel over its own distance.
+        // Direct path, and the path reflected at the ground.
         double zeta1 = (vegp.hgt - z[j]) * inowTL[j];
         double zeta2 = (vegp.hgt + z[j]) * inowTL[j];
         cTop[j] = (nearFieldKernel(zeta1) + nearFieldKernel(zeta2)) / ow[j];
     }
-    // The topmost layer ends at the observation height, where the kernel is
-    // infinite, so the sum above cannot sample it and its heat enters as the
-    // kernel's exact mean across the layer, seen from its upper edge, with its
-    // reflection in the ground.
+    // The top layer ends at canopy top, so the kernel's exact mean across it is used.
     {
         const size_t t = nn - 1;
         cTop[t] = (nearFieldLayerMean(dz * inowTL[t])
             + nearFieldKernel((vegp.hgt + z[t]) * inowTL[t])
             + NF_EDGE) / ow[t];
     }
-    // Far-field concentration at canopy top: the above-canopy air
-    // temperature/vapour pressure expressed in the same flux-like units
-    // (enthalpy/latent-heat-flux equivalent) as the source terms below.
+    // Canopy-top temperature times the volumetric heat capacity of air.
     const double phh = phairCpp(th, pk);
     const double CfTh = phh * cpairCpp(th) * th;
-    // Response of the scalar at each node to each layer's source, W[i][j]:
-    // Raupach's near-field/far-field superposition about the canopy-top value.
-    //
-    // Far field: a source above a node carries nothing down through it, and the
-    // air beneath the source stands at the level the source sets where it is
-    // released: its strength times the resistance from there to canopy top. A
-    // source below a node is carried up through it, adding its strength times
-    // the resistance from the node to canopy top -- less the share of its heat
-    // that goes down instead, into the ground, which is held at its own
-    // temperature while the air is solved. That share is the resistance above
-    // the source over the whole resistance between the ground and the node, so
-    // what passes up is the fraction lying below the source. Together these
-    // are Raupach's (1989, Eq. 19a) integral of the flux, which at each height
-    // includes every source below it, for a ground of given temperature.
-    //
-    // Near field: the localised kernel's response to every other layer's source,
-    // each sampled at its centre. A node's own layer is excluded from that
-    // sampling, since a source at zero separation carries infinite kernel
-    // weight; its heat is real and finite, and enters as the kernel's exact mean
-    // across the layer about its centre, together with its reflection off the
-    // ground.
-    //
-    // Layer centres are evenly spaced, so the direct path between two of them and
-    // the reflected path are each a whole number of layer thicknesses, and the
-    // kernel's exponential decay along either is a whole power of the decay
-    // across one thickness of the source layer. The two paths' logarithmic terms
-    // are taken as one logarithm of their product.
+    // W[i][j]: effect of layer j's source on the air at node i, relative to canopy-top air.
+    // Far field: a source below the node adds the resistance from the node to canopy
+    // top, times the fraction of the ground-to-node resistance lying below the
+    // source. A source above adds the resistance from the source to canopy top.
+    // Near field: the kernel at the distance between the two layer centres, direct
+    // and reflected at the ground. A node's own layer enters as the kernel's exact mean.
     MP_LAP(9);
     std::vector<double> W(nn * nn), Wnear(nn * nn);
+    // Powers of the kernel's exponential decay across one layer, reused for every pair.
     const size_t npow = 2 * nn;
     std::vector<double> decay(nn * npow);
     for (size_t j = 0; j < nn; ++j) {
@@ -3244,43 +2532,22 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
                 nf = (nearFieldLayerMean(halfthick) + nearFieldKernel(2.0 * z[i] * inowTL[i])
                     + neighbours) / ow[i];
             }
-            // (a node within the soil's own roughness has no resistance beneath
-            // it and takes the soil's values whatever its weights are)
+            // A node within the soil's roughness has no resistance below it.
             const double below = (Rz[i] > 0.0) ? Rz[j] / Rz[i] : 1.0;
             const double ff = (j <= i) ? Rup * below : (col.Rh - Rz[j]);
-            // The near field is the imprint of the canopy's own eddies, and is
-            // present only as far as the canopy sheds them.
+            // The near field is scaled by the weight given to canopy-scale turbulence.
             Wnear[i * nn + j] = windvars.fade * (nf - cTop[j]);
             W[i * nn + j] = Wnear[i * nn + j] + ff;
         }
     }
-    // Air temperature and vapour pressure at every node, found together with
-    // the foliage sources that depend on them. The ground exchanges with each
-    // node across the resistance below it, Rz, and what it delivers then
-    // crosses the resistance above, Rup; each layer's sources change with its
-    // own air as the leaf model reports. Everything enters linearly, so all
-    // nodes are solved at once. Substituting sources from the last pass instead
-    // overshoots wherever a layer's sources respond to its air more strongly
-    // than its air to its sources, as in dense, very short canopies. The
-    // responses cancel at the converged state: they set the path to the
-    // solution, not the solution. A node inside the soil's own roughness takes
-    // the soil's temperature and vapour pressure, as it should.
-    //
-    // Vapour is counted in moles: each layer's latent heat source over the
-    // latent heat at its own leaves is the vapour it releases, and one density
-    // of air, canopy top's, turns that into vapour pressure throughout, so
-    // that a canopy releasing no vapour holds the vapour pressure of the air
-    // above it and of the ground at every height.
-    //
-    // Canopy-top air responds to the sources too: it lies between the
-    // reference air and the ground, reached across rTop, their resistances in
-    // parallel, so a change in any layer's source moves it by that change times
-    // rTop, and every node with it. Where the reference height is at canopy top
-    // its air is fixed and rTop is zero.
+    // Linear systems for air temperature (AT, bT) and vapour pressure (AL, bL) at all
+    // nodes. Each includes the ground's exchange with the node, the change in each
+    // layer's source with its own air, and the response of canopy-top air (across
+    // rTop). Vapour is counted in moles.
     MP_LAP(10);
     std::vector<double> AT(nn * nn), AL(nn * nn), bT(nn), bL(nn);
-    // Each node's air as the pass found it: vapour pressure, density, heat
-    // capacity, and the latent heat at its leaves' temperature.
+    // Vapour pressure, molar density and heat capacity of each node's air, and the
+    // latent heat at its leaf temperature.
     std::vector<double> eAir(nn), phAir(nn), cpAir(nn), laLeaf(nn);
     for (size_t i = 0; i < nn; ++i) {
         eAir[i] = satvapCpp2(tair[i]) * rh[i] / 100.0;
@@ -3308,12 +2575,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         bT[i] = Rz[i] * sT + ph * cp * Rup * tground;
         bL[i] = Rz[i] * (phh * eh + pk * sL) + phh * Rup * esg;
     }
-    // The ground following the air: each layer's air, through the change it
-    // makes to that layer's source, warms the air the ground exchanges with by
-    // the change in source times the resistance from the layer to the
-    // reference height, and the ground takes its share of that. The ground's
-    // change reaches each node across the resistance above the node, and
-    // through canopy-top air across the resistance below it.
+    // Ground adjusted with the air: a change in a layer's air changes its source,
+    // which changes the air the ground exchanges with, and the ground follows by its share.
     std::vector<double> groundPerAir;
     if (ground != nullptr) {
         groundPerAir.assign(nn, 0.0);
@@ -3336,11 +2599,8 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
     }
     const std::vector<double> enew = solveDense(AL, bL, nn);
     MP_LAP(12);
-    // How much of each node's departure from canopy-top air the foliage accounts
-    // for, split into the part ordinary diffusion of its heat and vapour through
-    // the canopy gives (far field) and the extra imprint of nearby foliage whose
-    // release the eddies have not yet mixed (near field). The sources are those
-    // at the air just solved. Reported for inspection; nothing uses them.
+    // Far-field and near-field parts of each node's departure from canopy-top air.
+    // Diagnostic output only.
     onestepin.tfar.assign(nn, 0.0); onestepin.tnear.assign(nn, 0.0);
     onestepin.efar.assign(nn, 0.0); onestepin.enear.assign(nn, 0.0);
     for (size_t i = 0; i < nn; ++i) {
@@ -3358,6 +2618,7 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         onestepin.enear[i] = pk * Rz[i] * en / (phh * col.Rh);
         onestepin.efar[i] = pk * Rz[i] * ef / (phh * col.Rh);
     }
+    // Update air temperature and relative humidity, keeping vapour pressure within its limits.
     for (size_t i = 0; i < nn; ++i) {
         tair[i] = tnew[i];
         const double ean = std::min(std::max(enew[i], emn), emx);
@@ -3366,29 +2627,11 @@ static void LangrangianOne(onestep& onestepin, double pk, double tground, double
         if (rh[i] < 0.0) rh[i] = 0.0;
     }
 }
-// The air the ground exchanges heat and vapour with, and the resistance to it.
-//
-// The ground touches only the air just above it, and exchanges with that air
-// across the resistance between them. Its heat and vapour then rise through the
-// canopy as one flux, beneath every foliage layer, to canopy top and on to the
-// reference height. Each foliage layer, for its part, raises all the air beneath
-// it by its own source strength times the resistance from the layer up to the
-// reference height. So the air just above the ground is the reference air,
-// raised by every foliage layer in that way, and raised again by the ground's
-// own flux times the resistance from there to the reference height.
-//
-// The last of those depends on the flux being sought. Carrying it across to the
-// other side of the balance adds the resistance above the lowest air to the
-// resistance below it, and the air just above the ground drops out: the ground's
-// flux is its difference from the reference air raised by the foliage alone,
-// across the whole resistance from the soil to the reference height. That is the
-// form returned here. It is the local exchange written with the local air
-// eliminated, not an exchange with the reference air, and it needs no value of
-// the canopy air from a previous pass.
-//
-// The same raise taken only as far as canopy top (Ttop, etop) is what the
-// canopy-top balance needs, and the summed sources are the foliage's share of
-// the fluxes at the reference height.
+// The air the ground exchanges heat and vapour with: the reference air, raised
+// by each foliage layer's source times the resistance from that layer to the
+// reference height. The ground exchanges with it across the whole resistance from
+// the soil to the reference height. This is the same as exchange with the air
+// just above the ground, with that air eliminated from the equations.
 struct groundair {
     double T;        // temperature of the air the ground exchanges with (deg C)
     double relhum;   // its relative humidity (%)
@@ -3421,32 +2664,21 @@ static groundair airSeenByGround(const climstruct& climdata, const vegpstruct& v
     out.etop = esrc;
     return out;
 }
-// Temperature and vapour pressure of the air at canopy top. That air lies
-// between the reference air above and the ground below and receives the heat
-// and vapour the foliage releases; its state is the one at which what arrives
-// from below and from the foliage leaves through the air above. It is the upper
-// boundary of the dispersion solve within the canopy (LangrangianOne).
-//
-// The ground's exchange with canopy-top air passes beneath every foliage source,
-// and the far field of those sources raises the air at the ground above the air
-// at canopy top by each source's strength times the resistance from it to the
-// top (Tsrc, esrc). The ground therefore drives its exchange with the difference
-// between its own state and that raised air, not with canopy-top air directly.
+// Temperature and vapour pressure of the air at canopy top, where the heat and
+// vapour arriving from the ground and the foliage equal what leaves to the air
+// above. The ground's exchange is with canopy-top air raised by the foliage
+// sources (Tsrc, esrc).
 static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
     std::vector<double>& Hz, std::vector<double>& Lz, double zref,
     double Th, double eh, double tground, double soilrh,
     double rH_g, double rH_h_zref, double Tsrc, double esrc, int maxIter)
 {
-    // The balance is closed far more closely than the hour as a whole is asked
-    // to be, so that nothing of this loop's own stopping point shows in the hour's.
+    // Tolerance on canopy-top temperature and vapour pressure.
     const double tolerance = g_solver.topTolerance;
     size_t nb = vegpc.paii.size();
     double FcH = 0.0;
     double FcL = 0.0;
-    // Sensible and latent heat released by the foliage, per unit ground area.
-    // The leaf model gives the first per unit plant area and the second, the
-    // layer's transpiration and evaporation of intercepted water, already per
-    // unit ground area.
+    // Sensible and latent heat from all foliage, per unit ground area.
     for (size_t i = 0; i < nb; ++i) {
         FcH += Hz[i] * vegpc.paii[i];
         FcL += Lz[i];
@@ -3463,15 +2695,9 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
         double cp = cpairCpp(Th);
         const double tg = tground + Tsrc;
         const double la = latentHeat(tg);
-        // The ground's heat and vapour reach canopy-top air through the soil
-        // surface layer and the canopy air: rH_g is that resistance, soil to canopy top.
-        // Canopy-top air sits between the reference air above and the ground
-        // below, and receives the canopy's own heat. The ground's contribution
-        // depends on canopy-top air itself, so the balance is solved for it
-        // directly rather than by substitution, which diverges whenever the air
-        // above the canopy offers more resistance than the path from the ground.
-        // Only the air's density and heat capacity still depend on temperature,
-        // weakly, which is what the loop refines.
+        // Balance of canopy-top air between the reference air (across rH_h_zref), the
+        // ground (across rH_g) and the foliage sources. Iterated only because air
+        // density and heat capacity depend on temperature.
         const double rr = rH_h_zref / rH_g;
         double Th_new = (climdata.tref + FcH * rH_h_zref / (ph * cp) + rr * tground) / (1.0 + rr);
         double eh_new = (eref + FcL * rH_h_zref * climdata.pk / (ph * la) + rr * eground) / (1.0 + rr);
@@ -3482,7 +2708,7 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
         eh = eh_new;
         ++nrIterations;
     }
-    // ensure vapour pressure not > 100% relative humidity
+    // Vapour pressure no higher than saturation.
     double rh = (eh / satvapCpp2(Th));
     if (rh > 1.0) eh = satvapCpp2(Th);
     cantop out;
@@ -3492,12 +2718,10 @@ static cantop canopytop(vegpstruct& vegpc, windmodel& wind, climstruct climdata,
  }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ************************************************** Run model for one step ********************************************** //
-// These are the core timestep couplers.  A timestep is not a simple sequence: radiation, leaves,
-// canopy air, ground, soil and above-canopy stability are iterated until their shared fluxes and boundary conditions agree.
+// One hour of the model. Wind, leaves, canopy air, ground and soil depend on one
+// another and are iterated until they agree.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// What the hour's iteration carries from one pass to the next beside the hourly
-// state itself: the ground and canopy-top air, and the heat leaving the surface
-// and entering the soil, which the next pass's wind and soil solves start from.
+// Values carried from one pass of the hour's iteration to the next.
 struct outercarry {
     double tground = 0.0, Th = 0.0, eh = 0.0, psir = 0.0, H_iter = 0.0, G_iter = 0.0;
     double tdif = 1e99;        // how far the last pass moved the canopy air (K)
@@ -3505,14 +2729,8 @@ struct outercarry {
     std::vector<double> dTs;   // leaf-to-air temperature difference seeding leaf convection
     int pass = 0;
 };
-// One pass of the coupled hour. Everything in the canopy depends on everything
-// else: the wind and the stability of the air on the heat leaving the surface,
-// the leaves on the air around them and on each other's longwave, the ground on
-// the air above it, and the air on all of them. A pass takes the state the last
-// one left, works through each part in turn with the others as they then stand,
-// and leaves a new state; the hour is solved when a pass no longer moves the
-// canopy air. Nothing is relaxed here: what a pass finds is what it leaves.
-// Radiation from the sun is fixed for the hour and passed in.
+// One pass of the hour: wind and stability, leaves, ground and soil, then canopy
+// air, each solved with the others as they stand. Nothing is damped.
 static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climdata,
     vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
@@ -3523,12 +2741,15 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     const size_t na = onestepin.tair.size();
     std::vector<double> rz_zref(na); // resistance from each layer to zref
     std::vector<double> rz_soil(na); // resistance from the soil to each layer
-    std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // previous timestep's soil state, not touched by this pass's iteration
+    std::vector<double> oldTe_fixed = onestepin.soilheatvars.oldTe; // soil temperatures at the start of the hour
+    // Water on the leaves is reset to its value at the start of the hour.
     onestepin.swaterdepth = swater0;
+    // Longwave radiation.
     radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, c.tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
     onestepin.Rlwdown = lwrad.Rlwdown;
     onestepin.Rlwup = lwrad.Rlwup;
     MP_LAP(2);
+    // Wind and stability.
     windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, innerIter, a1,
         onestepin.psih, onestepin.psim, onestepin.phih, 1000.0, 1.0, soilpc.z0);
     onestepin.uz = wind.uz;
@@ -3541,6 +2762,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.LL = wind.LL;
     c.uf = wind.uf;
     MP_LAP(3);
+    // Rain interception.
     rainmodel rainvars = rainintercept(wc, vegpc.pia, wind.uh, climdata.precip, vegpc.x);
     envstruct envdata{};
     envdata.pk = climdata.pk;
@@ -3548,13 +2770,8 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     envdata.Ca = Ca;
     envdata.precip = climdata.precip;
     for (size_t i = 0; i < na; ++i) c.dTs[i] = std::abs(onestepin.tleaf[i] - onestepin.tair[i]);
-    // Resistances from the soil and from each layer to the reference height,
-    // all from one diffusivity column (soilToZ).
-    // The column is built at the same friction velocity the dispersion solve
-    // uses, floored for calm wind, so that the ground's and each layer's
-    // resistances to the reference height are the ones the canopy air is
-    // solved with; otherwise, in near-calm hours, the sources found against
-    // one column would be carried through another many times more resistive.
+    // Diffusivity profile, and resistances from the soil and from each layer to the
+    // reference height.
     const aerocolumn col = makeColumn(vegpc.hgt, dcan, mixingFrictionVelocity(wind), wind.LL, a0v, a1,
         canopyEnhancement(vegpc.hgt, vegpc.pai, soilpc.z0, wind.fade), soilpc.z0);
     double rHa = soilToZ(col, zref); // soil surface to zref
@@ -3565,10 +2782,10 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         rz_zref[i] = rHa - rz_soil[i];
     }
     MP_LAP(4);
+    // Leaf energy balance.
     plantmodelCpp(onestepin, envdata, vegpc, rainvars, swrad, lwrad, z, c.dTs, 3600.0, C3); // updates onestepin in place
     MP_LAP(5);
-    // The air the ground exchanges with this pass, given the foliage's
-    // sources as the leaf model has just left them.
+    // Ground: the air it exchanges with, then soil heat and soil water.
     const groundair ga = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
     double Rabs = swrad.RswGabs + lwrad.RlwGabs;
     soilmod soilheat = SoilHeatCpp(onestepin.soilheatvars, soilpc, Rabs, ga.T, ga.relhum, climdata.pk, ga.R, 3600);
@@ -3596,9 +2813,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.soilwatervars = soilwater.swo;
     onestepin.Ev = soilwater.Evapmmhr;
     onestepin.theta = soilwater.swo.theta[0];
-    // Sensible and latent heat leaving the whole surface: every foliage
-    // layer's source and the ground's, which together are the fluxes at the
-    // reference height and drive the stability of the air above.
+    // Sensible and latent heat from the whole surface: foliage plus ground.
     {
         const double phr = phairCpp(climdata.tref, climdata.pk), cpr = cpairCpp(climdata.tref);
         onestepin.H = ga.Hfoliage + (phr * cpr / ga.R) * (c.tground - ga.T);
@@ -3606,6 +2821,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     c.H_iter = onestepin.H;
     onestepin.L = ga.Lfoliage + groundLatentFlux(soilpc, c.tground, ga.T, ga.relhum,
         climdata.pk, ga.R, soilwater.swo.theta[0]);
+    // Canopy-top air.
     if (zref > vegpc.hgt) {
         cantop Theh = canopytop(vegpc, wind, climdata, onestepin.Hz, onestepin.Lz, zref, c.Th, c.eh, c.tground, soilrh,
             rhg, rhz, ga.Ttop, ga.etop, innerIter);
@@ -3622,11 +2838,9 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     const bool groundFollows = (g_solver.groundRow > 0);
     std::vector<double> eBefore;
     if (groundFollows) {
-        // The surface's restoring strength (W m-2 K-1): the slope of its balance
-        // with its own temperature, and what the soil beneath takes up per
-        // degree over the step, which for a step of this length is set by the
-        // conductivity and heat capacity of the soil at the surface, its
-        // capacity counting any water freezing or thawing there.
+        // How far the ground follows the air: its exchange with the air as a share of
+        // everything restoring surface temperature (the slope of the surface energy
+        // balance plus heat uptake by the soil over the hour).
         const double theta0 = soilwater.swo.theta[0];
         const double balanceSlope = (soilsurfaceEB(soilpc, Rabs, ga.T, c.tground - 0.05, climdata.pk, ga.relhum, ga.R, theta0)
             - soilsurfaceEB(soilpc, Rabs, ga.T, c.tground + 0.05, climdata.pk, ga.relhum, ga.R, theta0)) / 0.1;
@@ -3646,12 +2860,11 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         eBefore.resize(na);
         for (size_t i = 0; i < na; ++i) eBefore[i] = satvapCpp2(onestepin.tair[i]) * onestepin.rh[i] / 100.0;
     }
+    // Canopy air.
     LangrangianOne(onestepin, climdata.pk, c.tground, soilrh, c.Th, c.eh, vegpc, z, wind, a0v, a1,
         (zref > vegpc.hgt) ? rhz * rhg / (rhz + rhg) : 0.0, col, rz_soil, groundFollows ? &follower : nullptr); // updates onestepin.tair/rh in place
     if (groundFollows) {
-        // Leaves and their sources as the solved air leaves them: each layer's
-        // sources by their response to its air, and its foliage by how far it
-        // follows that air.
+        // Leaf temperatures and sources updated to the solved air.
         for (size_t i = 0; i < na; ++i) {
             if (!(vegpc.paii[i] > 0.0)) continue;
             const double dT = onestepin.tair[i] - tair[i];
@@ -3662,7 +2875,8 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
             const double toLeaf = phairCpp(tair[i], climdata.pk) * cpairCpp(tair[i]) / (0.5 * onestepin.rLB[i]);
             onestepin.tleaf[i] += (1.0 + perLeaf / toLeaf) * dT;
         }
-        // The ground against the air those sources leave beneath them.
+        // Ground updated to match: by re-solving soil heat (groundRow 1) or by the
+        // change found in the canopy air solve (groundRow 2).
         const groundair gaNow = airSeenByGround(climdata, vegpc, onestepin.Hz, onestepin.Lz, rz_zref, rHa, rhz);
         const double theta0 = soilwater.swo.theta[0];
         if (g_solver.groundRow == 1) {
@@ -3684,23 +2898,20 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
         onestepin.L = gaNow.Lfoliage + groundLatentFlux(soilpc, c.tground, gaNow.T, gaNow.relhum, climdata.pk, gaNow.R, theta0);
     }
     MP_LAP(13);
-    // Convergence is judged on canopy air: how far this pass's solution lies
-    // from the air the pass started from.
+    // Largest change in canopy air temperature over the pass.
     c.tdif = 0.0;
     for (size_t i = 0; i < na; ++i) {
         double dif = std::abs(tair[i] - onestepin.tair[i]);
         if (dif > c.tdif) c.tdif = dif;
     }
     c.psir = rootZonePotential(soilpc, soilwater.swo.theta, soilwater.swo.rootfrac, soilwater.swo.Tc) / 1000.0; // J/kg -> MPa
-    onestepin.soilheatvars.oldTe = oldTe_fixed; // don't let SoilHeatCpp's own state carry the last pass's oldTe into the next pass
+    onestepin.soilheatvars.oldTe = oldTe_fixed; // restore soil temperatures at the start of the hour
     ++c.pass;
     MP_LAP(8); MP_COUNT(15);
 }
-// The state the hour's iteration works on, as one vector: air temperature,
-// vapour pressure and leaf temperature at each node, then ground temperature,
-// canopy-top air temperature and vapour pressure, and the sensible and ground
-// heat fluxes. Vapour pressure is used, not relative humidity, so that the
-// vapour in the air does not change when its temperature is changed.
+// The hour's state as one vector: air temperature, vapour pressure and leaf
+// temperature at each node, then ground temperature, canopy-top temperature and
+// vapour pressure, and the sensible and ground heat fluxes.
 static std::vector<double> packState(const onestep& s, const outercarry& c)
 {
     const size_t n = s.tair.size();
@@ -3713,6 +2924,7 @@ static std::vector<double> packState(const onestep& s, const outercarry& c)
     x[3 * n] = c.tground; x[3 * n + 1] = c.Th; x[3 * n + 2] = c.eh; x[3 * n + 3] = c.H_iter; x[3 * n + 4] = c.G_iter;
     return x;
 }
+// The reverse: writes the vector back to the state.
 static void injectState(const std::vector<double>& x, onestep& s, outercarry& c)
 {
     const size_t n = s.tair.size();
@@ -3723,47 +2935,23 @@ static void injectState(const std::vector<double>& x, onestep& s, outercarry& c)
     }
     c.tground = x[3 * n]; c.Th = x[3 * n + 1]; c.eh = x[3 * n + 2]; c.H_iter = x[3 * n + 3]; c.G_iter = x[3 * n + 4];
 }
-// Passes remembered by the hour's iteration. Most hours are solved before
-// the memory fills, so its length costs them nothing. It matters in the few
-// hours where the heat leaving the surface and the stability of the air chase
-// each other: with a short memory the iteration keeps forgetting the passes
-// that showed it both sides of that loop.
+// Number of passes remembered by the acceleration of the hour's iteration.
 constexpr int OUTER_MEMORY = 10;
-// The furthest a combined state may lie from the latest pass's own result, in
-// kelvin or its equivalent in the other variables. Beyond it the combination
-// is an extrapolation the passes behind it cannot support.
+// Greatest distance (K or equivalent) allowed between the accelerated state and
+// the latest pass's own result.
 constexpr double OUTER_REACH = 10.0;
-// The last few states the iteration visited, in comparable units, with how far
-// a pass moved each; and what the latest pass itself produced.
+// Recent states (X) and how far a pass moved each (F), in comparable units.
 struct outermemory {
     std::vector<std::vector<double>> X, F;
     std::vector<double> passStart, passResult;
     double lastMove = 1e99;
-    int depth = OUTER_MEMORY;   // zero repeats plain passes
+    int depth = OUTER_MEMORY; // zero gives plain passes with no acceleration
 };
-// One step of the hour's iteration: a pass, then a choice of where the next
-// pass starts.
-//
-// Repeating passes does converge in most hours, but slowly, because each part
-// is solved with the others as the last pass left them and the corrections
-// arrive one pass late: warmer leaves evaporate more, the moister air then
-// suppresses it, and the two take turns. In some hours it does not converge at
-// all, where a change in the heat leaving the surface alters the mixing of the
-// air enough to reverse it.
-//
-// So the next pass does not start from where the last one ended. Each pass
-// shows how far it moved the state it was given. Over the last few passes
-// those moves, taken as a set, show how the canopy responds as a whole, and
-// from them is found the combination of recent states that the passes would
-// together have moved least: the best estimate, from what has been seen, of
-// the state a pass leaves unchanged (Anderson 1965). Where passes behave
-// smoothly that estimate improves by an order of magnitude or more each time.
-//
-// Two safeguards. If a pass moves the state three times further than the one
-// before, the estimate has gone astray, usually because the canopy has crossed
-// a point where its behaviour changes abruptly, and the memory is cleared. If
-// the combination is not finite, or lies implausibly far from what the latest
-// pass produced, the memory is cleared and the plain pass is taken.
+// One step of the hour's iteration: a pass, then Anderson (1965) acceleration to
+// choose where the next pass starts: the combination of recent states that the
+// passes together moved least. The memory is cleared if a pass moves the state
+// three times further than the one before, or if the combination is not finite
+// or lies too far from the latest result.
 static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstruct& climdata,
     vegpstruct& vegpc, const soilpstruct& soilpc, const std::vector<double>& z, const LWweights& wgts,
     const std::vector<double>& wc, const radmodel& swrad, const std::vector<double>& swater0,
@@ -3775,8 +2963,7 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     mem.passStart = x;
     mem.passResult = packState(s, c);
     if ((c.tdif <= tolerance && c.pass >= g_solver.minPass) || mem.depth <= 0) return;   // the pass's own result stands
-    // One kelvin's worth of each variable, so that none dominates the fit for
-    // its units alone.
+    // Scale each variable so that one unit is comparable to 1 K.
     std::vector<double> sc(m, 1.0);
     for (size_t i = 0; i < n; ++i) sc[n + i] = 0.1;         // kPa
     sc[3 * n + 2] = 0.1; sc[3 * n + 3] = 50.0; sc[3 * n + 4] = 50.0;   // kPa, W m-2, W m-2
@@ -3809,6 +2996,7 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     for (size_t p = 0; p < k; ++p) tr += A[p * k + p];
     for (size_t p = 0; p < k; ++p) A[p * k + p] += 1e-10 * tr + 1e-300;   // keeps the fit defined when two moves coincide
     const std::vector<double> gam = solveDense(A, b, k);
+    // The accelerated state.
     std::vector<double> xn(m);
     bool sound = true;
     for (size_t i = 0; i < m; ++i) {
@@ -3821,15 +3009,9 @@ static void outerStep(onestep& s, outercarry& c, outermemory& mem, const climstr
     if (sound) injectState(xn, s, c);
     else { mem.X.clear(); mem.F.clear(); }
 }
-// One vegetated timestep, fully coupled: radiation (fixed for the step) is
-// computed once; wind, rain interception, the plant energy balance, the
-// soil heat/water solves and the Lagrangian dispersion model are then
-// iterated together until a pass no longer moves the canopy air (each depends
-// on the others -- e.g. wind depends on the heat leaving the surface, which
-// depends on the leaves, which depend on the wind's resistances). At least
-// three passes always run.
-// Solves one complete timestep of the multilayer vegetated microclimate model.
-// Radiation, canopy energy/water balance, turbulent profiles, soil heat/water and above-canopy stability are iterated because each supplies boundary conditions or fluxes to the others; convergence produces the timestep state passed forward in time.
+// One hour for a vegetated surface. Shortwave radiation is calculated once;
+// everything else is iterated until a pass changes canopy air temperature by
+// less than the tolerance.
 static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const climstruct& climdata, vegpstruct& vegpc, const soilpstruct& soilpc,
     const std::vector<double>& z, const tsvegstruct& tspveg, const tsvegstruct& tspvegPAR, const tsdifstruct& tspdif,
     const tsdifstruct& tspdifPAR, const LWweights& wgts, const std::vector<double>& wc,
@@ -3851,24 +3033,19 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     outercarry c;
     MP_LAP(1);
     c.tground = onestepin.soilheatvars.Te[0];
-    // Canopy-top air is the upper boundary of the canopy air, carried from hour
-    // to hour as a state of its own.
+    // Canopy-top air from the previous hour.
     c.Th = onestepin.tcanopy;
     c.eh = satvapCpp2(c.Th) * (onestepin.rhcanopy / 100.0);
     // root-zone water potential, J/kg -> MPa
     c.psir = rootZonePotential(soilpc, onestepin.soilwatervars.theta, onestepin.soilwatervars.rootfrac, onestepin.soilwatervars.Tc) / 1000.0;
     c.dTs.assign(na, 0.0);
-    // Sensible heat feeds the wind model and the ground heat flux the soil
-    // surface balance; both start from the values the last hour left.
+    // Sensible and ground heat fluxes from the previous hour.
     c.H_iter = onestepin.H;
     c.G_iter = onestepin.soilheatvars.Gflux;
-    // Floor gust strength: a fixed value if one is given, otherwise from the
-    // canopy's foliage (floorGustRatio).
+    // Gust strength at the ground: as given, or from the foliage.
     const double a0v = (a0 > 0.0) ? a0 : floorGustRatio(vegpc, a1);
     const double dcan = zeroplanedisCpp2(vegpc.hgt, vegpc.pai);
-    // Water held on the foliage at the start of the hour. Each pass intercepts
-    // this hour's rain afresh from that state, so the film cannot fill across
-    // the passes and the rain reaching the ground stays what the canopy let through.
+    // Water on the foliage at the start of the hour, restored at the start of every pass.
     const std::vector<double> swater0 = onestepin.swaterdepth;
     outermemory mem;
     std::vector<double> steadiestStart;
@@ -3878,11 +3055,7 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
             a0v, a1, dcan, C3);
         if (c.pass >= g_solver.minPass && c.tdif < steadiestMove) { steadiestMove = c.tdif; steadiestStart = mem.passStart; }
     }
-    // An hour that has not settled within the passes allowed returns the pass
-    // that moved the canopy air least, not whichever happened to come last:
-    // of the states visited that is the one nearest to being unchanged by a
-    // pass, and the pass is repeated from it so that every quantity returned
-    // belongs to the same state. The error reported is that pass's own move.
+    // An hour that has not converged returns the pass that changed canopy air least.
     if (c.tdif > tolerance && steadiestMove < c.tdif) {
         injectState(steadiestStart, onestepin, c);
         outerPass(onestepin, c, climdata, vegpc, soilpc, z, wgts, wc, swrad, swater0, Ca, zref, maxIter, tolerance, a0v, a1, dcan, C3);
@@ -3897,17 +3070,11 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ***************************************** Above canopy ************************************************************** //
-// Above the canopy, temperature and humidity follow the same resistance the fluxes use: through
-// the air the canopy's eddies keep well mixed, into the surface layer. Wind follows the momentum
-// profile.
+// Temperature, humidity and wind between canopy top and the reference height.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Fraction of the canopy-top-to-reference resistance that lies below height za.
-// The flux is the same at every height above the canopy, so temperature and
-// vapour pressure lie this fraction of the way from their canopy-top values to
-// their reference values. Every resistance scales with one over the friction
-// velocity, so the fraction does not depend on it. Foliage is taken as uniform,
-// which matters only for sparse canopies, where the ground's limit on eddy
-// size can reach above canopy top.
+// Fraction of the resistance between canopy top and the reference height that
+// lies below height za. Temperature and vapour pressure at za lie this fraction
+// of the way from their canopy-top values to their reference values.
 static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL, double z0, double fade)
 {
     const double a1 = 1.25;
@@ -3935,9 +3102,8 @@ double RHabove(double za, double zref, double rh, double th, double tref, double
     if (rz > 100.0) rz = 100.0;
     return rz;
 }
-// Uses dpsimCpp2 -- see Tabove's doc comment above; now smoothly tapered,
-// so no separate shape form is needed here either.
-// Extrapolates wind speed between heights above the canopy using the MOST momentum profile.
+// Wind speed at height za above the canopy, from the log profile with its
+// stability correction.
 // [[Rcpp::export]]
 double Uabove(double za, double zref, double uh, double uref, double hgt, double pai, double LL) {
     double d = 0.0;
@@ -3948,13 +3114,9 @@ double Uabove(double za, double zref, double uh, double uref, double hgt, double
         / (std::log((zref - d) / (hgt - d)) + psibtm));
     return uz;
 }
-// One bare-ground timestep: the single-layer counterpart of OneStepBelow
-// with no canopy, no plant model and no Lagrangian dispersion -- wind
-// stability and the soil heat/water solves are iterated together until
-// the ground surface temperature stops changing, then the converged
-// state is used for a one-shot post-convergence profile at each height z.
-// Solves one timestep for a bare surface using the same atmospheric and soil physics but no canopy layers.
-// Ground radiation/energy balance, soil heat/water and atmospheric stability are iterated to a mutually consistent surface state.
+// One hour for bare ground. Stability, soil heat and soil water are iterated
+// until ground temperature stops changing. Air temperature, humidity and wind
+// are then found at each height.
 static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, const climstruct& climdata, const soilpstruct& soilpc,
     const std::vector<double>& z, double latr, double lonr, double zref, double zm = 0.004, int maxIter = 100,
     double  tolerance = OUTER_TOLERANCE)
@@ -3981,12 +3143,8 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     double psi_m = onestepin.psim;
     double psi_h = onestepin.psih;
     double H = onestepin.H;
-    // Bare ground is the diffusivity column of the vegetated model with the
-    // foliage removed: a surface layer from the soil's roughness height to the
-    // reference height. Friction velocity and Obukhov length are found as they
-    // are over vegetation, including the convective velocity that keeps exchange
-    // going in calm, sunny conditions (Beljaars 1994), so that vegetation thinned
-    // to nothing and bare ground give the same answer.
+    // Wind driving exchange: with an upward heat flux, convection adds to the wind
+    // (Beljaars 1994), as over vegetation.
     double zh = 0.2 * zm;
     auto driveWind = [&](double Hnow) {
         double Ueff = climdata.uref;
@@ -3997,22 +3155,21 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         return Ueff;
     };
     double uf = (ka * driveWind(H)) / (std::log(zref / zm) + psi_m);
-    // Monin-Obukhov length, from the friction velocity of the same pass.
+    // Obukhov length.
     double LL = (H != 0.0) ? (cpph * std::pow(guardedFrictionVelocity(uf, ka / std::log(zref / zm)), 3.0) * Tk) / (-ka * g * H) : 1e99;
     double dif = 1e99;
     int nrIterations = 0;
     soilmod soilheat;
     soilwaterout soilwater;
-    // The resistance is built from the friction velocity guarded against still
-    // air, as under a canopy; stability is still found from the wind as it is.
+    // Resistance from the ground to the reference height, with the still-air guard
+    // on friction velocity.
     double ufr = guardedFrictionVelocity(uf, ka / (std::log(zref / zm) + psi_m));
     zh = heatRoughness(zm, ufr);
     double rHa = (std::log(zref / zh) + psi_h) / (ka * ufr);
-    // G: surface energy balance residual, Aitken-damped across outer passes.
+    // Ground heat flux, damped between passes.
     Aitken1DState st_G;
     double G_iter = onestepin.soilheatvars.Gflux;
-    // At least two passes, so that stability is evaluated at least once from
-    // this hour's own sensible heat flux before the solution is accepted.
+    // At least two passes.
     while ((nrIterations < 2 || dif > tolerance) && nrIterations < maxIter) {
         if (H != 0.0) {
             LL = (cpph * std::pow(guardedFrictionVelocity(uf, ka / std::log(zref / zm)), 3.0) * Tk) / (-ka * g * H);
@@ -4035,13 +3192,12 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         onestepin.soilwatervars.oldTc = soilheat.oldTe;
         onestepin.soilwatervars.Tc = soilheat.Te;
-        // Bare ground transpires nothing, so the depletion fraction is inert here.
+        // No transpiration from bare ground.
         soilwater = SoilWaterCpp(onestepin.soilwatervars, soilpc, cfw, 3600, 0.5, std::max(maxIter, INNER_ITERATIONS_LEAST), SOIL_WATER_TOL);
         onestepin.runoff = soilwater.surplus;
         onestepin.drainage = soilwater.drainage;
         onestepin.witers = soilwater.iterations;
-        // The next pass resumes the water solve where this one ended, as over
-        // vegetation; the start-of-hour state it balances against is unchanged.
+        // The next pass starts the water solve from this pass's result.
         onestepin.soilwatervars = soilwater.swo;
         onestepin.soilheatvars.wc = soilwater.swo.theta;
         double G_raw = soilsurfaceEB(soilpc, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
@@ -4058,15 +3214,13 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     double la = latentHeat(Ts);
     onestepin.L = groundLatentFlux(soilpc, Ts, climdata.tref, climdata.relhum, climdata.pk, rHa,
         soilwater.swo.theta[0]);
-    // One-shot, post-convergence height sweep: turns the converged
-    // LL/uf/H/L into profile values (tair, rh, uz) at each height z[i].
+    // Air temperature, humidity and wind at each height.
     size_t n = z.size();
     std::vector<double> uz(n); // wind speed
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zm) {
             double psimz = dpsimCpp2(zm / LL) - dpsimCpp2(z[i] / LL);
-            // reported as the wind itself: the profile is built on the wind that
-            // drives exchange, which includes the velocity convection adds
+            // Actual wind: the convective addition is removed.
             const double Udrive = driveWind(H);
             uz[i] = (uf / ka) * (std::log(z[i] / zm) + psimz) * ((Udrive > 0.0) ? climdata.uref / Udrive : 1.0);
         }
@@ -4079,8 +3233,7 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
     for (size_t i = 0; i < n; ++i) {
         if (z[i] > zh) {
             double psihz = dpsihCpp2(zh / LL) - dpsihCpp2(z[i] / LL);
-            // the same guarded friction velocity the surface exchange was built
-            // with, so that the profile meets the reference air at its own height
+            // Resistance from the roughness height to z.
             double rHz = (std::log(z[i] / zh) + psihz) / (ka * ufr);
             tair[i] = Ts - (rHz / cpph) * H;
             double ez = eg - onestepin.L * (climdata.pk * rHz) / (la * ph);
@@ -4111,14 +3264,11 @@ static onestepbare OneStepBare(onestepbare onestepin, const obsstruct& obsdata, 
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ******************* Bigleaf model currently only used for soil initialization ****************************************** //
-// The big-leaf model is a deliberately cheaper representation used to generate realistic soil
-// initial conditions.  It retains surface/soil/stability feedbacks but avoids the multilayer canopy-air solve.
+// A simpler model that treats the canopy as a single layer. Used only to give
+// the soil realistic starting temperatures and water contents.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Canopy albedo (white-sky/diffuse and black-sky/direct-beam) and ground
-// weighting factors (direct/diffuse transmission to the ground), from the
-// two-stream coefficients -- the single-layer analogue of shortwavemodelCpp's
-// per-layer albedo terms.
-// Combines direct and diffuse two-stream reflectance into the effective canopy albedo for the current beam geometry.
+// Canopy albedo for diffuse (albd) and direct (albb) radiation, and the fractions
+// of direct and diffuse radiation that reach the ground.
 albf albedo(double kd, double pai, const tsdifstruct& tspdif, const tsdirstruct& tspdir)
 {
     albf out;
@@ -4128,11 +3278,8 @@ albf albedo(double kd, double pai, const tsdifstruct& tspdif, const tsdirstruct&
     out.wgti = std::exp(-pai); // ground weighting(diffuse)
     return out;
 }
-// Bulk (whole-canopy) surface resistance: leafgs' sunlit/shaded stomatal
-// conductance, area-weighted by the Beer-Lambert-derived sunlit fraction,
-// converted to a single resistance for the single-layer big-leaf model.
-// Collapses the leaf stomatal model to a canopy-scale resistance for the big-leaf spin-up model.
-// It integrates the same physiological controls approximately rather than resolving individual canopy layers.
+// Stomatal resistance of the whole canopy: conductance of sunlit and shaded
+// leaves, weighted by their leaf areas.
 double bulkstomatalresist(double tair, double tcan, double relhum, double pk, double psiw,
     double Ca, double precip, double Rsw, double Rdif, double k, double LAIfrac,
     vegpstruct vegp, const solmodel& solp, bool C3 = true)
@@ -4160,8 +3307,7 @@ double bulkstomatalresist(double tair, double tcan, double relhum, double pk, do
     // Convert to bulk surface resistance
     return ph / Gs;
 }
-// Calculate dewpoint temperature
-// Converts air temperature and relative humidity to dew-point temperature for humidity bookkeeping in the big-leaf model.
+// Dew-point temperature from air temperature and relative humidity.
 double dewpointCpp2(double tc, double rh) {
     // actual vapour pressure (kPa)
     double ea = satvapCpp2(tc) * rh / 100.0;
@@ -4180,12 +3326,8 @@ double dewpointCpp2(double tc, double rh) {
     }
     return td;
 }
-// Aitken-damped update for a self-referential fixed-point iteration (e.g.
-// H feeding wind, which feeds resistances, which feeds H back): blends the
-// raw new value with the old one by a weight (omega) that adapts each call
-// from how the residual (r = newv-oldv) is shrinking, damping oscillation
-// without needing a fixed damping constant tuned per use site.
-// Scalar Aitken relaxation used to stabilise self-coupled iterative variables such as friction velocity and surface temperature.
+// Damped update of an iterated value (Aitken): the weight given to the new value
+// adapts to how the change between iterations is shrinking.
 inline double aitken1d(double oldv, double newv, Aitken1DState& st)
 {
     double r = newv - oldv;
@@ -4203,13 +3345,8 @@ inline double aitken1d(double oldv, double newv, Aitken1DState& st)
     st.r_prev = r;
     return oldv + st.omega * r;
 }
-// One timestep of the single-layer ("big leaf") model: canopy treated as
-// one bulk surface (bulkstomatalresist) rather than resolved per-layer --
-// used only to spin up soil heat/water state before a full multilayer
-// run, not for the main model output. Iterates wind stability, canopy
-// temperature and the surface energy balance together to convergence.
-// Solves one vegetated big-leaf timestep used for inexpensive soil spin-up.
-// Canopy radiation, bulk transpiration, ground/canopy energy balance, soil state and atmospheric stability are iterated together, but without the full multilayer canopy-air calculation.
+// One hour of the big-leaf model for a vegetated surface. Canopy temperature,
+// transpiration, soil heat and water and stability are iterated together.
 bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, const vegpstruct& vegp,
     const tsvegstruct& tsvegp, const tsdifstruct& tspdif, const soilpstruct soilp,
     soilmod soilheat, soilwaterout soilwater,
@@ -4258,8 +3395,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         double Rdddg = tspdif.p3 * std::exp(-tsvegp.h * vegp.pai) + tspdif.p4 * std::exp(tsvegp.h * vegp.pai);
         if (Rdddg > 1.0) Rdddg = 1.0;
         if (Rdddg < 0.0) Rdddg = 0.0;
-        // The beam-scattered diffuse stream is a fraction of the beam through
-        // the canopy plane, which on the slope is the beam projected onto it.
+        // Diffuse radiation reaching the ground: from the sky, and scattered from the beam.
         double Rdifdowng = Rdddg * climdata.Rdif + Rdbdg * Rb0 * si;
         RabsG_sw = (1.0 - soilp.gref) * (Rdifdowng + Rdirdowng * si);
     }
@@ -4275,7 +3411,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     double Tk = climdata.tref + 273.15;
     double tdew = dewpointCpp2(climdata.tref, climdata.relhum);
     double ea = satvapCpp2(climdata.tref) * (climdata.relhum / 100.0);
-    // Initialize values
+    // Starting values
     double psim = 0.0;
     double H = 0.01;
     double G = 0.0;
@@ -4286,28 +3422,20 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     double uf = 0.0;
     double LL = 1e10;
     Aitken1DState st;
-    // At least two passes, so that stability is evaluated at least once from
-    // this hour's own sensible heat flux before the solution is accepted.
+    // At least two passes.
     while ((itr < 2 || error > OUTER_TOLERANCE) && itr < maxiter) {
         const double fade = canopyTurbulence(climdata.uref, vegp.hgt, vegp.pai, d, zref, soilp.z0);
         double zm = roughlengthCpp2(vegp.hgt, vegp.pai, d, soilp.z0, fade);
         uf = (ka * climdata.uref) / (std::log((zref - d) / zm) + psim);
-        // The air above the canopy is the diffusivity column of the multilayer
-        // model, so that the soil state the spin-up hands on was formed under
-        // the same description of it. The ground exchanges with the reference
-        // height across the whole column. The big leaf exchanges across two
-        // legs: from the level at which a single leaf standing for the whole
-        // canopy gives up its heat, up to canopy top, and from canopy top to the
-        // reference height through the column. The gust constant is given as a
-        // literal because this routine has no parameter for it and cannot be
-        // reached with any value but the default.
+        // Resistances to the reference height: for the ground, across the whole
+        // diffusivity profile (rGz); for the big leaf, from its exchange height to canopy
+        // top and then through the profile above (rHa).
         const double a1s = 1.25;
         const aerocolumn col = makeColumn(vegp.hgt, d, uf, LL, floorGustRatio(vegp, a1s), a1s,
             canopyEnhancement(vegp.hgt, vegp.pai, soilp.z0, fade), soilp.z0);
         const double rGz = soilToZ(col, zref);
         const double rHa = bigLeafToCanopyTop(vegp.hgt, vegp.pai, d, uf, LL, soilp.z0) + rGz - col.Rh;
-        // Bulk surface stomatal resistance, from the water potential of the
-        // whole root zone, as in the multilayer model.
+        // Stomatal resistance of the canopy, from the water potential of the root zone.
         const double psiw = rootZonePotential(soilp, soilwater.swo.theta, soilwater.swo.rootfrac, soilwater.swo.Tc);
         double rS = bulkstomatalresist(climdata.tref, tcanopy, climdata.relhum, climdata.pk, psiw,
             Ca, climdata.precip, climdata.Rsw, climdata.Rdif, kk.k, LAIfrac, vegp, solp, C3);
@@ -4328,9 +3456,10 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         soilwater.swo.Tc = soilheat.Te;
         soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, vegp.pTAW, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, RabsG, climdata.tref, soilheat.Te[0], climdata.pk,
-            climdata.relhum, rGz, soilwater.swo.theta[0]); // surface energy balance residual
+            climdata.relhum, rGz, soilwater.swo.theta[0]); // ground heat flux
         G = aitken1d(G, G_raw, st);
         soilheat.Gflux = G;
+        // Canopy temperature from the Penman-Monteith energy balance.
         double Te = (tcanopy + climdata.tref) / 2.0;
         double Rer = 4.0 * em * sb * std::pow(Te + 273.15, 3.0);
         double la = latentHeat(tcanopy);
@@ -4339,6 +3468,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
         tcanopy = climdata.tref + ((Rabs - Rema - ((la * ph) / (climdata.pk * rV)) * Da - G) /
             (Rer + ph * (cp / rHa + ((la * De) / (climdata.pk * rV)))));
         if (tcanopy < tdew) tcanopy = tdew;
+        // Sensible heat flux and stability.
         H = (ph * cp / rHa) * (tcanopy - climdata.tref);
         LL = (ph * cp * std::pow(guardedFrictionVelocity(uf, ka / std::log((zref - d) / zm)), 3.0) * Tk) / (-ka * g * H);
         LL = clipMOlength(LL, zref, d, zm);
@@ -4356,10 +3486,7 @@ bigleafone solveonestep(const obsstruct& obsdata, const climstruct& climdata, co
     out.iters = itr;
     return out;
 }
-// One timestep of the single-layer bare-ground model (no canopy at all) --
-// the big-leaf counterpart of OneStepBare, used for soil spin-up.
-// Bare-ground big-leaf timestep used to spin up soil state when vegetation is absent.
-// It retains the coupled surface energy balance, soil heat/water and atmospheric stability calculations without canopy physiology or radiation.
+// One hour of the big-leaf model for bare ground.
 bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata, const soilpstruct soilp,
     soilmod soilheat, soilwaterout soilwater, double zmr, double latr, double lonr, double zref = 2.0,
     int maxiter = 20)
@@ -4386,14 +3513,13 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
     double oldtsoil = soilheat.Te[0];
     double newtsoil = soilheat.Te[0];
     Aitken1DState st;
-    // G: surface energy balance residual, Aitken-damped across outer passes.
+    // Ground heat flux, damped between passes.
     Aitken1DState st_G;
     double G = soilheat.Gflux;
-    // At least two passes, so that stability is evaluated at least once from
-    // this hour's own sensible heat flux before the solution is accepted.
+    // At least two passes.
     while ((itr < 2 || error > OUTER_TOLERANCE) && itr < maxiter) {
-        // As in OneStepBare: the surface layer from the soil's roughness height,
-        // with the convective velocity scale in calm, sunny conditions.
+        // Friction velocity and resistance, with convection added to the wind when the
+        // heat flux is upward.
         const double zm = zmr;
         double Ueff = climdata.uref;
         if (H > 0.0) {
@@ -4411,15 +3537,13 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
         cfw.precip = climdata.precip; cfw.Et = 0.0;
         soilwater.swo.oldTc = soilheat.oldTe;
         soilwater.swo.Tc = soilheat.Te;
-        // Bare ground transpires nothing, so the depletion fraction is inert here.
+        // No transpiration from bare ground.
         soilwater = SoilWaterCpp(soilwater.swo, soilp, cfw, 3600, 0.5, maxiter, SOIL_WATER_TOL);
         double G_raw = soilsurfaceEB(soilp, Rabs, climdata.tref, soilheat.Te[0], climdata.pk,
             climdata.relhum, rHa, soilwater.swo.theta[0]);
         G = aitken1d(G, G_raw, st_G);
         soilheat.Gflux = G;
-        // Convergence is judged on how far this pass's surface temperature lies
-        // from the one the pass started from, before relaxation, since the
-        // relaxed step can be a small fraction of that distance.
+        // Change in surface temperature over the pass, before damping.
         error = std::abs(soilheat.Te[0] - oldtsoil);
         newtsoil = aitken1d(newtsoil, soilheat.Te[0], st);
         soilheat.Te[0] = newtsoil;
@@ -4443,11 +3567,11 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ****************************************** Ecotherm model *********************************************************** //
-// The ectotherm module takes modelled microclimate as forcing and solves the animal energy balance.
-// Body geometry/orientation alter both radiative interception and convective exchange, allowing behavioural microclimate use to be represented.
+// Body temperature of an ectotherm from its energy balance, given the
+// microclimate around it. The animal is treated as an ellipsoid.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Calculates the projected animal silhouette exposed to direct radiation for the specified body geometry and orientation.
-// This converts solar angle and posture into the area that intercepts direct shortwave.
+// Surface area and volume of the animal, and the area it presents to the direct
+// beam (silA), for its shape and orientation.
 static silstruct silhouette(double zenr, double azir, double height, double width, double length,
     double adir = 0.0, double atilt = 0.0, std::string position = "fixed")
 {
@@ -4459,7 +3583,7 @@ static silstruct silhouette(double zenr, double azir, double height, double widt
     double adirr = adir * torad;
     double atiltr = atilt * torad;
     silstruct out;
-    // Calculate surface area using Knud Thomsens formula for ellipsoid
+    // Surface area by Knud Thomsen's formula for an ellipsoid
     double P = 1.6075;  // Approximation constant
     out.A = 4 * pi * std::pow((std::pow(A, P) * std::pow(B, P) +
         std::pow(A, P) * std::pow(C, P) +
@@ -4498,9 +3622,7 @@ static silstruct silhouette(double zenr, double azir, double height, double widt
     else Rcpp::stop("Position not recongised");
     return out;
 }
-// Compute characteristic dimension of animal
-// Returns the characteristic body dimension normal to the wind for convective heat transfer.
-// Body orientation therefore affects aerodynamic resistance as well as radiative exposure.
+// Characteristic dimension of the animal across the wind, for convective heat exchange.
 static double chardim(double wdir, double zenr, double azir, double height, double width, double length,
     double adir = 0.0, double atilt = 0.0, std::string position = "fixed")
 {
@@ -4542,14 +3664,12 @@ static double chardim(double wdir, double zenr, double azir, double height, doub
         position = "fixed";
     }
     silstruct sa = silhouette(pi / 2.0, wdir, height, width, length, adir, atilt, position);
-    // Compute characteristic 
+    // Volume over the area presented to the wind
     double d = sa.V / sa.silA;
     return d;
 }
-// Animal boundary-layer resistance to heat transfer -- same forced/free
-// convection Nusselt-number correlation as leafrHa above, but over the
-// animal's characteristic dimension (d) rather than a leaf's.
-// Boundary-layer resistance for an animal body, combining forced and free convection at the body scale.
+// Boundary-layer resistance of the animal to heat (s/m): forced and free
+// convection combined.
 static double animalrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
 {
     double Tk = tair + 273.15;
@@ -4575,8 +3695,7 @@ static double animalrHa(double tair, double dT, double uz, double d, double rHma
     if (rHa > rHmax) rHa = rHmax;
     return rHa;
 }
-// Calculate water diffusivity
-// Molecular diffusivity of water vapour in air at the specified film temperature and pressure.
+// Diffusivity of water vapour in air (m2/s).
 double Dw_waterVapour(double Tf, double pk)
 {
     const double D0 = 2.26e-5;   // m^2 s^-1 at 273.15 K and 101325 Pa
@@ -4586,14 +3705,10 @@ double Dw_waterVapour(double Tf, double pk)
     double Pa = pk * 1000.0;
     return D0 * std::pow(Tfk / T0, 1.75) * (P0 / Pa);
 }
-// Animal body temperature from a Penman-Monteith-style steady-state energy
-// balance: radiative and evaporative exchange with the air (fraction cd,
-// via rHa/rc) plus, where the animal is in contact with a substrate
-// (fraction confrac), radiative, conductive (keff) and evaporative
-// exchange through that contact interface, all solved simultaneously
-// against absorbed radiation (Rabs) and metabolic heat (M).
-// Solves animal surface temperature and evaporative heat exchange from the whole-body energy balance.
-// Radiation, convection, conduction/contact, metabolism and evaporative resistance are combined for the specified morphology and microclimate.
+// Body temperature from the Penman-Monteith energy balance: absorbed radiation
+// and metabolic heat (M) against emission, convection and evaporation to the air,
+// and conduction and evaporation through the fraction of the body in contact
+// with the surface (confrac).
 // [[Rcpp::export]]
 double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh,
     double rHa, double height, double rc, double confrac, double M, double em = 0.97, double k = 0.5,
@@ -4607,8 +3722,8 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double ea = satvapCpp2(Ta);
     double Da = ea * (1.0 - rh / 100.0); // vapour pressure deficit, air
     double Dac = surfrh * satvapCpp2(Tf) - ea; // vapour pressure deficit, contact interface
-    // Conduction from the body core to the contact face, across half the body
-    // height; the height is given in centimetres.
+    // Conduction from the body core to the contact surface, across half the body
+    // height (given in cm).
     const double halfheight = 0.5 * height / 100.0; // m
     double keff = k / halfheight;
     double mr = cd * em * sb; // radiative exchange coefficient, air-facing
@@ -4630,9 +3745,8 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     Tbody = Ta + top / btm;
     return (Tbody);
 }
-// Scalar version of aitkin_weightdif (Aitken-style adaptive damping),
-// parameterised by backweight (= 1-omega) instead of omega directly.
-// Adaptive scalar under-relaxation for the ectotherm body-temperature iteration.
+// Damped update of an iterated value (Aitken), with limits on the weight given
+// to the old value.
 static inline void aitkin_weightdif_scalar(
     double oldv,
     double& newv,   // raw new value on input, updated in place
@@ -4667,28 +3781,18 @@ static inline void aitkin_weightdif_scalar(
     newv = oldv + omega * r;
     st.omega = omega;
 }
-// Animal metabolic rate (W): allometric scaling with body mass (m^b),
-// scaled for body temperature via a Q10 temperature coefficient.
-// Returns whole-animal metabolic heat production from body size and a Q10 temperature response.
+// Metabolic rate (W): allometric scaling with body mass and a Q10 response to
+// body temperature.
 double metabolic_rate(double volume, double rho, double Q10, double a0, double b, double Tref, double Tbody)
 {
     double m = volume * rho;
     double M = a0 * std::pow(m, b) * std::pow(Q10, (Tbody - Tref) / 10.0);
     return M;
 }
-// Position details:
-// one of fixed (constant adir and atilt assumed), 
-// max (animal seeks to maximize radiation absorption)
-// min (animal seeks to minimize radiation absorption)
-// randomdir (animal maintains tilt, but adir is random)
-// random (animal has random atilt and adir)
-// Animal body temperature time series: at each timestep, absorbed
-// shortwave (via the animal's solar-facing silhouette area) and longwave
-// radiation feed PenmanMonteith_animal's energy balance, iterated to
-// convergence (the animal's own temperature affects its emitted longwave
-// and boundary-layer exchange, both inputs to the same balance).
-// Runs the ectotherm energy-balance model through a time series for one supplied microclimate.
-// At each timestep, body orientation controls radiation and convection, while metabolism and evaporative/conductive exchange are iterated to obtain body temperature.
+// Body temperature at each time step for one microclimate series.
+// position is one of: fixed (adir and atilt as given), max (radiation absorbed is
+// maximised), min (minimised), randomdir (tilt as given, direction random),
+// random (tilt and direction random).
 // [[Rcpp::export]]
 Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List animal,
     double lat, // Latitude (decimal degrees)
@@ -4774,11 +3878,8 @@ Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata,
     }
     return Tbody;
 }
-// Ectotherm's own energy balance, over a time x vertical-layer grid of
-// microclimate inputs instead of a single time series (e.g. body
-// temperature at every canopy height simultaneously).
-// Runs the ectotherm model across multiple candidate microclimates and selects the thermally relevant result at each timestep.
-// This is the multi-location counterpart of Ectotherm for behavioural use of heterogeneous microclimate.
+// As Ectotherm, for microclimate given at several heights: returns body
+// temperature at each time step and height.
 // [[Rcpp::export]]
 Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcpp::List animal,
     double lat, // Latitude (decimal degrees)
@@ -4869,11 +3970,10 @@ Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcp
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** R wrappers *********************************************************** //
-// R wrappers translate flexible R lists/data frames into typed C++ state, run the sequential
-// timestep model, and package either requested-height outputs or full diagnostic profiles back to R.
+// Functions called from R. They convert the R inputs, run the model hour by hour
+// and return the results.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Plant area index above each canopy node (cumulative sum from the top down).
-// Converts layer PAI increments to cumulative PAI above each layer, the vertical coordinate required by canopy radiative transfer.
+// Plant area index above the bottom of each canopy layer (cumulative from the top down).
 // [[Rcpp::export]]
 std::vector<double> reverseCumsum(const std::vector<double>& paii) {
     std::vector<double> rev_paii = paii;
@@ -4886,9 +3986,7 @@ std::vector<double> reverseCumsum(const std::vector<double>& paii) {
     std::reverse(cum.begin(), cum.end());
     return cum;
 }
-// Creates c++ veg struct
-// Translates the R vegetation parameter list into the typed C++ structure used throughout the model.
-// Derived/cache fields and layer vectors are initialised here so downstream physics can work without repeated R lookups.
+// Converts the R vegetation parameters to the C++ structure.
 static vegpstruct tovegpstruct(List vegp, std::vector<double> paii, std::vector<double> Lfrac) {
     // Constant within canopy
     vegpstruct out;
@@ -4924,18 +4022,17 @@ static vegpstruct tovegpstruct(List vegp, std::vector<double> paii, std::vector<
     out.Lfrac = Lfrac; // Fraction of paii that is living plant material
     return out;
 }
-// Creates c++ soilc struct
-// Translates the R soil parameter list into the typed hydraulic/thermal parameter structure used by the soil solvers.
+// Converts the R soil parameters to the C++ structure.
 static soilpstruct tosoilpstruct(List soilp) {
     soilpstruct out;
-    // Scalars (force extraction to double)
+    // Scalars
     out.slope = Rcpp::as<double>(soilp["slope"]) * torad; // radians
     out.aspect = Rcpp::as<double>(soilp["aspect"]) * torad; // radians
     out.gref = Rcpp::as<double>(soilp["gref"]);
     out.grefPAR = Rcpp::as<double>(soilp["grefPAR"]);
     out.groundem = Rcpp::as<double>(soilp["groundem"]);
     out.nLayers = Rcpp::as<int>(soilp["nLayers"]);
-    // Vectors (explicit conversion to std::vector<double>)
+    // Vectors
     out.Vq = Rcpp::as<std::vector<double>>(soilp["Vq"]);
     out.Vm = Rcpp::as<std::vector<double>>(soilp["Vm"]);
     out.Vo = Rcpp::as<std::vector<double>>(soilp["Vo"]);
@@ -4946,18 +4043,15 @@ static soilpstruct tosoilpstruct(List soilp) {
     out.thetaS = Rcpp::as<std::vector<double>>(soilp["Smax"]);
     out.Ksat = Rcpp::as<std::vector<double>>(soilp["Ksat"]);
     out.FreeDrain = Rcpp::as<bool>(soilp["FreeDrain"]);
-    // The soil's roughness length for momentum, where the caller gives one.
+    // Roughness length of the soil for momentum, if given.
     out.z0 = soilp.containsElementNamed("zm") ? Rcpp::as<double>(soilp["zm"]) : Z0_GROUND;
-    // Ensure psi_e is negative (air entry potential)
+    // Air entry potential is negative.
     for (double& v : out.psie) v = -std::abs(v);
-    // The water solve's lower bound: oven dryness, in every layer. The residual
-    // water content belongs to a different retention model and on Campbell's
-    // curve lies where coarse soils are still wet, so it is not a bound here.
+    // Lower limit of soil water potential: oven dry.
     out.psi_min = std::vector<double>(out.psie.size(), PSI_OVEN_DRY);
     return out;
 }
-// Creates input file for soil heat model
-// Builds the initial dynamic soil-heat state from supplied temperature and water-content profiles.
+// Initial state of the soil heat model, from profiles of temperature and water content.
 static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<double> wc)
 {
    
@@ -4970,11 +4064,8 @@ static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<dou
     state.n = n;
     state.z = z; // node depths
     state.dz = dz; // layer thickness
-    // Each node stores the heat of the soil it exchanges with its neighbours
-    // for: from half-way to the node above to half-way to the node below, and
-    // for the surface node the upper half of the top layer (Campbell 1985,
-    // Eq. 4.7). The deepest node is the fixed lower boundary and stores nothing
-    // that is solved for.
+    // Thickness of soil each node stores heat for: from halfway to the node above to
+    // halfway to the node below (Campbell 1985, Eq. 4.7).
     std::vector<double> vol(n + 1);
     vol[0] = 0.5 * (z[1] - z[0]);
     for (int i = 1; i <= n; ++i) vol[i] = 0.5 * (z[i + 1] - z[i - 1]);
@@ -4986,8 +4077,7 @@ static soilmod toSoilheatmod(List soilp, std::vector<double> Te, std::vector<dou
     state.iters = 0;
     return state;
 }
-// Creates input file for soil water model
-// Builds the initial dynamic soil-water state, including matric potential, vapour and the root distribution derived from the soil/vegetation setup.
+// Initial state of the soil water model: water potential, vapour and root fractions.
 static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double root50, double root95)
 {
     soilwatermod out;
@@ -5002,11 +4092,8 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     std::vector<double> psiw(out.n + 1);
     std::vector<double> k(out.n + 1);
     std::vector<double> vapor(out.n + 1);
-    // Node-centred control volume: half the distance to each neighbour.
-    // The surface node (i=0, true physical boundary, no i-1 neighbour)
-    // gets a one-sided half-cell instead -- leaving it at zero starves
-    // the surface Newton row of capacitance, causing non-convergence as
-    // k[0]->0 while drying.
+    // Thickness of soil each node stores water for: half the distance to each
+    // neighbour, and for the surface node half the top layer.
     vol[0] = (out.z[1] - out.z[0]) / 2.0;
     for (int i = 0; i <= out.n; ++i) {
         if (i > 0) vol[i] = (out.z[i + 1] - out.z[i - 1]) / 2.0;
@@ -5023,22 +4110,15 @@ static soilwatermod toSoilwatermod(soilpstruct soilpc, soilmod state, double roo
     out.rootfrac = root_distribute(out.z, root50, root95);
     return out;
 }
-// Heights of the canopy nodes. The canopy is cut into slabs of equal depth, each
-// holding its share of the foliage, and everything the model carries for a slab
-// -- the temperature of its leaves, the air they exchange with, the wind past
-// them -- is a mean over the slab, referred to its centre. Canopy top is not a
-// node: it is the upper boundary of the canopy air, with a state of its own.
+// Heights of the canopy nodes: the centres of n layers of equal depth. Values
+// for a layer are means over the layer. Canopy top is not a node.
 static std::vector<double> canopyNodeHeights(size_t n, double hgt)
 {
     std::vector<double> z(n);
     for (size_t i = 0; i < n; ++i) z[i] = (static_cast<double>(i) + 0.5) / static_cast<double>(n) * hgt;
     return z;
 }
-// Initial onestep state: every canopy layer set to the same starting
-// temperature/humidity/wind (temp0/rh0/Rlw0), refined once the model
-// actually starts iterating.
-// Assembles the initial multilayer timestep state from spun-up soil conditions and reference atmospheric values.
-// This provides the starting leaf/air/soil fields from which OneStepBelow begins its coupled iteration.
+// Initial state of the multilayer model: every layer at the same temperature and humidity.
 static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, double temp0, double rh0, double Rlw0, int na) {
     std::vector<double> v0(na, 0.0);
     std::vector<double> v1(na, 1.0);
@@ -5085,9 +4165,7 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.error = 0.0;
     return onestepin;
 }
-// Flattens a onestep struct into the R-facing named list returned by the
-// profile/timeseries R functions.
-// Packages the internal multilayer timestep state into an R list for diagnostic/profile output.
+// Converts the model state to an R list.
 static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
 {
     Rcpp::List out;
@@ -5117,7 +4195,7 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["rh"] = Rcpp::wrap(onestepin.rh);
     out["tcanopy"] = onestepin.tcanopy;
     out["rhcanopy"] = onestepin.rhcanopy;
-    // Winds are returned as the wind itself, not the wind that drives exchange.
+    // Actual wind speeds: the convective addition is removed.
     std::vector<double> uzActual = onestepin.uz;
     for (double& u : uzActual) u *= onestepin.windscale;
     out["ucanopy"] = onestepin.ucanopy * onestepin.windscale;
@@ -5152,12 +4230,9 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["z"] = Rcpp::wrap(z);
     return out;
 }
-// Bare-ground vertical profile at a single requested hour: first spins the
-// soil state forward hour-by-hour up to hourtoplot using a coarse
-// two-point height grid (z2), then re-runs the final hour at the full
-// resolution of the requested z to return that hour's profile.
-// R-facing diagnostic runner for a bare-ground profile at a selected hour.
-// It advances the model to that timestep and returns the detailed internal state rather than only standard time-series outputs.
+// Profile of air temperature, humidity and wind over bare ground at one chosen
+// hour. The model is run up to that hour, which is then solved at the heights
+// requested.
 // [[Rcpp::export]]
 List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z,
     double zref, double lat, double lon, std::vector<double> SoilTempIni,
@@ -5271,16 +4346,14 @@ List profilebareR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List
     out["z"] = z;
     return out;
 }
-// Wrapper function for returning profile
-// R-facing diagnostic runner for the vegetated multilayer model at a selected hour.
-// It is intended for inspecting the full vertical state and flux structure of one timestep.
+// Full state of the vegetated model at one chosen hour.
 // [[Rcpp::export]]
 List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soilc, List vegp,
     std::vector<double> paii20, std::vector<double> paii, std::vector<double> Lfrac20, std::vector<double> Lfrac, 
     double zref, double Ca, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
     int maxNrIterations = 100, double tolerance = 0.1, double a0 = -1.0, double a1 = 1.25, bool C3 = true)
 {
-    // ** ------------------ Run model up to hour with 20 layers ------------------------- ** //
+    // Run the model up to the chosen hour
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
     std::vector<int> day = obstime["day"];
@@ -5326,7 +4399,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
         soilheatvars = onestepin.soilheatvars;
         soilwatervars = onestepin.soilwatervars;
     }
-    // ** --------------------------------- Run full profile for hour  --------------------------------- ** //
+    // Solve the chosen hour and return its full state
     vegpc = tovegpstruct(vegp, paii, Lfrac);
     wgts = lwradweights(vegpc.paii);
     wc = windprofileCpp(vegpc, soilpc.z0);
@@ -5344,11 +4417,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
         tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
     return OneStepCpptoList(onestepin, z2);
 }
-// Bare-ground time series at a single requested height (reqhgt): runs
-// OneStepBare hour-by-hour across the whole input time series, returning
-// one row per hour.
-// Main R-facing time-series driver for the bare-ground microclimate model.
-// It advances soil and surface state sequentially through the forcing data and extracts conditions at the requested height for each timestep.
+// Bare ground: the whole time series at one height (below ground if reqhgt is negative).
 // [[Rcpp::export]]
 DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List soilc, double zref,
     double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
@@ -5388,10 +4457,10 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     onestepin.Rswup = 0.0; onestepin.Rb0 = 0.0; onestepin.Rlwup = 0.0;
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
     onestepin.theta = onestepin.soilwatervars.theta[0];
-    // identifiy which value to select if below ground
+    // Soil node nearest the depth requested, if below ground
     size_t sel = 0;
     if (reqhgt < 0.0) {
-        // Nodes only: the last depth lies below the boundary and holds no node.
+        // The last depth is below the boundary and has no node.
         std::vector<double> zz = onestepin.soilheatvars.z;
         double mn = std::abs(reqhgt + zz[0]);
         for (size_t i = 1, n = zz.size() - 1; i < n; ++i) {
@@ -5503,11 +4572,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         Named("error") = Rcpp::wrap(error)
     );
 }
-// Vegetated time series at a single requested height (reqhgt): runs
-// OneStepBelow hour-by-hour across the whole input time series, returning
-// one row per hour -- the multilayer-canopy counterpart of RunBareR.
-// Main R-facing time-series driver for the multilayer vegetated microclimate model.
-// It prepares static canopy/radiation geometry once, advances the fully coupled OneStepBelow state hour by hour, and returns requested-height weather plus soil/canopy diagnostics.
+// Vegetated surface: the whole time series at one height.
 // [[Rcpp::export]]
 Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     Rcpp::List vegp, std::vector<double> paii, std::vector<double> Lfrac, double zref, double Ca,
@@ -5546,7 +4611,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     double lonr = lon * torad;
     std::vector<double> zz = z;
     if (reqhgt < 0.0) {
-        // Nodes only: the last depth lies below the boundary and holds no node.
+        // The last depth is below the boundary and has no node.
         zz = soilheatvars.z;
         zz.pop_back();
         for (size_t i = 0; i < zz.size(); ++i)
@@ -5668,13 +4733,9 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     out.attr("row.names") = Rcpp::IntegerVector::create(NA_INTEGER, static_cast<int>(n));
     return out;
 }
-// Re-expresses a weather time series measured at height zin as the
-// equivalent series at height zout, above canopy: runs OneStepBelow at
-// zin each hour, then extrapolates temperature/humidity/wind/pressure to
-// zout via the above-canopy profile functions (Tabove/RHabove, a
-// hypsometric correction for pressure).
-// Runs the multilayer model and converts weather from one height to another, using the modelled canopy/above-canopy profile rather than a fixed lapse or wind adjustment.
-// It is the height-adjustment interface built on the same timestep physics as RunModelR.
+// Converts weather measured at height zin to the equivalent at height zout above
+// the canopy. The model is run each hour with the weather at zin; temperature,
+// humidity, wind and pressure are then taken along the above-canopy profile to zout.
 // [[Rcpp::export]]
 List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii,
     std::vector<double> Lfrac, double zin, double zout, double lat, double lon, 
@@ -5749,20 +4810,14 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
     );
 }
 
-// Writes vector v into row hr of mat (one hour's profile into a
-// time x height output matrix).
-// Small output helper that copies a std::vector profile into one row of an R numeric matrix.
+// Copies a vector into row hr of a matrix.
 void FillMyMatrix(NumericMatrix& mat, std::vector<double>& v, size_t hr)
 {
     for (size_t i = 0; i < v.size(); ++i) {
         mat(hr, i) = v[i];
     }
 }
-// Bare-ground time x height matrices for the whole input time series and
-// requested z: runs OneStepBare hour-by-hour, writing each hour's profile
-// into a row via FillMyMatrix.
-// Runs the bare-ground model and retains the complete vertical/soil state at every timestep.
-// This is the full-field diagnostic counterpart of the reduced requested-height output in RunBareR.
+// Bare ground: the whole time series at every height in z and every soil node.
 // [[Rcpp::export]]
 List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::vector<double> z,
     double zref, double zm, double lat, double lon, std::vector<double> SoilTempIni, std::vector<double> SoilThetaIni, 
@@ -5798,7 +4853,7 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
     std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
     std::vector<int> witers(n, 0); // iterations of the soil water solve
     std::vector<int> iters(n, 0); // passes the hour took
-    std::vector<double> error(n, 0.0); // how far its last pass still moved the air (K)
+    std::vector<double> error(n, 0.0); // change in air temperature over the last pass (K)
     // Create Numeric Matrices for above ground
     NumericMatrix tair(n, na);
     NumericMatrix rh(n, na);
@@ -5846,15 +4901,12 @@ List RunBelowFullBare(DataFrame obstime, DataFrame climdata, List soilc, std::ve
         Named("runoff") = Rcpp::wrap(runoff),
         Named("drainage") = Rcpp::wrap(drainage),
         Named("witers") = Rcpp::wrap(witers),
-        // Passes each hour took to settle, and the move of the last
+        // Passes each hour took, and the change over the last pass
         Named("iters") = Rcpp::wrap(iters),
         Named("error") = Rcpp::wrap(error)
     );
 }
-// Vegetated time x height matrices for the whole input time series and
-// requested z: the multilayer-canopy counterpart of RunBelowFullBare.
-// Runs the vegetated multilayer model and retains full vertical fields through time.
-// It exposes the internal canopy-air state for diagnostics or downstream calculations instead of collapsing to a single requested height.
+// Vegetated surface: the whole time series at every canopy node and soil node.
 // [[Rcpp::export]]
 List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, std::vector<double> paii,
     std::vector<double> Lfrac, double zref, double Ca, double lat, double lon,
@@ -5902,8 +4954,8 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     std::vector<double> drainage(n, 0.0); // water leaving through the base of the soil (mm)
     std::vector<int> witers(n, 0); // iterations of the soil water solve
     std::vector<int> iters(n, 0); // passes the hour took
-    std::vector<double> error(n, 0.0); // how far its last pass still moved the air (K)
-    std::vector<double> tcanopy(n), rhcanopy(n), ucanopy(n); // air and wind at canopy top, the upper boundary of the canopy air
+    std::vector<double> error(n, 0.0); // change in air temperature over the last pass (K)
+    std::vector<double> tcanopy(n), rhcanopy(n), ucanopy(n); // air temperature, humidity and wind at canopy top
     // Create Numeric Matrices for below ground
     size_t nb = onestepin.soilheatvars.Te.size();
     NumericMatrix tsoil(n, nb);
@@ -5938,7 +4990,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         FillMyMatrix(tleaf, onestepin.tleaf, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
         {
-            std::vector<double> uzActual = onestepin.uz;   // the wind itself, not the wind that drives exchange
+            std::vector<double> uzActual = onestepin.uz; // actual wind, without the convective addition
             for (double& u : uzActual) u *= onestepin.windscale;
             FillMyMatrix(uz, uzActual, hr);
         }
@@ -5971,21 +5023,17 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         Named("runoff") = Rcpp::wrap(runoff),
         Named("drainage") = Rcpp::wrap(drainage),
         Named("witers") = Rcpp::wrap(witers),
-        // Passes each hour took to settle, and the move of the last
+        // Passes each hour took, and the change over the last pass
         Named("iters") = Rcpp::wrap(iters),
         Named("error") = Rcpp::wrap(error)
     );
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ********************************************** Other useful functions *********************************************** //
-// Convenience utilities derived from the same solar/radiation machinery, plus the public big-leaf
-// spin-up entry points used to prepare soil initial conditions for the main model.
+// Solar utilities, and the big-leaf runs that give the soil its starting state.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Clear-sky direct-beam shortwave irradiance, from optical depth terms
-// for Rayleigh scattering + permanent gases, water vapour absorption
-// (via dewpoint) and aerosols.
-// Calculates clear-sky shortwave radiation through the supplied date/time series.
-// The result provides a solar-geometry benchmark independent of the observed/modelled cloud attenuation.
+// Clear-sky shortwave radiation, allowing for scattering and absorption by
+// gases, water vapour and aerosols.
 // [[Rcpp::export]]
 std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon)
 {
@@ -6017,11 +5065,8 @@ std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, doubl
     }
     return csr;
 }
-// Diffuse fraction of shortwave radiation: a clearness-index (k =
-// swrad/top-of-atmosphere beam) separation model, with an additional
-// correction (sigma3/delta terms) for sky variability.
-// Estimates the diffuse fraction of incoming shortwave from total radiation and solar geometry.
-// This supplies the direct/diffuse partition required by the two-stream canopy radiation model.
+// Fraction of shortwave radiation that is diffuse, from the clearness index and
+// solar altitude.
 // [[Rcpp::export]]
 std::vector<double> difpropCpp(DataFrame obstime, std::vector<double> swrad, double lat, double lon)
 {
@@ -6074,8 +5119,7 @@ std::vector<double> difpropCpp(DataFrame obstime, std::vector<double> swrad, dou
     }
     return dp;
 }
-// Solar altitude (degrees above horizon).
-// Returns solar altitude through a date/time series for the supplied location.
+// Solar altitude (degrees above the horizon).
 // [[Rcpp::export]]
 std::vector<double> solaltCpp(DataFrame obstime, double lat, double lon)
 {
@@ -6094,10 +5138,7 @@ std::vector<double> solaltCpp(DataFrame obstime, double lat, double lon)
     }
     return sa;
 }
-// Linearly upsamples a matrix from nin to nout rows per column (e.g. for
-// smoother plotting of hourly output), interpolating column-wise.
-// Linearly resamples time-by-variable output to a requested number of rows.
-// This is a presentation/interpolation utility and does not alter the physical model state.
+// Linearly interpolates each column of a matrix to nout rows.
 // [[Rcpp::export]]
 NumericMatrix expand_outputCpp(const NumericMatrix& mat, int nout) {
     int nin = mat.nrow();
@@ -6122,12 +5163,8 @@ NumericMatrix expand_outputCpp(const NumericMatrix& mat, int nout) {
     }
     return out;
 }
-// Spins up soil heat/water state ahead of a full multilayer run: runs the
-// single-layer big-leaf model (solveonestep) hour-by-hour across the
-// whole input time series from a linearly-interpolated initial soil
-// profile, and returns the converged final soil state as a warm start.
-// Spins up soil temperature and moisture beneath vegetation before the full multilayer run.
-// The cheaper big-leaf model is marched through the forcing series so the returned soil profiles are dynamically consistent rather than arbitrary initial conditions.
+// Runs the big-leaf model through the time series to give soil temperatures and
+// water contents for the start of a multilayer run.
 // [[Rcpp::export]]
 List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     Rcpp::List vegp, std::vector<double> Lfrac, double zref, double Ca, double lat, double lon,
@@ -6156,9 +5193,9 @@ List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List s
     size_t n = soilpc.thetaS.size();
     std::vector<double> SoilTempIni(n);
     std::vector<double> SoilThetaIni(n);
-    // Soil profile initial-condition seed: temperature interpolates from
-    // temp[0] to boundaryT; water content interpolates from 60% to 100%
-    // of thetaS[n-1] (matching weatherhgt_adjust()'s R-level initial guess).
+    // Starting soil profile: temperature from the first air temperature at the
+    // surface to the boundary temperature at depth; water content from 60% to 100%
+    // of saturation.
     double end1 = boundaryT;
     double end2 = soilpc.thetaS[n - 1];
     double start1 = temp[0];
@@ -6218,10 +5255,7 @@ List BigLeafCpp2(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List s
         Named("SoilThetaIni") = Rcpp::wrap(water.swo.theta)
     );
 }
-// Bare-ground counterpart of BigLeafCpp2: spins up soil heat/water state
-// via solveonestepbare instead of solveonestep, for runs with no canopy.
-// Bare-ground soil spin-up counterpart of BigLeafCpp2.
-// It equilibrates soil heat and water with the forcing series without paying the cost of the full multilayer canopy calculation.
+// As BigLeafCpp2, for bare ground.
 // [[Rcpp::export]]
 List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List soilc,
     double zref, double zmr, double lat, double lon,
@@ -6243,9 +5277,7 @@ List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::Lis
     size_t n = soilpc.thetaS.size();
     std::vector<double> SoilTempIni(n);
     std::vector<double> SoilThetaIni(n);
-    // Soil profile initial-condition seed: temperature interpolates from
-    // temp[0] to boundaryT; water content interpolates from 60% to 100%
-    // of thetaS[n-1] (matching weatherhgt_adjust()'s R-level initial guess).
+    // Starting soil profile, as in BigLeafCpp2.
     double end1 = boundaryT;
     double end2 = soilpc.thetaS[n - 1];
     double start1 = temp[0];
@@ -6305,10 +5337,10 @@ List BigLeafBareCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::Lis
 }
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
 // ************************************** Examining the hour's iteration ********************************************** //
-// Internal entry points for studying how the coupled hour is solved: they run one chosen hour pass by pass from the
-// state the model itself reached at its start, record what each pass does, and apply a single pass to any state.
-// They compute nothing the model does not; they expose its iteration.
+// Internal functions for examining how an hour is solved. They run one chosen
+// hour pass by pass and record each pass.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// Everything the chosen hour's iteration starts from.
 struct diagcontext {
     onestep start, base;
     outercarry basecarry;
@@ -6407,11 +5439,10 @@ SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List 
     ctx->dcan = zeroplanedisCpp2(ctx->vegp.hgt, ctx->vegp.pai);
     return Rcpp::XPtr<diagcontext>(ctx, true);
 }
-// Runs the chosen hour's iteration step by step and records it: the state each
-// step leaves, what the pass within it produced, and how far the pass moved
-// the canopy air. `memory` is the number of past passes combined (the model's
-// own if negative, plain passes if zero). Optionally starts from a given state,
-// and keeps the final state as the one single passes are applied about.
+// Runs the chosen hour step by step and records the state after each step, the
+// result of each pass, and the change in canopy air. memory is the number of
+// past passes combined (the model's own if negative, none if zero). The run can
+// start from a given state (xstart).
 // [[Rcpp::export]]
 Rcpp::List DiagRunCpp(SEXP ctxptr, int memory, int maxPass, double tolerance, Rcpp::NumericVector xstart, bool setBase = true)
 {
@@ -6444,9 +5475,7 @@ Rcpp::List DiagRunCpp(SEXP ctxptr, int memory, int maxPass, double tolerance, Rc
         Rcpp::Named("z") = ctx->z, Rcpp::Named("tref") = ctx->clim.tref, Rcpp::Named("uref") = ctx->clim.uref,
         Rcpp::Named("Rsw") = ctx->clim.Rsw, Rcpp::Named("precip") = ctx->clim.precip, Rcpp::Named("relhum") = ctx->clim.relhum);
 }
-// One pass applied to a given state, with everything else as the last recorded
-// run left it. This is the map whose fixed point the hour's iteration is
-// looking for.
+// One pass applied to a given state.
 // [[Rcpp::export]]
 Rcpp::NumericVector DiagMapCpp(SEXP ctxptr, Rcpp::NumericVector x)
 {

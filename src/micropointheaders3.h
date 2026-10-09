@@ -1,5 +1,4 @@
-// micropointheaders2.h
-// Radiation model
+// Data structures of the model.
 #include <Rcpp.h>
 using namespace Rcpp;
 
@@ -24,8 +23,7 @@ namespace newmodel {
         double fd; // reaction of Vcmax converted to leaf dark respiration (unitless)
         double psi50; // Water potential when plant loses 50% of krc_max (MPa) 
         double apsi; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)
-        double rpmin = -1.0; // minimum whole-plant hydraulic resistance; lazily cached by
-                              // leafgs() from hgt/hv/Kxmx. Negative = not yet computed.
+        double rpmin = -1.0; // minimum hydraulic resistance of the plant; calculated on first use (negative until then)
         double len;  // Leaf length (m)
         double wid; // Leaf width (m)
         double vegem; // Vegetation emissivity (unitless)
@@ -33,34 +31,34 @@ namespace newmodel {
         double pTAW; // Fraction of total available water plant can deplete before stress (unitless)
         double root50; // Depth above which half of all roots lie (m)
         double root95; // Depth above which 95% of all roots lie (m)
-        std::vector<double> paii; // one-sided plant area index at each canopy node
-        std::vector<double> pia; // one-sided plant area index above each canopy node
+        std::vector<double> paii; // one-sided plant area index of each canopy layer
+        std::vector<double> pia; // one-sided plant area index above the bottom of each canopy layer
         std::vector<double> Lfrac; // Fraction of paii that is living plant material
     };
     struct soilpstruct {
         double slope; // slope (radians)
         double aspect; // aspect (radians)
-        double gref; // Ground surface refletcance (shortwave radiation, 0-1)
-        double grefPAR; // Ground PAR refletcance (shortwave radiation, 0-1)
+        double gref; // Ground surface reflectance (shortwave radiation, 0-1)
+        double grefPAR; // Ground surface reflectance (PAR, 0-1)
         double groundem; // Ground surface emissivity (unitless)
         int nLayers; // number of layers
         bool FreeDrain; // whether deep layer is free draining or not
         double z0; // roughness length of the soil surface for momentum (m)
-        std::vector<double> Vq; // Volumetric quartz fraction (m^3/m^3
+        std::vector<double> Vq; // Volumetric quartz fraction (m^3/m^3)
         std::vector<double> Vm; // Volumetric mineral fraction (m^3/m^3)
         std::vector<double> Vo; // Volumetric organic fraction (m^3/m^3)
-        std::vector<double> Mc; // Mass fraction of clay (kg/kg
+        std::vector<double> Mc; // Mass fraction of clay (kg/kg)
         std::vector<double> psie; // Campbell air entry potential (J/kg)
-        std::vector<double> b; // Water retention curve shapet parameter
-        std::vector<double> thetaR; // Residual soil water fraction at wilting point 
+        std::vector<double> b; // Shape parameter of the water retention curve
+        std::vector<double> thetaR; // Residual volumetric soil water fraction
         std::vector<double> thetaS; // Volumetric soil water fraction at saturation
-        std::vector<double> Ksat; // Saturated hydrualic conductivity (kg s / m^3 - same as cm/s)
-        std::vector<double> psi_min; // lower bound on psiw in the water solve: oven dryness (J/kg)
+        std::vector<double> Ksat; // Saturated hydraulic conductivity (kg s / m^3)
+        std::vector<double> psi_min; // lowest water potential allowed: oven dry (J/kg)
     };
     struct climstruct {
         double tref; // temperature (deg C)
         double relhum; // relhum (percentage)
-        double pk; // atmospheric pressure (pk)
+        double pk; // atmospheric pressure (kPa)
         double Rsw; // shortwave down (W/m^2)
         double Rdif;  // diffuse down (W/m^2)
         double Rlw; // longwave down (W/m^2)
@@ -149,20 +147,18 @@ namespace newmodel {
         double RlwCabs; // Longwave radiation absorbed by vegetated surface
     };
     struct windmodel {
-        std::vector<double> uz; // wind speed below canopy 
-        double LL; // Monin�Obukhov length (m)
+        std::vector<double> uz; // wind speed in each canopy layer
+        double LL; // Monin-Obukhov length (m)
         double uf; // friction velocity
         double uh; // wind speed at top of canopy
         double zm; // roughness length
         double psi_m;
         double psi_h;
         double phi_h;
-        // Friction velocity generated per unit driving wind. Set by canopy
-        // roughness and stability, so it converts a wind speed into the
-        // friction velocity that wind produces over this particular canopy.
+        // Friction velocity per unit wind speed.
         double ufratio;
-        double windscale; // measured wind over the wind that drives exchange: turns profile winds into the wind itself
-        double fade; // weight of canopy-scale turbulence: 1 fully turbulent, 0 absent
+        double windscale; // actual wind over effective wind (which includes the convective addition)
+        double fade; // weight given to canopy-scale turbulence (0 to 1)
     };
     struct rainmodel {
         std::vector<double> kd; // extinction coefficient
@@ -178,10 +174,10 @@ namespace newmodel {
         int n; // number of layers
         std::vector<double> z; // node depths
         std::vector<double> dz; // layer thickness
-        std::vector<double> vol; // soil per unit area whose heat each node stores: half the layer above and half the layer below
+        std::vector<double> vol; // thickness of soil each node stores heat for (m)
         std::vector<double> wc; // volumetric water fraction of layer
         std::vector<double> Te; // temperature of layer
-        std::vector<double> oldTe; // old temperature of layer
+        std::vector<double> oldTe; // temperature of layer at the start of the time step
         double Gflux; // Ground heat flux (W/m^2)
         int iters; // Number of iterations to convergence
     };
@@ -190,37 +186,37 @@ namespace newmodel {
         double Tair; // reference air temperature
         double relhum; // reference relative humidity
         double pk; // reference pressure
-        double rHa; // reference resistance form gorund to zref
+        double rHa; // resistance from the ground to the reference height
         double precip; // precipitation
-        double Et; // Evapotranspiration
+        double Et; // transpiration (mm)
     };
     struct soilwatermod {
         int n; // number of layers
         std::vector<double> z; // node depths
         std::vector<double> dz; // layer thickness
-        std::vector<double> vol; // volume of layer (m3)
+        std::vector<double> vol; // thickness of soil each node stores water for (m)
         std::vector<double> psiw; // water potential
-        std::vector<double> k; // hydrualic conductivity
+        std::vector<double> k; // hydraulic conductivity
         std::vector<double> vapor; // vapour concentration (current time step)
         std::vector<double> oldvapor; // vapour concentration (previous time step)
         std::vector<double> theta; // volumetric water fraction (current time step)
         std::vector<double> oldtheta; // volumetric water fraction (previous time step)
         std::vector<double> Tc; // temperature (deg C) of soil
-        std::vector<double> oldTc; // temperature (deg C) of soil
+        std::vector<double> oldTc; // temperature (deg C) of soil at the start of the time step
         std::vector<double> rootfrac; // root fraction in each soil layer
     };
     struct soilwaterout {
-        soilwatermod swo; // main bit of soil water model
+        soilwatermod swo; // state of the soil water model
         bool success; // whether model converged
         int iterations; // how many iterations model run for
         double Evapmmhr; // surface evaporation
         double surplus = 0.0; // water a saturated surface could not take, which runs off (mm)
         double drainage = 0.0; // water leaving through the base of the soil (mm), negative where it enters
     };
-    // Strucxtures used for convergence function
+    // State of the damped (Aitken) updates
     struct WAitkenStateScalar {
         double r_prev = 0.0;
-        double omega = 0.2;   // default: quite high backweight
+        double omega = 0.2; // starting weight given to the new value
         bool have_prev = false;
     };
     struct cantop {
@@ -234,19 +230,19 @@ namespace newmodel {
         std::vector<double> Rlwdown;
         std::vector<double> Rlwup;
         std::vector<double> tair; // air temperature
-        std::vector<double> tleaf; // avaerage temperature of foliage elements used for Langrangian model and returned by default
+        std::vector<double> tleaf; // mean temperature of foliage, leaves and wood (deg C)
         std::vector<double> rh; // relative humidity
         std::vector<double> uz; // wind speed
-        std::vector<double> rLB; // Leaf boundary layer conductance
+        std::vector<double> rLB; // leaf boundary-layer resistance (s/m)
         std::vector<double> swaterdepth; // Leaf surface water depth
-        std::vector<double> Hz; // Sensible heat flux exchange with surrounding air
-        std::vector<double> Lz;  // Sensible heat flux exchange with surrounding air
+        std::vector<double> Hz; // sensible heat from foliage to air, per unit plant area (W/m^2)
+        std::vector<double> Lz; // latent heat from foliage to air, per unit ground area (W/m^2)
         std::vector<double> gs;  // Stomatal conductance
-        std::vector<double> dSTdT; // response of each layer's sensible heat source to its own air temperature (W m-2 K-1)
-        std::vector<double> dSLde; // response of each layer's latent heat source to its own air vapour pressure (W m-2 kPa-1)
-        std::vector<double> tfar, tnear; // foliage's far-field and near-field parts of each node's air temperature (K)
+        std::vector<double> dSTdT; // change in each layer's sensible heat source per degree of its own air (W m-2 K-1)
+        std::vector<double> dSLde; // change in each layer's latent heat source per kPa of its own air's vapour pressure (W m-2 kPa-1)
+        std::vector<double> tfar, tnear; // far-field and near-field parts of each node's air temperature due to foliage (K)
         std::vector<double> efar, enear; // the same for vapour pressure (kPa)
-        double precipground; // Precipitation eaching the ground
+        double precipground; // Precipitation reaching the ground (mm)
         soilmod soilheatvars; // soil heat model input / output
         soilwatermod soilwatervars; // soil water model input / output;
         double H; // Total sensible heat (including from ground)
@@ -257,14 +253,14 @@ namespace newmodel {
         double psim; // psi_m
         double psih; // psi_h
         double phih; // phi_h
-        double fade; // weight of canopy-scale turbulence this step
-        double tcanopy; // air temperature at canopy top (deg C), the upper boundary of the canopy air
+        double fade; // weight given to canopy-scale turbulence (0 to 1)
+        double tcanopy; // air temperature at canopy top (deg C)
         double rhcanopy; // relative humidity at canopy top (%)
-        double ucanopy; // wind speed at canopy top (m/s), on the scale that drives exchange
-        double windscale; // turns the exchange-scale winds into the wind itself, for reporting
-        double LL; // // Monin�Obukhov length (m)
-        int iters; // number of iterations for which model run
-        int witers; // number of iterations for which water model run
+        double ucanopy; // effective wind speed at canopy top (m/s), which includes the convective addition
+        double windscale; // actual wind over effective wind
+        double LL; // Monin-Obukhov length (m)
+        int iters; // passes the hour took
+        int witers; // iterations of the soil water solve
         double runoff = 0.0; // water a saturated surface could not take (mm)
         double drainage = 0.0; // water leaving through the base of the soil (mm)
         double error;
@@ -284,12 +280,12 @@ namespace newmodel {
         double theta; // Volumetric soil moisture of surface layer
         double psim; // psi_m
         double psih; // psi_h
-        double LL; // // Monin�Obukhov length (m)
-        int iters; // number of iterations for which model run
+        double LL; // Monin-Obukhov length (m)
+        int iters; // passes the hour took
         double error;
         double runoff = 0.0; // water a saturated surface could not take (mm)
         double drainage = 0.0; // water leaving through the base of the soil (mm)
-        int witers = 0; // number of iterations for which water model run
+        int witers = 0; // iterations of the soil water solve
     };
     struct bigsmallleafstruct {
         double Hsmall;
