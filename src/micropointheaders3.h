@@ -235,6 +235,7 @@ namespace newmodel {
         std::vector<double> uz; // wind speed
         std::vector<double> rLB; // leaf boundary-layer resistance (s/m)
         std::vector<double> swaterdepth; // Leaf surface water depth
+        std::vector<double> leafwet; // fraction of the leaf surface that is wet
         std::vector<double> Hz; // sensible heat from foliage to air, per unit plant area (W/m^2)
         std::vector<double> Lz; // latent heat from foliage to air, per unit ground area (W/m^2)
         std::vector<double> gs;  // Stomatal conductance

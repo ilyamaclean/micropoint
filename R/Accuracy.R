@@ -85,7 +85,7 @@ ACCURACY_LEVELS <- list(
     out
   }
   lowest <- mout$tair[, 1]
-  for (v in c("Rdirdown", "Rdifdown", "Rswup", "Rlwdown", "Rlwup", "tleaf")) mout[[v]] <- onto(mout[[v]])
+  for (v in c("Rdirdown", "Rdifdown", "Rswup", "Rlwdown", "Rlwup", "tleaf", "leafwet")) mout[[v]] <- onto(mout[[v]])
   mout$windspeed <- onto(mout$windspeed, mout$ucanopy)
   mout$tair <- onto(mout$tair, mout$tcanopy)
   mout$relhum <- onto(mout$relhum, mout$rhcanopy)

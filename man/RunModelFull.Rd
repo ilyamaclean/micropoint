@@ -109,6 +109,7 @@ For **vegetated runs** the returned elements are:
   \item{Rlwup}{Upward longwave radiation (W m^-2).}
   \item{tair}{Air temperature profile (°C).}
   \item{tleaf}{Leaf temperature profile (°C).}
+  \item{leafwet}{Fraction of the leaf surface that is wet.}
   \item{relhum}{Relative humidity profile (\%).}
   \item{windspeed}{Wind speed profile (m s^-1).}
   \item{tsoil}{Soil temperature profile (°C).}

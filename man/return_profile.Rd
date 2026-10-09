@@ -89,6 +89,7 @@ A list of model outputs for the hour, including:
   \item{z}{Heights (m) of the canopy layers or, for bare ground, of the profile returned.}
   \item{tair, rh, uz}{Air temperature (°C), relative humidity (\%) and wind speed (m s^-1) at heights `z`.}
   \item{tleaf}{Leaf temperature (°C) of each canopy layer. Vegetated runs only.}
+  \item{leafwet}{Fraction of the leaf surface that is wet in each canopy layer. Vegetated runs only.}
   \item{Rdirdown, Rdifdown, Rswup, Rlwdown, Rlwup}{Shortwave and longwave radiation (W m^-2).}
   \item{zb, Soiltemp, thetas}{Depths (m) of the soil nodes, and soil temperature (°C) and volumetric water content at them.}
   \item{H, L, G}{Sensible, latent and ground heat fluxes (W m^-2).}

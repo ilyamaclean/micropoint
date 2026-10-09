@@ -1370,6 +1370,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
     std::vector<double> Lz(n);
     std::vector<double> rLB(n);
     std::vector<double> dSTdT(n), dSLde(n);
+    onestepin.leafwet.assign(n, 0.0);
     // Rain is followed down from the top layer. Each layer intercepts part of what
     // arrives, and what it cannot hold at the end of the hour drips to the layer below.
     std::vector<double> Efilm(n);
@@ -1395,6 +1396,7 @@ static void plantmodelCpp(onestep& onestepin, envstruct envdata, vegpstruct& veg
         // a leaf transpires through its stomata. A surface colder than the dew point
         // gains dew over both sides.
         const double fw = wetFraction(onestepin.swaterdepth[i], envdata.precip);
+        onestepin.leafwet[i] = fw;
         double gwet = fw / rLB[i];
         double gtsun = 0.0, gtshade = 0.0;
         // Converts conductance times vapour pressure difference to mm of water over the hour.
@@ -3712,7 +3714,7 @@ double Dw_waterVapour(double Tf, double pk)
 // [[Rcpp::export]]
 double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh,
     double rHa, double height, double rc, double confrac, double M, double em = 0.97, double k = 0.5,
-    double surfrh = 1.0)
+    double surfrh = 1.0, double surfwet = 1.0)
 {
     double Tbody = Ta;
     double cp = cpairCpp(Ta);
@@ -3721,7 +3723,7 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double cd = 1.0 - confrac;
     double ea = satvapCpp2(Ta);
     double Da = ea * (1.0 - rh / 100.0); // vapour pressure deficit, air
-    double Dac = surfrh * satvapCpp2(Tf) - ea; // vapour pressure deficit, contact interface
+    double Dac = ea - surfrh * satvapCpp2(Ts); // vapour pressure deficit against the contact surface
     // Conduction from the body core to the contact surface, across half the body
     // height (given in cm).
     const double halfheight = 0.5 * height / 100.0; // m
@@ -3734,14 +3736,13 @@ double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, doubl
     double rv = rHa + rc; // total vapour resistance (s/m)
     double ml = (ph * la * cd) / (rv * pk); // latent heat exchange coefficient, air-facing
     double Dw = Dw_waterVapour(Tf, pk);
-    // Vapour from the contact face diffuses across the same half height.
+    // Vapour passes between the skin and the wet share of the contact surface, across the same half height.
     double rv_contact = halfheight / Dw + rc;
-    double mlc = (la * confrac) / rv_contact; // latent heat exchange coefficient, contact-facing
+    double mlc = (ph * la * confrac * surfwet) / (rv_contact * pk); // latent heat exchange coefficient, contact-facing
     double DeV = satvapCpp2(Te + 0.5) - satvapCpp2(Te - 0.5); // slope of the saturation vapour pressure curve, air-facing
-    double DeC = satvapCpp2(Tf + 0.5) - satvapCpp2(Tf - 0.5); // slope of the saturation vapour pressure curve, contact-facing
     double top = (Rabs + M - mr * radem(Ta) - mrc * radem(Ta) + mc * dT - ml * Da - mlc * Dac);
     double btm = 4.0 * mr * std::pow(Te + 273.15, 3.0) + 4.0 * mrc * std::pow(Tf + 273.15, 3.0) +
-        mc + mv + ml * DeV + surfrh * mlc * DeC;
+        mc + mv + ml * DeV + mlc * DeV;
     Tbody = Ta + top / btm;
     return (Tbody);
 }
@@ -3818,6 +3819,8 @@ Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata,
     std::vector<double> rh = climdata["rh"]; // Air relative humidity (percentage)
     std::vector<double> pk = climdata["pk"]; // Atmospheric pressure (kPa)
     std::vector<double> surfrh = climdata["surfrh"]; // Surface relative humidity (0-1)
+    std::vector<double> surfwet(surfrh.size(), 1.0); // Fraction of the contact surface that is wet or porous (0-1)
+    if (climdata.containsElementNamed("surfwet")) surfwet = Rcpp::as<std::vector<double>>(climdata["surfwet"]);
     // Extract animal parameters
     double height = animal["height"]; // height of animal (cm)
     double width = animal["width"]; // width of animal (cm)
@@ -3868,7 +3871,7 @@ Rcpp::NumericVector Ectotherm(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata,
             double M = metabolic_rate(volume, rho, Q10, a0, b, Tref, Tbody[i]) / area;
             double Told = Tbody[i];
             Tbody[i] = PenmanMonteith_animal(Rabs, Ta[i], Ts[i], Te, Tf, pk[i], rh[i], rHa, height,
-                rc, confrac, M, em, k, surfrh[i]);
+                rc, confrac, M, em, k, surfrh[i], surfwet[i]);
             aitkin_weightdif_scalar(Told, Tbody[i], st);
             double dTold = dT;
             dT = Tbody[i] - Ta[i];
@@ -3902,6 +3905,8 @@ Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcp
     Rcpp::NumericMatrix Ts = climdata["Ts"]; // Surface temperature (only needed if confrac > 0)
     Rcpp::NumericMatrix rh = climdata["rh"]; // Air relative humidity (percentage)
     Rcpp::NumericVector pk = climdata["pk"]; // Atmospheric pressure (kPa)
+    const bool hasWet = climdata.containsElementNamed("surfwet"); // fraction of the contact surface that is wet (0-1)
+    Rcpp::NumericMatrix surfwet = hasWet ? Rcpp::as<Rcpp::NumericMatrix>(climdata["surfwet"]) : Rcpp::NumericMatrix(1, 1);
     Rcpp::NumericVector wdir = climdata["wdir"]; // wind direction (only needed if position = fixed
     double height = animal["height"]; // height of animal (cm)
     double width = animal["width"]; // width of animal (cm)
@@ -3957,7 +3962,7 @@ Rcpp::NumericVector EctothermM(Rcpp::DataFrame obstime, Rcpp::List climdata, Rcp
                 double M = metabolic_rate(volume, rho, Q10, a0, b, Tref, Tbody(i, j)) / area;
                 double Told = Tbody(i, j);
                 Tbody(i, j) = PenmanMonteith_animal(Rabs, Ta(i, j), Ts(i, j), Te, Tf, pk[i], rh(i, j), rHa, height,
-                    rc, confrac, M, em, k, 1.0);
+                    rc, confrac, M, em, k, 1.0, hasWet ? surfwet(i, j) : 1.0);
                 aitkin_weightdif_scalar(Told, Tbody(i, j), st);
                 double dTold = dT;
                 dT = Tbody(i, j) - Ta(i, j);
@@ -4139,6 +4144,7 @@ static onestep CreateOneStep(soilmod soilheatvars, soilwatermod soilwatervars, d
     onestepin.uz = v1;
     onestepin.rLB = v1;
     onestepin.swaterdepth = v0;
+    onestepin.leafwet = v0;
     onestepin.Hz = v0;
     onestepin.Lz = v0;
     onestepin.gs = v0;
@@ -4204,6 +4210,7 @@ static Rcpp::List OneStepCpptoList(onestep onestepin, std::vector<double> z)
     out["witers"] = onestepin.witers;
     out["rLB"] = Rcpp::wrap(onestepin.rLB);
     out["swaterdepth"] = Rcpp::wrap(onestepin.swaterdepth);
+    out["leafwet"] = Rcpp::wrap(onestepin.leafwet);
     out["Hz"] = Rcpp::wrap(onestepin.Hz);
     out["tfar"] = Rcpp::wrap(onestepin.tfar);
     out["tnear"] = Rcpp::wrap(onestepin.tnear);
@@ -4627,7 +4634,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
         }
     }
     std::vector<double> Rdirdown(n), Rdifdown(n), Rswup(n), Rlwdown(n), Rlwup(n);
-    std::vector<double> tair(n), tground(n), tleaf(n), rz(n), uz(n);
+    std::vector<double> tair(n), tground(n), tleaf(n), leafwet(n, -999.99), rz(n), uz(n);
     std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n), drainage(n);
     std::vector<int> iters(n), witers(n);
     for (size_t hr = 0; hr < n; ++hr) {
@@ -4695,6 +4702,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                 else {
                     tair[hr] = onestepin.tair[sel];
                     tleaf[hr] = onestepin.tleaf[sel];
+                    leafwet[hr] = onestepin.leafwet[sel];
                     rz[hr] = onestepin.rh[sel];
                     uz[hr] = onestepin.uz[sel] * onestepin.windscale;
                 }
@@ -4717,6 +4725,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     out["tair"] = tair;
     out["tground"] = tground;
     out["tleaf"] = tleaf;
+    out["leafwet"] = leafwet;
     out["relhum"] = rz;
     out["windspeed"] = uz;
     out["H"] = H;
@@ -4948,6 +4957,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     NumericMatrix Rlwup(n, na);
     NumericMatrix tair(n, na);
     NumericMatrix tleaf(n, na);
+    NumericMatrix leafwet(n, na);
     NumericMatrix rh(n, na);
     NumericMatrix uz(n, na);
     std::vector<double> runoff(n, 0.0); // rain the saturated surface could not take (mm)
@@ -4991,6 +5001,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
         FillMyMatrix(Rlwup, onestepin.Rlwup, hr);
         FillMyMatrix(tair, onestepin.tair, hr);
         FillMyMatrix(tleaf, onestepin.tleaf, hr);
+        FillMyMatrix(leafwet, onestepin.leafwet, hr);
         FillMyMatrix(rh, onestepin.rh, hr);
         {
             std::vector<double> uzActual = onestepin.uz; // actual wind, without the convective addition
@@ -5032,6 +5043,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     );
     out["LL"] = Rcpp::wrap(LL);
     out["fade"] = Rcpp::wrap(fade);
+    out["leafwet"] = Rcpp::wrap(leafwet);
     return out;
 }
 // Air temperature, relative humidity and wind speed at heights za between canopy top and the

@@ -159,8 +159,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // PenmanMonteith_animal
-double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh, double rHa, double height, double rc, double confrac, double M, double em, double k, double surfrh);
-RcppExport SEXP _micropoint_PenmanMonteith_animal(SEXP RabsSEXP, SEXP TaSEXP, SEXP TsSEXP, SEXP TeSEXP, SEXP TfSEXP, SEXP pkSEXP, SEXP rhSEXP, SEXP rHaSEXP, SEXP heightSEXP, SEXP rcSEXP, SEXP confracSEXP, SEXP MSEXP, SEXP emSEXP, SEXP kSEXP, SEXP surfrhSEXP) {
+double PenmanMonteith_animal(double Rabs, double Ta, double Ts, double Te, double Tf, double pk, double rh, double rHa, double height, double rc, double confrac, double M, double em, double k, double surfrh, double surfwet);
+RcppExport SEXP _micropoint_PenmanMonteith_animal(SEXP RabsSEXP, SEXP TaSEXP, SEXP TsSEXP, SEXP TeSEXP, SEXP TfSEXP, SEXP pkSEXP, SEXP rhSEXP, SEXP rHaSEXP, SEXP heightSEXP, SEXP rcSEXP, SEXP confracSEXP, SEXP MSEXP, SEXP emSEXP, SEXP kSEXP, SEXP surfrhSEXP, SEXP surfwetSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -179,7 +179,8 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< double >::type em(emSEXP);
     Rcpp::traits::input_parameter< double >::type k(kSEXP);
     Rcpp::traits::input_parameter< double >::type surfrh(surfrhSEXP);
-    rcpp_result_gen = Rcpp::wrap(PenmanMonteith_animal(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, rc, confrac, M, em, k, surfrh));
+    Rcpp::traits::input_parameter< double >::type surfwet(surfwetSEXP);
+    rcpp_result_gen = Rcpp::wrap(PenmanMonteith_animal(Rabs, Ta, Ts, Te, Tf, pk, rh, rHa, height, rc, confrac, M, em, k, surfrh, surfwet));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -604,7 +605,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_Tabove", (DL_FUNC) &_micropoint_Tabove, 9},
     {"_micropoint_RHabove", (DL_FUNC) &_micropoint_RHabove, 12},
     {"_micropoint_Uabove", (DL_FUNC) &_micropoint_Uabove, 7},
-    {"_micropoint_PenmanMonteith_animal", (DL_FUNC) &_micropoint_PenmanMonteith_animal, 15},
+    {"_micropoint_PenmanMonteith_animal", (DL_FUNC) &_micropoint_PenmanMonteith_animal, 16},
     {"_micropoint_Ectotherm", (DL_FUNC) &_micropoint_Ectotherm, 8},
     {"_micropoint_EctothermM", (DL_FUNC) &_micropoint_EctothermM, 8},
     {"_micropoint_reverseCumsum", (DL_FUNC) &_micropoint_reverseCumsum, 1},

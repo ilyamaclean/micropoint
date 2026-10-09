@@ -177,6 +177,7 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     z <- c(rev(-zb), 0, moutprofile$z)
   } else {
     climin$Ts <- moutprofile$tleaf
+    climin$surfwet <- moutprofile$leafwet
     # Ectotherm temperature within canopy.
     Tbodyc <- Ectotherm(obstime, climin, ectop, lat, long, vegp$ltra, maxiter, tolerance)
     # Ectotherm temperature above canopy.
@@ -282,6 +283,7 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
       if (class(vegp) != "logical") {
         if (reqhgt < vegp$h) {  # vegetation present and below canopy
           climin$Ts <- mout$tleaf
+          climin$surfwet <- mout$leafwet
         } else { # vegetation present and above canopy
           ectop$confrac <- 0
         }
@@ -346,6 +348,7 @@ full_ecto <- function(mout, climdata, vegp, soilc, ectop, lat, long, maxiter = 1
                  wdir = climdata$winddir)
   if (class(vegp) != "logical") {
     climin$Ts <- mout$tleaf
+    climin$surfwet <- mout$leafwet
     ltra <- vegp$ltra
   } else {
     ectop$confrac <- 0

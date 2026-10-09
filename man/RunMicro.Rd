@@ -108,6 +108,8 @@ listed above, plus:
 \itemize{
   \item `tleaf`: leaf temperature at the requested height within the canopy,
   or `-999.99` where not applicable.
+  \item `leafwet`: fraction of the leaf surface that is wet, or `-999.99`
+  where not applicable.
   \item `Evaporation`: soil evaporation.
   \item `Transpiration`: plant transpiration.
 }
