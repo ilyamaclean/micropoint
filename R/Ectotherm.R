@@ -72,7 +72,7 @@ create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "r
   VO2fun <- function(Tbody) VO2ref * Q10^((Tbody - Tref)/10)
   # compute other variables
   k <- switch(type, arthropod = 0.2, reptile = 0.5, amphibian = 0.5, other = 0.4)
-  confrac <- switch(type, arthropod = 0.01, reptile = 0.2, amphibian = 0.1, other = 0.02)
+  confrac <- switch(type, arthropod = 0.01, reptile = 0.1, amphibian = 0.1, other = 0.02)
   atilt <- switch(type, arthropod = 0, reptile = 5, amphibian = 20, other = 5)
   return(list(height = height, width = width, len = len, refl = refl, confrac = confrac,
               rc = rc, em = 0.97, volume = V, area = A, rho = 1000,
