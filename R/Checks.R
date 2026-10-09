@@ -68,7 +68,7 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   cosz <- sin(alt * pi / 180)
   beamh <- climdata$swdown - climdata$difrad
   beammax <- .clearestbeam(alt, climdata$pres) * pmax(cosz, 0)
-  s <- which(beamh > beammax)
+  s <- which(beamh > beammax + 1e-8)   # rounding allowed for, so corrected data pass
   if (length(s) > 0) {
     warning("Direct beam stronger than the sun can deliver, or with the sun below the horizon, in ",
             length(s), " hours. Excess treated as diffuse")

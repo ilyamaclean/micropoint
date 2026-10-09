@@ -112,7 +112,7 @@ createvegp <- function(vegtype = "BET.Te") {
 #' @importFrom Rcpp sourceCpp
 #' @useDynLib micropoint, .registration = TRUE
 #' @export
-createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, slope = 0, aspect = 180,
+createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 3, slope = 0, aspect = 180,
                         surface_organicmu = 3, FreeDrain = TRUE) {
   s <- which(newsoilparamstable$Soil.type == soiltype)
   # Campbell parameters, selected by name
@@ -261,12 +261,13 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
   if (class(vegp) == "logical") return(0)
   referenceheightCpp(vegp$h, vegp$pai, zm)
 }
-# Adjusts weather measured too close to a canopy to the height the model needs.
-# Returns the weather and the height it then refers to.
+# Adjusts weather measured too close to a canopy to the height the model needs, rounded up
+# to a whole metre. Returns the weather and the height it then refers to.
 .forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                                  st = .accuracy_settings()) {
   zreq <- .reference_height(vegp, zm)
   if (zref >= zreq - 1e-6) return(list(climdata = climdata, zref = zref))
+  zreq <- ceiling(zreq - 1e-6)   # adjusted to a whole number of metres
   message(sprintf("Weather at %.4g m is too close to a canopy of this height and density; translated to %.4g m.",
                   zref, zreq))
   # forcing already checked by the caller

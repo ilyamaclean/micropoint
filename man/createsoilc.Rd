@@ -7,7 +7,7 @@
 createsoilc(
   soiltype = "Clay loam",
   nlayers = 15,
-  totalDepth = 2,
+  totalDepth = 3,
   slope = 0,
   aspect = 180,
   surface_organicmu = 3,
