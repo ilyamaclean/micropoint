@@ -114,7 +114,8 @@ listed above, plus:
   \item `Transpiration`: plant transpiration.
 }
 
-Both also return `Evaporation` from the soil (mm), `runoff` from the soil
+Both also return `Evaporation` from the soil (mm), `surfwater`, the volumetric
+water content of the soil surface, `runoff` from the soil
 surface (mm), `drainage` from the base of the soil (mm) and `witers`, the
 number of iterations of the soil water model.
 }

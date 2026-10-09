@@ -274,10 +274,14 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
                          rh = mout$relhum,
                          pk = climdata$pres,
                          surfrh = rep(1, n))
-    if (reqhgt == 0) {   # on ground surface
+    # The animal rests on the ground if its lowest point reaches it
+    zrest <- (0.5 * ectop$height + 0.5 * ectop$len * abs(sin(ectop$atilt * pi / 180))) * 0.01
+    if (reqhgt <= zrest + 1e-9) {   # on ground surface
+      water <- if (reqhgt == 0) mout$soilwater else mout$surfwater
       psie <- -abs(soilc$psi_e[1])
-      psiw <- psie * (mout$soilwater / soilc$Smax[1])^-soilc$b[1]
+      psiw <- psie * (water / soilc$Smax[1])^-soilc$b[1]
       Tk <- mout$tground + 273.15
+      climin$Ts <- mout$tground
       climin$surfrh <- exp(0.018015 * psiw / (8.314 * Tk))
     } else { # above ground
       if (class(vegp) != "logical") {

@@ -4492,6 +4492,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     std::vector<double> L(n);
     std::vector<double> G(n);
     std::vector<double> Ev(n);
+    std::vector<double> surfwater(n); // water content of the soil surface
     std::vector<double> runoff(n), drainage(n);
     std::vector<int> iters(n), witers(n);
     std::vector<double> error(n);
@@ -4513,6 +4514,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         L[hr] = onestepin.L;
         G[hr] = onestepin.soilheatvars.Gflux;
         Ev[hr] = onestepin.Ev;
+        surfwater[hr] = onestepin.theta;
         runoff[hr] = onestepin.runoff;
         drainage[hr] = onestepin.drainage;
         witers[hr] = onestepin.witers;
@@ -4571,6 +4573,7 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
         Named("L") = Rcpp::wrap(L),
         Named("G") = Rcpp::wrap(G),
         Named("Evaporation") = Rcpp::wrap(Ev),
+        Named("surfwater") = Rcpp::wrap(surfwater),
         Named("runoff") = Rcpp::wrap(runoff),
         Named("drainage") = Rcpp::wrap(drainage),
         // Error variables
@@ -4636,6 +4639,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     std::vector<double> Rdirdown(n), Rdifdown(n), Rswup(n), Rlwdown(n), Rlwup(n);
     std::vector<double> tair(n), tground(n), tleaf(n), leafwet(n, -999.99), rz(n), uz(n);
     std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n), drainage(n);
+    std::vector<double> surfwater(n); // water content of the soil surface
     std::vector<int> iters(n), witers(n);
     for (size_t hr = 0; hr < n; ++hr) {
         obsstruct obsdata;
@@ -4663,6 +4667,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
         L[hr] = onestepin.L;
         G[hr] = onestepin.soilheatvars.Gflux;
         Ev[hr] = onestepin.Ev;
+        surfwater[hr] = onestepin.theta;
         Et[hr] = onestepin.Et;
         iters[hr] = onestepin.iters;
         error[hr] = onestepin.error;
@@ -4732,6 +4737,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     out["L"] = L;
     out["G"] = G;
     out["Evaporation"] = Ev;
+    out["surfwater"] = surfwater;
     out["Transpiration"] = Et;
     out["runoff"] = runoff;
     out["drainage"] = drainage;

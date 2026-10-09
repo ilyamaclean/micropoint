@@ -665,7 +665,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   \item `Transpiration`: plant transpiration.
 #' }
 #'
-#' Both also return `Evaporation` from the soil (mm), `runoff` from the soil
+#' Both also return `Evaporation` from the soil (mm), `surfwater`, the volumetric
+#' water content of the soil surface, `runoff` from the soil
 #' surface (mm), `drainage` from the base of the soil (mm) and `witers`, the
 #' number of iterations of the soil water model.
 #'
@@ -723,6 +724,7 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
   .warn_unsettled(mout$error, st)
   stuck <- sum(mout$witers >= max(st$maxiter, 50))
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
+  mout$surfwater <- .reportedtheta(mout$surfwater, soilc)
   # Rename variables if below ground
   if (reqhgt <= 0) {
     mout$tsoil <- mout$tair; mout$tair <- NULL
