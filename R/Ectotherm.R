@@ -183,20 +183,14 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     za <- moutprofile$za
     n2 <- length(za)
     n <- length(moutprofile$Rswup)
-    d <- zeroplanedisCpp2(vegp$h, vegp$pai)
-    zm <- roughlengthCpp2(vegp$h, vegp$pai, d, if (is.null(soilc$zm)) 0.004 else soilc$zm)
-    # Friction velocity from the reference wind, then wind at each height above
-    # the canopy. The reference height is the one the profile was run with.
+    # Wind above the canopy, between the model's wind at canopy top and the weather's.
+    # The reference height is the one the profile was run with.
     uref <- climdata$windspeed[hr]
     if (!is.null(moutprofile$zref)) {
       zref <- moutprofile$zref
       uref <- moutprofile$uref
     }
-    psimref <- dpsimCpp2(zm / moutprofile$LL) - dpsimCpp2((zref - d) / moutprofile$LL)
-    uf <- (0.41 * uref) / (log((zref - d)/zm) + psimref)
-    psim <- 0
-    for (i in 1:length(za)) psim[i] <- dpsimCpp2(zm / moutprofile$LL) - dpsimCpp2((za[i] - d) / moutprofile$LL)
-    uza <- (uf / 0.41) * (log((moutprofile$za - d) / zm) + psim)
+    uza <- sapply(za, function(zz) Uabove(zz, zref, moutprofile$ucanopy, uref, vegp$h, vegp$pai, moutprofile$LL))
     obstime <- data.frame(year = rep(tme$year +1900, n2),
                           month = rep(tme$mon + 1, n2),
                           day = rep(tme$mday, n2),
