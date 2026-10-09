@@ -33,10 +33,8 @@ as in the inbuilt dataset `climdata`.}
 values are above ground, `0` is the soil surface, and negative values are
 below ground.}
 
-\item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-which are too short for the vegetation to present the wind a surface distinct
-from the soil.}
+\item{vegp}{Vegetation parameter list as returned by [createvegp()]. If `NA`,
+bare ground is assumed.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
@@ -57,7 +55,7 @@ Default is 2 (see details).}
 If `NA`, a default profile is generated.}
 
 \item{ThetaIni}{Optional numeric vector of initial volumetric soil water
-contents. If `NA`, all layers are initialised to 0.419.}
+contents. If `NA`, a default profile is generated.}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO2 concentration (ppm).
 If `NA`, it is estimated from the year of the first observation using [Cafromyear()].}
@@ -66,19 +64,22 @@ If `NA`, it is estimated from the year of the first observation using [Cafromyea
 used to initialise the soil temperature profile. If `NA`, it is estimated
 from `climdata$temp`, which requires roughly a full year of data.}
 
-\item{zm}{Numeric. Roughness length for bare-ground calculations.}
+\item{zm}{Numeric. Roughness length (m) of the soil surface.}
 
-\item{maxiter}{Optional integer. The most passes an hour may take. By default
-set by `accuracy`; supplying it overrides that.}
+\item{maxiter}{Optional integer. Maximum number of iterations within each
+hour. Set by `accuracy` if not supplied.}
 
-\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
-moves air temperature by less than this (K). By default set by `accuracy`;
-supplying it overrides that.}
+\item{tolerance}{Optional numeric. Convergence tolerance (K) for air
+temperature. Set by `accuracy` if not supplied.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
-\item{accuracy}{Character. How closely the model is solved, and so how long
-it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details.}
+\item{accuracy}{Character. Controls the trade-off between model run time and
+numerical accuracy. One of `"high"` (the default), `"very high"`,
+`"moderate"` or `"fast"`. `"very high"` is slower and more accurate, while
+`"moderate"` and `"fast"` progressively favour speed over accuracy. `"fast"`
+is intended primarily for applications where the model is run repeatedly
+over many grid cells.}
 }
 \value{
 A data.frame containing model outputs for each time step.
@@ -109,66 +110,17 @@ listed above, plus:
   or `-999.99` where not applicable.
   \item `Evaporation`: soil evaporation.
   \item `Transpiration`: plant transpiration.
-  \item `witers`: passes taken by the soil water solve.
 }
 
-Both also return `Evaporation` from the soil (mm); `runoff`, the rain reaching
-the ground that the saturated soil surface could not take, each hour (mm);
-`drainage`, the water leaving through the base of the soil each hour (mm,
-negative where water enters there); and `witers`, the iterations taken to
-balance the soil's water. A warning is given if the balance was not reached
-in some hours. Wind speed is the wind itself:
-the velocity that convection adds to exchange over a heated surface is not
-included. Below ground, `soilwater` is no lower than the soil's residual
-water content.
+Both also return `Evaporation` from the soil (mm), `runoff` from the soil
+surface (mm), `drainage` from the base of the soil (mm) and `witers`, the
+number of iterations of the soil water model.
 }
 \description{
 Runs the microclimate model for each time step in `climdata` and returns
 the simulated microclimate at the requested height `reqhgt`.
 }
 \details{
-\strong{Accuracy and run time.} Each hour is solved by repeated passes through
-the canopy and soil until a pass no longer changes the result by much.
-`accuracy` sets how closely that is done, and with it the run time. The
-figures below compare each level with the same model solved very tightly, for
-forest, crop and grass in a range of climates; they are a guide, not a
-guarantee. "Typical error" is the root-mean-square difference in air, leaf
-and ground temperature over a year; "worst hour" the largest difference in
-any hour of a year, at any height. Times are for one year of hourly data
-with twenty canopy layers.
-
-\tabular{llll}{
-  \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
-  very high \tab under 0.05 K (usually under 0.01) \tab under 1.5 K, usually under 0.5 \tab 9 to 25 s \cr
-  high \tab under 0.4 K (usually 0.1) \tab 1 to 2.5 K \tab 6 to 12 s \cr
-  moderate \tab under 0.9 K (usually 0.2) \tab 2 to 4 K \tab 2 to 5 s \cr
-  fast \tab under 1.1 K (usually 0.3) \tab 2.5 to 5.5 K \tab 1.6 to 4 s
-}
-
-The larger figures of each range are for still, humid weather, in which the
-model settles least readily. At `"moderate"` a run with more than ten canopy
-layers is made on ten, and at `"fast"`, which is meant for runs over many
-grid cells, on five; results are returned at the height asked for. Bare
-ground takes one to two seconds at every level. Weather measured too close to
-the canopy is translated to the height the model needs at the same level.
-
-If some hours do not settle within the passes the level allows, one warning
-says how many; the values returned for those hours are those of the pass
-that changed least. `tolerance` and `maxiter` override the level's own
-values and are not needed in ordinary use.
-
-Standard meteorological observations are typically made about 2 m above the
-ground. If vegetation is taller than the measurement height, these data lie
-within the canopy rather than above it. The microclimate model requires
-forcing at or above the height given by [reference_height()]; forcing
-supplied below it is translated up to that height with
-[weatherhgt_adjust()] before the run. When vegetation is present the model
-uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
-conditions at the requested height `reqhgt`. Within a canopy these are the
-mean conditions of the canopy layer whose middle is nearest that height; at
-canopy height or above they follow the profile above the canopy, which
-starts from the air at canopy top.
-
 If `vegp` is `NA`, bare-ground conditions are assumed and the bare-ground
 model is used. If `reqhgt <= 0`, output is treated as below-ground and soil
 temperature and soil water content are returned instead of air temperature

@@ -1,41 +1,26 @@
-#' Check and tidy model inputs
+#' Check model inputs
 #'
-#' Tests the weather, vegetation and soil inputs against the ranges they can
-#' physically take and the ranges they plausibly take, before a model run.
-#' Impossible values with a single sensible correction are corrected, with a
-#' warning; impossible values without one stop the run; possible but unusual
-#' values give a warning. Every model run function calls this first.
+#' Checks the weather, vegetation and soil inputs before a model run. Values
+#' that are impossible but have one sensible correction are corrected, with a
+#' warning. Other impossible values stop the run. Unusual values give a
+#' warning. Every model run function calls this first.
 #'
 #' @param climdata data.frame of hourly weather, named as in the inbuilt
 #' dataset `climdata`.
 #' @param vegp vegetation parameter list as returned by [createvegp()], or `NA`
 #' for bare ground.
 #' @param soilc soil parameter list as returned by [createsoilc()].
-#' @param lat latitude (decimal degrees), used to place the sun.
-#' @param long longitude (decimal degrees), used to place the sun.
+#' @param lat latitude (decimal degrees).
+#' @param long longitude (decimal degrees).
 #' @param paii optional vector of plant area index for each canopy layer.
-#' @param Lfrac optional vector of the live leaf fraction of each canopy layer.
+#' @param Lfrac optional vector of the living fraction of plant area in each
+#' canopy layer.
 #'
 #' @details
-#' **Direct and diffuse shortwave.** The direct beam is recorded as the part of
-#' `swdown` not in `difrad`, as it arrives on a horizontal surface. Dividing by
-#' the cosine of the solar zenith angle gives the beam as it arrives normal to
-#' the sun, which is what leaves and slopes intercept. That cannot exceed what
-#' the clearest sky lets through: the solar constant reduced by the depth of
-#' atmosphere the beam has crossed, which is many times greater with the sun
-#' near the horizon than overhead. The limit used is
-#' `1352 * 0.76^((m * pres / 101.3)^0.678)` W m^-2, where `m` is the relative
-#' air mass of Kasten and Young (1989). The form is that of Meinel and Meinel
-#' (1976), in which each further unit of air mass removes a little less than
-#' the one before, with the transmittance of a very clear atmosphere (0.76 for
-#' an overhead sun at sea level) in place of their typical one. It is a
-#' ceiling, not an estimate of the beam: no account is taken of season, water
-#' vapour or aerosol.
-#' Hourly records sum an hour of radiation, but the sun's position is computed
-#' for a single instant, and the two disagree most near the horizon: the implied
-#' beam can be impossibly strong, or present while the sun is below the horizon.
-#' In those hours the excess is treated as diffuse, so total shortwave is always
-#' the recorded value and only its partition changes.
+#' Direct-beam radiation, expressed normal to the solar beam, is capped at the
+#' maximum expected under a very clear sky. Any excess, and any direct
+#' radiation when the sun is below the horizon, is treated as diffuse
+#' radiation so that total shortwave radiation is unchanged.
 #'
 #' @return A list with elements `climdata`, `vegp` and `soilc`, with any
 #' corrections applied.
@@ -82,7 +67,7 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   alt <- solaltCpp(obstime, lat, long)
   cosz <- sin(alt * pi / 180)
   beamh <- climdata$swdown - climdata$difrad
-  beammax <- clearestbeam(alt, climdata$pres) * pmax(cosz, 0)
+  beammax <- .clearestbeam(alt, climdata$pres) * pmax(cosz, 0)
   s <- which(beamh > beammax)
   if (length(s) > 0) {
     warning("Direct beam stronger than the sun can deliver, or with the sun below the horizon, in ",
@@ -119,10 +104,7 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
     if (vegp$root95 <= vegp$root50) stop("vegp$root95 must exceed vegp$root50")
     if (!(length(paii) == 1 && is.na(paii[1]))) {
       if (any(paii < 0)) stop("paii cannot be negative")
-      # Plant area includes the stems and branches that hold foliage up, so every
-      # layer of a real canopy holds some. A layer with none above foliage means
-      # the canopy height is above the vegetation; one below foliage means a
-      # crown with nothing beneath it.
+      # Every layer must hold some plant area: it includes stems and branches.
       if (any(paii == 0))
         stop("paii must be greater than zero in every canopy layer: plant area includes the stems, ",
              "so an empty layer means either a canopy height above the vegetation or foliage with nothing holding it up")
@@ -151,26 +133,9 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   if (any(soilc$b <= 0)) stop("soilc$b must be positive")
   return(list(climdata = climdata, vegp = vegp, soilc = soilc))
 }
-#' Strongest direct beam the clearest sky can deliver
-#'
-#' @param alt solar altitude (degrees above the horizon).
-#' @param pres atmospheric pressure (kPa).
-#' @return Beam irradiance normal to the sun (W m^-2); zero with the sun at or
-#'   below the horizon.
-#' @details
-#' The solar constant reduced by a very clear atmosphere's transmittance. The
-#' depth of air the beam crosses is the relative air mass of Kasten and Young
-#' (1989), which stays finite at the horizon, scaled by pressure for the site's
-#' elevation. Transmittance falls with that depth as Meinel and Meinel (1976)
-#' have it: each further unit of air mass removes less than the one before,
-#' because the wavelengths most easily scattered are already gone. A constant
-#' transmittance per unit air mass would cut the beam of a low sun to half its
-#' real strength. The base, 0.76 for an overhead sun at sea level (about 1030
-#' W m^-2 at the ground), is that of an exceptionally clear day where they give
-#' 0.7 for a typical one; it is chosen to bound the beam from above, not to
-#' estimate it.
-#' @noRd
-clearestbeam <- function(alt, pres) {
+# Strongest direct beam (W/m2), normal to the sun, that a very clear sky transmits
+# at solar altitude alt and pressure pres (kPa).
+.clearestbeam <- function(alt, pres) {
   up <- alt > 0
   m <- rep(Inf, length(alt))
   m[up] <- 1 / (sin(alt[up] * pi / 180) + 0.50572 * (alt[up] + 6.07995)^-1.6364)

@@ -31,7 +31,7 @@ naming conventions as the inbuilt dataset `climdata`.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
-\item{ectop}{List of ectotherm parameters required by [Ectotherm()].}
+\item{ectop}{List of ectotherm parameters as returned by [create_ectop()].}
 
 \item{lat}{Numeric. Latitude in decimal degrees.}
 

@@ -24,13 +24,13 @@ timeseries_ecto(
 naming conventions as the inbuilt dataset `climdata`.}
 
 \item{reqhgt}{height above or below ground for which body temperature is wanted
-(negative is below ground). Must match value supplied to [RunMIcro()].}
+(negative is below ground). Must match value supplied to [RunMicro()].}
 
 \item{vegp}{Vegetation parameter list as returned by [createvegp()].}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
-\item{ectop}{List of ectotherm parameters required by [Ectotherm()].}
+\item{ectop}{List of ectotherm parameters as returned by [create_ectop()].}
 
 \item{lat}{Numeric. Latitude in decimal degrees.}
 
@@ -44,14 +44,14 @@ convergence in the ectotherm model.}
 \value{
 A data.frame with two columns:
 \describe{
-  \item{obs_time}{POSIXlt object of dates and times associated with eahc body
+  \item{obs_time}{POSIXlt object of dates and times associated with each body
   temperature estimate}
   \item{Tbody}{Predicted ectotherm body temperature (degrees C).}
 }
 }
 \description{
 Runs the ectotherm model through time using microclimate data returned by
-[RunMicro()] and returns predicted body temperature for very hour.
+[RunMicro()] and returns predicted body temperature for every hour.
 }
 \details{
 If `confrac` in `ectop` is > 0, and `0 < reqhgt < vegp$h` the ectotherm is

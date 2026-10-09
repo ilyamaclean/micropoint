@@ -2,7 +2,7 @@
 % Please edit documentation in R/Checks.R
 \name{runchecks}
 \alias{runchecks}
-\title{Check and tidy model inputs}
+\title{Check model inputs}
 \usage{
 runchecks(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA)
 }
@@ -15,45 +15,30 @@ for bare ground.}
 
 \item{soilc}{soil parameter list as returned by [createsoilc()].}
 
-\item{lat}{latitude (decimal degrees), used to place the sun.}
+\item{lat}{latitude (decimal degrees).}
 
-\item{long}{longitude (decimal degrees), used to place the sun.}
+\item{long}{longitude (decimal degrees).}
 
 \item{paii}{optional vector of plant area index for each canopy layer.}
 
-\item{Lfrac}{optional vector of the live leaf fraction of each canopy layer.}
+\item{Lfrac}{optional vector of the living fraction of plant area in each
+canopy layer.}
 }
 \value{
 A list with elements `climdata`, `vegp` and `soilc`, with any
 corrections applied.
 }
 \description{
-Tests the weather, vegetation and soil inputs against the ranges they can
-physically take and the ranges they plausibly take, before a model run.
-Impossible values with a single sensible correction are corrected, with a
-warning; impossible values without one stop the run; possible but unusual
-values give a warning. Every model run function calls this first.
+Checks the weather, vegetation and soil inputs before a model run. Values
+that are impossible but have one sensible correction are corrected, with a
+warning. Other impossible values stop the run. Unusual values give a
+warning. Every model run function calls this first.
 }
 \details{
-**Direct and diffuse shortwave.** The direct beam is recorded as the part of
-`swdown` not in `difrad`, as it arrives on a horizontal surface. Dividing by
-the cosine of the solar zenith angle gives the beam as it arrives normal to
-the sun, which is what leaves and slopes intercept. That cannot exceed what
-the clearest sky lets through: the solar constant reduced by the depth of
-atmosphere the beam has crossed, which is many times greater with the sun
-near the horizon than overhead. The limit used is
-`1352 * 0.76^((m * pres / 101.3)^0.678)` W m^-2, where `m` is the relative
-air mass of Kasten and Young (1989). The form is that of Meinel and Meinel
-(1976), in which each further unit of air mass removes a little less than
-the one before, with the transmittance of a very clear atmosphere (0.76 for
-an overhead sun at sea level) in place of their typical one. It is a
-ceiling, not an estimate of the beam: no account is taken of season, water
-vapour or aerosol.
-Hourly records sum an hour of radiation, but the sun's position is computed
-for a single instant, and the two disagree most near the horizon: the implied
-beam can be impossibly strong, or present while the sun is below the horizon.
-In those hours the excess is treated as diffuse, so total shortwave is always
-the recorded value and only its partition changes.
+Direct-beam radiation, expressed normal to the solar beam, is capped at the
+maximum expected under a very clear sky. Any excess, and any direct
+radiation when the sun is below the horizon, is treated as diffuse
+radiation so that total shortwave radiation is unchanged.
 }
 \references{
 Kasten F, Young AT (1989) Revised optical air mass tables and

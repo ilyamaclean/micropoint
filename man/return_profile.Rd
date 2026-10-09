@@ -33,10 +33,9 @@ as in the inbuilt dataset `climdata`.}
 
 \item{hr}{Integer. Hour to return, indexed from 1 to `nrow(climdata)`.}
 
-\item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-which are too short for the vegetation to present the wind a surface distinct
-from the soil.}
+\item{vegp}{Vegetation parameter list as returned by [createvegp()]. If `NA`,
+bare ground is assumed. Canopies shorter than twice the soil roughness
+length are also run as bare ground.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
@@ -57,7 +56,7 @@ Default is 2 (see details).}
 If `NA`, a default profile is generated.}
 
 \item{ThetaIni}{Optional numeric vector of initial volumetric soil water
-contents in each layer. If `NA`, all plausible profile is computed}
+contents. If `NA`, a default profile is generated.}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO2 concentration (ppm).
 If `NA`, it is estimated from the year of the first observation using [Cafromyear()].}
@@ -66,13 +65,13 @@ If `NA`, it is estimated from the year of the first observation using [Cafromyea
 used to initialise the soil temperature profile. If `NA`, it is estimated
 from `climdata$temp`, which requires roughly a full year of data.}
 
-\item{zm}{Numeric. Roughness length for bare-ground calculations.}
+\item{zm}{Numeric. Roughness length (m) of the soil surface.}
 
-\item{maxiter}{Optional integer. The most passes an hour may take. By default
-set by `accuracy`.}
+\item{maxiter}{Optional integer. Maximum number of iterations within each
+hour. Set by `accuracy` if not supplied.}
 
-\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
-moves air temperature by less than this (K). By default set by `accuracy`.}
+\item{tolerance}{Optional numeric. Convergence tolerance (K) for air
+temperature. Set by `accuracy` if not supplied.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
@@ -81,39 +80,22 @@ moves air temperature by less than this (K). By default set by `accuracy`.}
 \item{varn}{Character. Variable to plot. One of `"temp"`, `"relhum"`,
 or `"radiation"`.}
 
-\item{accuracy}{Character. How closely the model is solved: `"high"` (the
-default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()]. The
-hour returned is always solved on the canopy layers given.}
+\item{accuracy}{Character. One of `"high"` (the default), `"very high"`,
+`"moderate"` or `"fast"`. See details of [RunMicro()].}
 }
 \value{
-A data.frame containing model outputs for each time step. For
-bare-ground runs, the returned columns are:
-
+A list of model outputs for the hour, including:
 \describe{
-  \item{year, month, day, hour}{Date-time components of the simulation.}
-  \item{Rdirdown}{Direct shortwave radiation downward.}
-  \item{Rdifdown}{Diffuse shortwave radiation downward.}
-  \item{Rswup}{Upward shortwave radiation.}
-  \item{Rlwdown}{Downward longwave radiation.}
-  \item{Rlwup}{Upward longwave radiation.}
-  \item{tair}{Air temperature at the requested height.}
-  \item{tground}{Ground surface temperature.}
-  \item{relhum}{Relative humidity.}
-  \item{windspeed}{Wind speed.}
-  \item{H}{Sensible heat flux.}
-  \item{L}{Latent heat flux.}
-  \item{G}{Ground heat flux.}
-  \item{iters}{Number of iterations required for convergence.}
-  \item{error}{Final convergence error.}
-}
-
-For vegetated runs, the returned data.frame contains all of the columns
-listed above, plus:
-
-\itemize{
-  \item `tleaf`: leaf temperature.
-  \item `Evaporation`: soil evaporation.
-  \item `Transpiration`: plant transpiration.
+  \item{z}{Heights (m) of the canopy layers or, for bare ground, of the profile returned.}
+  \item{tair, rh, uz}{Air temperature (°C), relative humidity (\%) and wind speed (m s^-1) at heights `z`.}
+  \item{tleaf}{Leaf temperature (°C) of each canopy layer. Vegetated runs only.}
+  \item{Rdirdown, Rdifdown, Rswup, Rlwdown, Rlwup}{Shortwave and longwave radiation (W m^-2).}
+  \item{zb, Soiltemp, thetas}{Depths (m) of the soil nodes, and soil temperature (°C) and volumetric water content at them.}
+  \item{H, L, G}{Sensible, latent and ground heat fluxes (W m^-2).}
+  \item{za, tair_above, rh_above}{Heights (m) above the canopy, and air temperature and relative humidity at them. Vegetated runs only.}
+  \item{tcanopy, rhcanopy, ucanopy}{Air temperature, relative humidity and wind speed at canopy top. Vegetated runs only.}
+  \item{zref}{Height (m) of the weather data used. Vegetated runs only.}
+  \item{iters, error}{Number of iterations and final convergence error (K).}
 }
 }
 \description{
@@ -122,25 +104,21 @@ vertical profile for the hour, through the soil, canopy, and optionally the air 
 canopy. Profiles can be returned for bare ground or vegetated conditions.
 }
 \details{
-The length of vectors `paii` and `Lfrac` must be the same and `sum(paii)` must
-equal `vegp$pai`.
+The length of `paii` and `Lfrac` must be the same, and `sum(paii)` must equal
+`vegp$pai`.
 
-The function first runs the model up to hour `hr`, then returns the full
-profile for that hour. If `vegp` is provided, a vegetated profile is
-calculated; otherwise a bare-ground profile is returned.
+The model is run up to hour `hr`, then the full profile for that hour is
+returned. If `vegp` is supplied, a vegetated profile is calculated;
+otherwise a bare-ground profile is returned.
 
-Standard meteorological observations are often measured about 2 m above the
-ground. The model needs forcing that describes air above the layer in which
-the canopy's own eddies distort the wind profile, at or above the height
-given by [reference_height()]. Forcing supplied below that height is first
-translated up to it, and the profile is then returned up to that height; the
-height used is returned as `zref`. If using the function repeatedly to
-generate height profiles for different hours, it is much quicker to
-translate `climdata` once beforehand using [weatherhgt_adjust()].
+The model requires weather data from above the canopy, typically at least
+1.3 to 1.9 times canopy height for a dense canopy and somewhat lower for a
+sparse one. If `zref` is too low, the weather data are adjusted automatically
+to the required height. If using the function repeatedly for different
+hours, it is quicker to adjust `climdata` once beforehand using
+[weatherhgt_adjust()].
 
-If `plotout = TRUE`, the selected profile is plotted. For `"temp"`, soil,
-air, and leaf temperature profiles are plotted where available. For
-`"relhum"`, soil moisture is converted to relative humidity below ground and
-joined to the air humidity profile above ground. For `"radiation"`, vertical
-profiles of shortwave and longwave radiation are plotted.
+If `plotout = TRUE`, the selected profile is plotted. `"temp"` plots
+temperature, `"relhum"` relative humidity and soil moisture, and
+`"radiation"` shortwave and longwave radiation.
 }

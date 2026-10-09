@@ -33,8 +33,7 @@ Generates a vegetation parameter list and a vector of length
 `n` of plausible plant area index values for grassy vegetation.
 }
 \details{
-The plant area index, if not given, is estimated from height. Leaves
-are taken as near vertical and their width as 8 percent of the height.
+The plant area index, if not given, is estimated from height.
 }
 \examples{
 \dontrun{

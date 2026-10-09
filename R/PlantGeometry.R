@@ -100,8 +100,7 @@ PAIgrass<-function(hgt, n = 1000, PAI = NA, fraccover = NA, taper = 1) {
 #'  \item{paii}{a vector of length `n` of plant area index values, the sum of
 #'  which equals the plant area index}
 #' }
-#' @details The plant area index, if not given, is estimated from height. Leaves
-#' are taken as near vertical and their width as 8 percent of the height.
+#' @details The plant area index, if not given, is estimated from height.
 #' @rdname vegpforgrass
 #' @export
 #' @examples

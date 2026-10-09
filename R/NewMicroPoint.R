@@ -36,11 +36,7 @@
 #'   \item{root50}{Depth above which half of all roots lie (m)}
 #'   \item{root95}{Depth above which 95\% of all roots lie (m)}
 #' }
-#' Root depths are from Schenk & Jackson (2002) Table 4: tropical evergreen
-#' forest (`BET.Tr`), warm-temperate forest (`BET.Te`), cool-temperate forest
-#' (`BDT`, `NET`), boreal forest (`NDT`), meadows and pastures in the forest zone
-#' (`C3`), humid tropical savannas (`C4`), Mediterranean shrublands and woodlands
-#' (`ESh`) and semi-desert shrublands (`DSh`).
+#' Root depths are from Schenk & Jackson (2002), Table 4.
 #' @references Schenk, H.J. & Jackson, R.B. (2002) The global biogeography of
 #' roots. Ecological Monographs, 72, 311-328.
 #' @export
@@ -61,8 +57,7 @@ createvegp <- function(vegtype = "BET.Te") {
 #'
 #' @param soiltype Character string giving the soil type. See details. Default is \code{"Clay loam"}.
 #' @param nlayers Integer. Number of soil layers.
-#' @param totalDepth Numeric. Total soil depth (m): the depth of the deepest
-#'   node, which is held at the boundary temperature.
+#' @param totalDepth Numeric. Total soil depth (m).
 #' @param slope Numeric. Surface slope (degrees).
 #' @param aspect Numeric. Surface aspect (degrees).
 #' @param surface_organicmu Numeric. Multiplication factor controlling the
@@ -101,15 +96,10 @@ createvegp <- function(vegtype = "BET.Te") {
 #'   \item{Vq}{Quartz fraction by volume (m^3 m^-3), repeated for each soil layer}
 #'   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
 #'   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
-#'   \item{Mc}{Coarse fragment or gravel fraction (m^3 m^-3), repeated for each soil layer}
+#'   \item{Mc}{Mass fraction of clay (kg kg^-1), repeated for each soil layer}
 #'   \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
-#'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer.
-#'     The Campbell hydraulic conductivity exponent used internally by the soil water solver
-#'     is derived from this as \code{2 * b + 3}; it is not a separate element of this list.}
-#'   \item{psi_e}{Air-entry water potential (J/kg, specific potential energy per
-#'     unit mass -- numerically equal to kPa for water; consistent with the
-#'     Kelvin-equation vapour pressure calculations elsewhere in the soil
-#'     water model, which require this unit), repeated for each soil layer}
+#'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
+#'   \item{psi_e}{Air-entry water potential (J/kg, numerically equal to kPa), repeated for each soil layer}
 #'   \item{gref}{Ground shortwave reflectance (unitless)}
 #'   \item{groundem}{Ground longwave emissivity (unitless)}
 #'   \item{grefPAR}{Ground reflectance for photosynthetically active radiation (unitless)}
@@ -125,8 +115,7 @@ createvegp <- function(vegtype = "BET.Te") {
 createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 2, slope = 0, aspect = 180,
                         surface_organicmu = 3, FreeDrain = TRUE) {
   s <- which(newsoilparamstable$Soil.type == soiltype)
-  # Extract by name (not position) so this is robust to column order and
-  # skips the van Genuchten-only columns (alpha, VGn, VGpsie).
+  # Campbell parameters, selected by name
   campbellcols <- c("Smax", "Smin", "Ksat", "Vq", "Vm", "Vo", "Mc", "rho", "b", "psi_e")
   v <- as.numeric(newsoilparamstable[s, campbellcols])
   names(v) <- campbellcols
@@ -202,18 +191,18 @@ Cafromyear <- function(year) {
 #' @param SoilTempIni Optional numeric vector of initial soil temperatures.
 #' If `NA`, a default profile is generated.
 #' @param ThetaIni Optional numeric vector of initial volumetric soil water
-#' contents. If `NA`, all layers are initialised to 0.419.
+#'   contents. If `NA`, a default profile is generated.
 #' @param CO2ppm Optional numeric. Atmospheric CO₂ concentration (ppm).
 #' If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
 #' (°C) used to initialise the soil temperature profile. If `NA`, it is
 #' estimated from `climdata$temp`.
-#' @param accuracy Character. How closely the model is solved: `"high"` (the
-#'   default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()].
-#' @param maxiter Optional integer. The most passes an hour may take. By default
-#'   set by `accuracy`.
-#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
-#'   moves air temperature by less than this (K). By default set by `accuracy`.
+#' @param accuracy Character. Controls the trade-off between model run time and
+#' numerical accuracy. One of "high" (the default), "very high", "moderate" or "fast".
+#' @param maxiter Optional integer. Maximum number of iterations within each
+#'   hour. Set by `accuracy` if not supplied.
+#' @param tolerance Optional numeric. Convergence tolerance (K) for air
+#'   temperature. Set by `accuracy` if not supplied.
 #'
 #' @details
 #' Standard meteorological observations are typically made about 2 m above the
@@ -230,7 +219,7 @@ Cafromyear <- function(year) {
 #' @export
 weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, ThetaIni = NA,
                               CO2ppm = NA, boundaryT = NA, accuracy = "high", maxiter = NULL, tolerance = NULL) {
-  st <- accuracy_settings(accuracy, tolerance, maxiter)
+  st <- .accuracy_settings(accuracy, tolerance, maxiter)
   n <- dim(climdata)[1]
   if (class(boundaryT) == "logical") {
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -255,7 +244,7 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  set_solver(st)
+  .set_solver(st)
   hgtvars <- WeatherhgtCpp2(obstime, climdata, soilc, vegp, paii, Lfrac, zin, zout, lat, long,
                             SoilTempIni, ThetaIni, CO2ppm, st$maxiter, st$tolerance)
   clim2 <- climdata
@@ -265,41 +254,18 @@ weatherhgt_adjust <- function(climdata, zin, zout, lat, long, SoilTempIni = NA, 
   clim2$pres <- hgtvars$new_pressure
   return(clim2)
 }
-#' Lowest height at which weather forcing can be referred to a canopy
-#'
-#' The model needs its weather forcing to describe air above the layer in which
-#' the canopy's own eddies distort the wind profile. This returns the lowest
-#' such height for a given canopy.
-#'
-#' @param vegp A list of vegetation parameters as returned by [createvegp()],
-#' or `NA` for bare ground.
-#' @param zm Numeric. Roughness length (m) of the soil surface.
-#'
-#' @details
-#' The height is `d + c (h - d)`, where `h` is canopy height, `d` the zero-plane
-#' displacement height and `c` the factor by which heat diffusivity at canopy
-#' top exceeds its surface-layer value: three for a closed canopy, falling to
-#' one as the canopy opens. It ranges from about 1.3 to 1.9 canopy heights for
-#' closed canopies and is the ground itself for bare ground. [RunMicro()],
-#' [RunModelFull()], [return_profile()] and [InitailizeWater()] translate
-#' forcing supplied below this height up to it with [weatherhgt_adjust()].
-#'
-#' @return The height (m) above ground.
-#' @export
-reference_height <- function(vegp, zm = 0.004) {
+# Lowest height (m) at which weather forcing can be measured for a canopy:
+# d + c (h - d), where c is the factor by which heat diffusivity at canopy top
+# exceeds its surface-layer value. Zero for bare ground.
+.reference_height <- function(vegp, zm = 0.004) {
   if (class(vegp) == "logical") return(0)
   referenceheightCpp(vegp$h, vegp$pai, zm)
 }
-#' Translates forcing measured too close to a canopy up to the height the model needs
-#'
-#' Returns the forcing and the height it then refers to. Forcing already at or
-#' above the required height is returned unchanged. The translation is itself a
-#' run of the model, over a short sward, and is made at the accuracy of the run
-#' it serves (`st`, that run's settings).
-#' @noRd
-forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                                 st = accuracy_settings()) {
-  zreq <- reference_height(vegp, zm)
+# Adjusts weather measured too close to a canopy to the height the model needs.
+# Returns the weather and the height it then refers to.
+.forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, boundaryT = NA, zm = 0.004,
+                                 st = .accuracy_settings()) {
+  zreq <- .reference_height(vegp, zm)
   if (zref >= zreq - 1e-6) return(list(climdata = climdata, zref = zref))
   message(sprintf("Weather at %.4g m is too close to a canopy of this height and density; translated to %.4g m.",
                   zref, zreq))
@@ -308,26 +274,12 @@ forcing_at_reference <- function(climdata, vegp, zref, lat, long, CO2ppm = NA, b
                                                  CO2ppm = CO2ppm, boundaryT = boundaryT, accuracy = st))
   list(climdata = climdata, zref = zreq)
 }
-#' Reduces a canopy too short to resolve to bare ground
-#'
-#' @param vegp Vegetation parameter list as returned by [createvegp()], or `NA`.
-#' @param zm Roughness length of the soil surface (m).
-#' @return `vegp` unchanged, or `NA` if the canopy is no taller than the soil
-#'   is rough.
-#' @details
-#' Vegetation that stands no higher than the roughness elements of the soil
-#' itself presents the wind no surface distinct from the soil, and leaves no
-#' depth of air between the ground and its top for the canopy equations to
-#' describe. Such a surface is treated as bare ground. The limit is a multiple
-#' of the soil roughness length, so a rougher soil raises it. It is a safety
-#' stop, not a transition: the canopy's own effect on the air has already faded
-#' to nothing by the time vegetation is this short, so the result is continuous
-#' across it. A canopy of no height or no plant area is bare ground too.
-#' @noRd
+# A canopy shorter than this multiple of the soil roughness length is run as bare ground,
+# as is one with no height or no plant area.
 SHORT_CANOPY_MULTIPLE <- 2
-asbareifshort <- function(vegp, zm = 0.004) {
+.asbareifshort <- function(vegp, zm = 0.004) {
   if (class(vegp) == "logical") return(vegp)
-  if (vegp$h <= 0 || vegp$pai <= 0) return(NA)   # no height or no foliage: there is no canopy
+  if (vegp$h <= 0 || vegp$pai <= 0) return(NA)   # no canopy
   if (vegp$h < SHORT_CANOPY_MULTIPLE * zm) {
     warning("Canopy height is below ", SHORT_CANOPY_MULTIPLE, " times the soil roughness length (",
             signif(SHORT_CANOPY_MULTIPLE * zm * 1000, 3), " mm), so the vegetation is no taller than the soil is rough. ",
@@ -341,19 +293,17 @@ asbareifshort <- function(vegp, zm = 0.004) {
 #'
 #' @param climdata data.frame of weather conditions that uses the same naming conventions
 #'   as in the inbuilt dataset `climdata`.
-#' @param vegp Vegetation parameter list as returned by [createvegp()].
-#'   If `NA`, bare-ground conditions are assumed, as are canopies shorter than
-#'   2 times the soil roughness length, which are too short for the vegetation
-#'   to present the wind a surface distinct from the soil.
+#' @param vegp Vegetation parameter list as returned by [createvegp()]. If `NA`,
+#'   bare ground is assumed. Canopies shorter than twice the soil roughness
+#'   length are also run as bare ground.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param Lfrac Fraction of plant area that is living vegetation, given either as
-#'   a single value or as a vector giving the fraction in each canopy layer.
-#'   Required unless `vegp` is `NA`.
+#' @param Lfrac Fraction of plant area that is living vegetation: a single value
+#'   or one for each canopy layer. Required unless `vegp` is `NA`.
 #' @param lat Numeric. Latitude in decimal degrees.
 #' @param long Numeric. Longitude in decimal degrees.
 #' @param zref Numeric. Height (m) of the meteorological forcing data.
 #'   Default is 2 (see Details).
-#' @param zmr Numeric. Roughness length for bare-ground calculations.
+#' @param zmr Numeric. Roughness length (m) of the soil surface.
 #' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm).
 #'   If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
@@ -362,12 +312,10 @@ asbareifshort <- function(vegp, zm = 0.004) {
 #' @param maxiter Integer. Maximum number of iterations used to achieve convergence
 #'   within each time step.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
-#' @param accuracy Character. `"high"` (the default), `"very high"`,
-#'   `"moderate"` or `"fast"`: the accuracy at which weather measured too close to the
-#'   canopy is translated up to the height the model needs (see Details of
-#'   [RunMicro()]). The spin-up itself is a quick, simplified run and is the
-#'   same at every level.
-#'
+#' @param accuracy Character. Controls the trade-off between model run time and
+#'   numerical accuracy. One of "high" (the default), "very high",
+#'   "moderate" or "fast". Used only where weather is adjusted to a greater
+#'   height.
 #' @details
 #' The soil water model is run over the supplied climate data, and the final
 #' soil water profile is used as the initial condition. Where antecedent climate
@@ -382,10 +330,10 @@ asbareifshort <- function(vegp, zm = 0.004) {
 InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
                             CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE,
                             Lfrac = NA, accuracy = "high") {
-  st <- accuracy_settings(accuracy)
+  st <- .accuracy_settings(accuracy)
   chk <- runchecks(climdata, vegp, soilc, lat, long, Lfrac = Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
-  soilc$zm <- zmr   # the soil's roughness length travels with the soil parameters
+  soilc$zm <- zmr   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -396,7 +344,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp, zmr)
+  vegp <- .asbareifshort(vegp, zmr)
   if (class(vegp) == "logical") {
     blm <- BigLeafBareCpp(obstime, climdata, soilc, zref, zmr, lat, long,
                           boundaryT, maxiter)
@@ -406,7 +354,7 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
     }
     if (length(Lfrac) == 1) Lfrac <- rep(Lfrac, 10)
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zmr, st)
+    fr <- .forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zmr, st)
     climdata <- fr$climdata; zref <- fr$zref
     blm <- BigLeafCpp2(obstime, climdata, soilc, vegp, Lfrac, zref, CO2ppm,
                        lat, long, boundaryT, maxiter, C3)
@@ -424,10 +372,9 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @param climdata data.frame of weather conditions that uses the same naming conventions
 #' as in the inbuilt dataset `climdata`.
 #' @param hr Integer. Hour to return, indexed from 1 to `nrow(climdata)`.
-#' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-#' which are too short for the vegetation to present the wind a surface distinct
-#' from the soil.
+#' @param vegp Vegetation parameter list as returned by [createvegp()]. If `NA`,
+#'   bare ground is assumed. Canopies shorter than twice the soil roughness
+#'   length are also run as bare ground.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
 #' @param paii Numeric vector of plant area index values for each canopy layer
 #' as returned by [PAIgeometry()] or [PAIgrass()] (see details).
@@ -440,76 +387,55 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #' @param SoilTempIni Optional numeric vector of initial soil temperatures.
 #'   If `NA`, a default profile is generated.
 #' @param ThetaIni Optional numeric vector of initial volumetric soil water
-#'   contents in each layer. If `NA`, all plausible profile is computed
+#'   contents. If `NA`, a default profile is generated.
 #' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm).
 #'   If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
 #'   used to initialise the soil temperature profile. If `NA`, it is estimated
 #'   from `climdata$temp`, which requires roughly a full year of data.
-#' @param zm Numeric. Roughness length for bare-ground calculations.
-#' @param maxiter Optional integer. The most passes an hour may take. By default
-#'   set by `accuracy`.
-#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
-#'   moves air temperature by less than this (K). By default set by `accuracy`.
+#' @param zm Numeric. Roughness length (m) of the soil surface.
+#' @param maxiter Optional integer. Maximum number of iterations within each
+#'   hour. Set by `accuracy` if not supplied.
+#' @param tolerance Optional numeric. Convergence tolerance (K) for air
+#'   temperature. Set by `accuracy` if not supplied.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param plotout Logical. If `TRUE`, plot the requested profile.
-#' @param accuracy Character. How closely the model is solved: `"high"` (the
-#'   default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()]. The
-#'   hour returned is always solved on the canopy layers given.
+#' @param accuracy Character. One of `"high"` (the default), `"very high"`,
+#'   `"moderate"` or `"fast"`. See details of [RunMicro()].
 #' @param varn Character. Variable to plot. One of `"temp"`, `"relhum"`,
 #'   or `"radiation"`.
 #'
 #' @details
-#' The length of vectors `paii` and `Lfrac` must be the same and `sum(paii)` must
-#' equal `vegp$pai`.
+#' The length of `paii` and `Lfrac` must be the same, and `sum(paii)` must equal
+#' `vegp$pai`.
 #'
-#' The function first runs the model up to hour `hr`, then returns the full
-#' profile for that hour. If `vegp` is provided, a vegetated profile is
-#' calculated; otherwise a bare-ground profile is returned.
+#' The model is run up to hour `hr`, then the full profile for that hour is
+#' returned. If `vegp` is supplied, a vegetated profile is calculated;
+#' otherwise a bare-ground profile is returned.
 #'
-#' Standard meteorological observations are often measured about 2 m above the
-#' ground. The model needs forcing that describes air above the layer in which
-#' the canopy's own eddies distort the wind profile, at or above the height
-#' given by [reference_height()]. Forcing supplied below that height is first
-#' translated up to it, and the profile is then returned up to that height; the
-#' height used is returned as `zref`. If using the function repeatedly to
-#' generate height profiles for different hours, it is much quicker to
-#' translate `climdata` once beforehand using [weatherhgt_adjust()].
+#' The model requires weather data from above the canopy, typically at least
+#' 1.3 to 1.9 times canopy height for a dense canopy and somewhat lower for a
+#' sparse one. If `zref` is too low, the weather data are adjusted automatically
+#' to the required height. If using the function repeatedly for different
+#' hours, it is quicker to adjust `climdata` once beforehand using
+#' [weatherhgt_adjust()].
 #'
-#' If `plotout = TRUE`, the selected profile is plotted. For `"temp"`, soil,
-#' air, and leaf temperature profiles are plotted where available. For
-#' `"relhum"`, soil moisture is converted to relative humidity below ground and
-#' joined to the air humidity profile above ground. For `"radiation"`, vertical
-#' profiles of shortwave and longwave radiation are plotted.
+#' If `plotout = TRUE`, the selected profile is plotted. `"temp"` plots
+#' temperature, `"relhum"` relative humidity and soil moisture, and
+#' `"radiation"` shortwave and longwave radiation.
 #'
-#' @return A data.frame containing model outputs for each time step. For
-#' bare-ground runs, the returned columns are:
-#'
+#' @return A list of model outputs for the hour, including:
 #' \describe{
-#'   \item{year, month, day, hour}{Date-time components of the simulation.}
-#'   \item{Rdirdown}{Direct shortwave radiation downward.}
-#'   \item{Rdifdown}{Diffuse shortwave radiation downward.}
-#'   \item{Rswup}{Upward shortwave radiation.}
-#'   \item{Rlwdown}{Downward longwave radiation.}
-#'   \item{Rlwup}{Upward longwave radiation.}
-#'   \item{tair}{Air temperature at the requested height.}
-#'   \item{tground}{Ground surface temperature.}
-#'   \item{relhum}{Relative humidity.}
-#'   \item{windspeed}{Wind speed.}
-#'   \item{H}{Sensible heat flux.}
-#'   \item{L}{Latent heat flux.}
-#'   \item{G}{Ground heat flux.}
-#'   \item{iters}{Number of iterations required for convergence.}
-#'   \item{error}{Final convergence error.}
-#' }
-#'
-#' For vegetated runs, the returned data.frame contains all of the columns
-#' listed above, plus:
-#'
-#' \itemize{
-#'   \item `tleaf`: leaf temperature.
-#'   \item `Evaporation`: soil evaporation.
-#'   \item `Transpiration`: plant transpiration.
+#'   \item{z}{Heights (m) of the canopy layers or, for bare ground, of the profile returned.}
+#'   \item{tair, rh, uz}{Air temperature (°C), relative humidity (\%) and wind speed (m s^-1) at heights `z`.}
+#'   \item{tleaf}{Leaf temperature (°C) of each canopy layer. Vegetated runs only.}
+#'   \item{Rdirdown, Rdifdown, Rswup, Rlwdown, Rlwup}{Shortwave and longwave radiation (W m^-2).}
+#'   \item{zb, Soiltemp, thetas}{Depths (m) of the soil nodes, and soil temperature (°C) and volumetric water content at them.}
+#'   \item{H, L, G}{Sensible, latent and ground heat fluxes (W m^-2).}
+#'   \item{za, tair_above, rh_above}{Heights (m) above the canopy, and air temperature and relative humidity at them. Vegetated runs only.}
+#'   \item{tcanopy, rhcanopy, ucanopy}{Air temperature, relative humidity and wind speed at canopy top. Vegetated runs only.}
+#'   \item{zref}{Height (m) of the weather data used. Vegetated runs only.}
+#'   \item{iters, error}{Number of iterations and final convergence error (K).}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp
@@ -519,10 +445,10 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                            SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                            maxiter = NULL, tolerance = NULL, C3 = TRUE, plotout = TRUE, varn = "temp",
                            accuracy = "high") {
-  st <- accuracy_settings(accuracy, tolerance, maxiter)
+  st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
-  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
+  soilc$zm <- zm   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
@@ -540,7 +466,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp, zm)
+  vegp <- .asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- seq(0, zref, length.out = 1000)
     mout <- profilebareR(hr - 1, obstime, climdata, soilc, z, zref, lat, long, SoilTempIni, ThetaIni,
@@ -549,10 +475,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
   }  else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
     # A canopy given as one layer is returned as its two halves
-    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
-    # The hours leading up to the one returned are run on twenty layers, or on
-    # as many as the accuracy level allows if that is fewer. A canopy given on
-    # too few layers to fit a curve through is run through those hours as given.
+    two <- .at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
+    # The hours before the one returned are run on at most twenty layers;
+    # a canopy given on very few layers is run as given.
     n <- length(paii)
     nlead <- min(20, st$canopylayers)
     if (n >= 4) {
@@ -569,9 +494,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
       Lfrac20 <- Lfrac
     }
     # Forcing measured too close to the canopy is translated up to the height the model needs
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
+    fr <- .forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata2 <- fr$climdata; zref2 <- fr$zref
-    set_solver(st)
+    .set_solver(st)
     mout <- profileR(hr - 1, obstime, climdata2, soilc, vegp, paii20, paii,
                      Lfrac20, Lfrac, zref2, CO2ppm, lat, long, SoilTempIni, ThetaIni,
                      st$maxiter, st$tolerance, -1, 1.25, C3)
@@ -654,7 +579,7 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
            col = "black", xlab = "", ylab = "", lwd = 2)
     } else (stop("varn not reconised\n"))
   }
-  mout$thetas <- reportedtheta(mout$thetas, soilc)
+  mout$thetas <- .reportedtheta(mout$thetas, soilc)
   return(mout)
 }
 #' Run the microclimate model at a specified height
@@ -667,10 +592,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @param reqhgt Numeric. Height (m) at which output is required. Positive
 #' values are above ground, `0` is the soil surface, and negative values are
 #' below ground.
-#' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-#' which are too short for the vegetation to present the wind a surface distinct
-#' from the soil.
+#' @param vegp Vegetation parameter list as returned by [createvegp()]. If `NA`,
+#'   bare ground is assumed.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
 #' @param paii Numeric vector of plant area index values for each canopy layer
 #' as returned by [PAIgeometry()] or [PAIgrass()] (see details).
@@ -683,65 +606,26 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @param SoilTempIni Optional numeric vector of initial soil temperatures.
 #' If `NA`, a default profile is generated.
 #' @param ThetaIni Optional numeric vector of initial volumetric soil water
-#' contents. If `NA`, all layers are initialised to 0.419.
+#'   contents. If `NA`, a default profile is generated.
 #' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm).
 #' If `NA`, it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual air temperature
 #' used to initialise the soil temperature profile. If `NA`, it is estimated
 #' from `climdata$temp`, which requires roughly a full year of data.
-#' @param zm Numeric. Roughness length for bare-ground calculations.
-#' @param maxiter Optional integer. The most passes an hour may take. By default
-#'   set by `accuracy`; supplying it overrides that.
-#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
-#'   moves air temperature by less than this (K). By default set by `accuracy`;
-#'   supplying it overrides that.
+#' @param zm Numeric. Roughness length (m) of the soil surface.
+#' @param maxiter Optional integer. Maximum number of iterations within each
+#'   hour. Set by `accuracy` if not supplied.
+#' @param tolerance Optional numeric. Convergence tolerance (K) for air
+#'   temperature. Set by `accuracy` if not supplied.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
-#' @param accuracy Character. How closely the model is solved, and so how long
-#'   it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details.
+#' @param accuracy Character. Controls the trade-off between model run time and
+#' numerical accuracy. One of `"high"` (the default), `"very high"`,
+#' `"moderate"` or `"fast"`. `"very high"` is slower and more accurate, while
+#' `"moderate"` and `"fast"` progressively favour speed over accuracy. `"fast"`
+#' is intended primarily for applications where the model is run repeatedly
+#' over many grid cells.
 #'
 #' @details
-#' \strong{Accuracy and run time.} Each hour is solved by repeated passes through
-#' the canopy and soil until a pass no longer changes the result by much.
-#' `accuracy` sets how closely that is done, and with it the run time. The
-#' figures below compare each level with the same model solved very tightly, for
-#' forest, crop and grass in a range of climates; they are a guide, not a
-#' guarantee. "Typical error" is the root-mean-square difference in air, leaf
-#' and ground temperature over a year; "worst hour" the largest difference in
-#' any hour of a year, at any height. Times are for one year of hourly data
-#' with twenty canopy layers.
-#'
-#' \tabular{llll}{
-#'   \strong{level} \tab \strong{typical error} \tab \strong{worst hour} \tab \strong{time} \cr
-#'   very high \tab under 0.05 K (usually under 0.01) \tab under 1.5 K, usually under 0.5 \tab 9 to 25 s \cr
-#'   high \tab under 0.4 K (usually 0.1) \tab 1 to 2.5 K \tab 6 to 12 s \cr
-#'   moderate \tab under 0.9 K (usually 0.2) \tab 2 to 4 K \tab 2 to 5 s \cr
-#'   fast \tab under 1.1 K (usually 0.3) \tab 2.5 to 5.5 K \tab 1.6 to 4 s
-#' }
-#'
-#' The larger figures of each range are for still, humid weather, in which the
-#' model settles least readily. At `"moderate"` a run with more than ten canopy
-#' layers is made on ten, and at `"fast"`, which is meant for runs over many
-#' grid cells, on five; results are returned at the height asked for. Bare
-#' ground takes one to two seconds at every level. Weather measured too close to
-#' the canopy is translated to the height the model needs at the same level.
-#'
-#' If some hours do not settle within the passes the level allows, one warning
-#' says how many; the values returned for those hours are those of the pass
-#' that changed least. `tolerance` and `maxiter` override the level's own
-#' values and are not needed in ordinary use.
-#'
-#' Standard meteorological observations are typically made about 2 m above the
-#' ground. If vegetation is taller than the measurement height, these data lie
-#' within the canopy rather than above it. The microclimate model requires
-#' forcing at or above the height given by [reference_height()]; forcing
-#' supplied below it is translated up to that height with
-#' [weatherhgt_adjust()] before the run. When vegetation is present the model
-#' uses the canopy structure defined by `vegp`, `paii` and `Lfrac` to simulate
-#' conditions at the requested height `reqhgt`. Within a canopy these are the
-#' mean conditions of the canopy layer whose middle is nearest that height; at
-#' canopy height or above they follow the profile above the canopy, which
-#' starts from the air at canopy top.
-#'
 #' If `vegp` is `NA`, bare-ground conditions are assumed and the bare-ground
 #' model is used. If `reqhgt <= 0`, output is treated as below-ground and soil
 #' temperature and soil water content are returned instead of air temperature
@@ -775,18 +659,11 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #'   or `-999.99` where not applicable.
 #'   \item `Evaporation`: soil evaporation.
 #'   \item `Transpiration`: plant transpiration.
-#'   \item `witers`: passes taken by the soil water solve.
 #' }
 #'
-#' Both also return `Evaporation` from the soil (mm); `runoff`, the rain reaching
-#' the ground that the saturated soil surface could not take, each hour (mm);
-#' `drainage`, the water leaving through the base of the soil each hour (mm,
-#' negative where water enters there); and `witers`, the iterations taken to
-#' balance the soil's water. A warning is given if the balance was not reached
-#' in some hours. Wind speed is the wind itself:
-#' the velocity that convection adds to exchange over a heated surface is not
-#' included. Below ground, `soilwater` is no lower than the soil's residual
-#' water content.
+#' Both also return `Evaporation` from the soil (mm), `runoff` from the soil
+#' surface (mm), `drainage` from the base of the soil (mm) and `witers`, the
+#' number of iterations of the soil water model.
 #'
 #' @importFrom Rcpp sourceCpp
 #' @useDynLib micropoint, .registration = TRUE
@@ -794,19 +671,17 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                      SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                      maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
-  st <- accuracy_settings(accuracy, tolerance, maxiter)
+  st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
-  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
+  soilc$zm <- zm   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
-  # The soil the run is made with, where the accuracy level allows fewer layers
-  # than were given; initial profiles supplied for the user's nodes are carried
-  # to its nodes. The engine reads the result at the depth asked for.
-  cs <- coarsen_soil(soilc, st$soillayers)
+  # Soil layers used for the run, if the accuracy level allows fewer than were given.
+  cs <- .coarsen_soil(soilc, st$soillayers)
   if (!is.null(cs)) {
     if (class(SoilTempIni) != "logical") SoilTempIni <- stats::approx(cs$zu, SoilTempIni, xout = cs$zc, rule = 2)$y
     if (class(ThetaIni) != "logical") ThetaIni <- stats::approx(cs$zu, ThetaIni, xout = cs$zc, rule = 2)$y
@@ -824,32 +699,30 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp, zm)
+  vegp <- .asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {
     mout <- RunBareR(reqhgt, obstime, climdata, soilc, zref, lat, long, SoilTempIni,
                      ThetaIni, zm, st$maxiter, st$tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
+    fr <- .forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata <- fr$climdata; zref <- fr$zref
-    # The canopy the run is made with, where the level allows fewer layers than
-    # were given. The engine reads the result at the height asked for.
-    cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
+    # Canopy layers used for the run, if the accuracy level allows fewer than were given.
+    cc <- .coarsen_canopy(paii, Lfrac, st$canopylayers)
     if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
-    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
-    set_solver(st)
+    two <- .at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
+    .set_solver(st)
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, st$maxiter, st$tolerance, -1, 1.25, C3)
   }
-  # Each hour is solved by iteration, and so is the soil's water balance within
-  # it; say so, once for the run, if either did not settle in some hours
-  warn_unsettled(mout$error, st)
+  # One warning for the run if some hours, or their soil water balance, did not converge
+  .warn_unsettled(mout$error, st)
   stuck <- sum(mout$witers >= max(st$maxiter, 50))
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   # Rename variables if below ground
   if (reqhgt <= 0) {
     mout$tsoil <- mout$tair; mout$tair <- NULL
-    mout$soilwater <- reportedtheta(mout$relhum, soilc); mout$relhum <- NULL
+    mout$soilwater <- .reportedtheta(mout$relhum, soilc); mout$relhum <- NULL
   }
   return(mout)
 }
@@ -862,10 +735,9 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @param climdata data.frame of weather conditions using the same naming
 #' conventions as the inbuilt dataset `climdata`.
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param vegp Vegetation parameter list as returned by [createvegp()].
-#' If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-#' which are too short for the vegetation to present the wind a surface distinct
-#' from the soil.
+#' @param vegp Vegetation parameter list as returned by [createvegp()]. If `NA`,
+#'   bare ground is assumed. Canopies shorter than twice the soil roughness
+#'   length are also run as bare ground.
 #' @param paii Numeric vector of plant area index values for each canopy layer,
 #' ordered from bottom to top.
 #' @param Lfrac Numeric vector giving the fraction of plant area in each canopy
@@ -879,27 +751,26 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' boundary node. If `NA`, a default profile is generated.
 #' @param ThetaIni Optional numeric vector of initial soil water contents,
 #' ordered from the soil surface downward and including the lower boundary
-#' node. If `NA`, all layers are initialised to 0.419.
+#' node. If `NA`, a default profile is generated.
 #' @param CO2ppm Optional numeric. Atmospheric CO2 concentration (ppm). If `NA`,
 #' it is estimated from the year of the first observation using [Cafromyear()].
 #' @param boundaryT Optional numeric. Approximate mean annual temperature used
 #' to initialise the soil temperature profile. If `NA`, it is estimated from
 #' `climdata$temp`, which requires approximately a full year of data.
-#' @param zm Numeric. Roughness length used for bare-ground calculations.
-#' @param maxiter Optional integer. The most passes an hour may take. By default
-#'   set by `accuracy`.
-#' @param tolerance Optional numeric. The iteration of an hour stops when a pass
-#'   moves air temperature by less than this (K). By default set by `accuracy`.
+#' @param zm Numeric. Roughness length (m) of the soil surface.
+#' @param maxiter Optional integer. Maximum number of iterations within each
+#'   hour. Set by `accuracy` if not supplied.
+#' @param tolerance Optional numeric. Convergence tolerance (K) for air
+#'   temperature. Set by `accuracy` if not supplied.
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
-#' @param accuracy Character. How closely the model is solved, and so how long
-#'   it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details
-#'   of [RunMicro()]. Profiles are returned on the layers given whatever the level.
+#' @param accuracy Character. One of `"high"` (the default), `"very high"`,
+#'   `"moderate"` or `"fast"`. See details of [RunMicro()].
 #'
 #' @details
-#' The meteorological forcing data must describe air at or above the height
-#' given by [reference_height()]. Forcing supplied below that height is
-#' translated up to it with [weatherhgt_adjust()] before the simulation, and
-#' the heights returned then extend to that height.
+#' The model requires weather data from above the canopy, typically at least
+#' 1.3 to 1.9 times canopy height for a dense canopy and somewhat lower for a
+#' sparse one. If `zref` is too low, the weather data are adjusted automatically
+#' to the required height using [weatherhgt_adjust()] before the model is run.
 #'
 #' If `vegp` is `NA`, the model runs in bare-ground mode. Otherwise the full
 #' canopy model is used with vegetation structure defined by `vegp`, `paii`,
@@ -913,12 +784,10 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' (below ground). Rows correspond to time steps and columns correspond to
 #' canopy heights or soil nodes.
 #'
-#' For vegetated runs the canopy is divided into as many layers of equal depth
-#' as `paii` has elements, and each column gives the mean conditions of one
-#' layer, counted from the ground and referred to the middle of the layer: with
-#' `n` layers under a canopy of height `h`, column `i` is at `(i - 0.5) h / n`.
-#' Canopy top is the upper edge of the highest layer, not one of the columns;
-#' the air there is returned separately.
+#' For vegetated runs each column is one canopy layer, counted from the ground:
+#' with `n` layers under a canopy of height `h`, column `i` is at height
+#' `(i - 0.5) h / n`. For bare-ground runs the columns are twenty equally
+#' spaced heights up to `zref`.
 #'
 #' For **bare-ground runs** (`vegp = NA`) the returned elements are:
 #' \describe{
@@ -926,18 +795,12 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{relhum}{Relative humidity profile (\%).}
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
-#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
-#'     than the soil's residual water content.}
-#'   \item{runoff}{Rain reaching the ground that the saturated soil surface
-#'     could not take, each hour (mm). A vector, one value per time step.}
-#'   \item{drainage}{Water leaving through the base of the soil each hour (mm),
-#'     negative where water enters there. A vector.}
-#'   \item{witers}{Iterations taken to balance the soil's water each hour. A
-#'     warning is given if the balance was not reached in some hours.}
-#'   \item{iters}{Passes each hour took to settle. A vector.}
-#'   \item{error}{How far the last pass of each hour still moved air
-#'     temperature (K). One warning is given for the run if this exceeds the
-#'     tolerance in some hours.}
+#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{runoff}{Runoff from the soil surface in each time step (mm). A vector.}
+#'   \item{drainage}{Drainage from the base of the soil in each time step (mm). A vector.}
+#'   \item{witers}{Number of iterations of the soil water model in each time step. A vector.}
+#'   \item{iters}{Number of iterations in each time step. A vector.}
+#'   \item{error}{Final convergence error in each time step (K). A vector.}
 #' }
 #'
 #' For **vegetated runs** the returned elements are:
@@ -952,24 +815,15 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #'   \item{relhum}{Relative humidity profile (\%).}
 #'   \item{windspeed}{Wind speed profile (m s^-1).}
 #'   \item{tsoil}{Soil temperature profile (°C).}
-#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
-#'     than the soil's residual water content.}
-#'   \item{runoff}{Rain reaching the ground that the saturated soil surface
-#'     could not take, each hour (mm). A vector, one value per time step.}
-#'   \item{drainage}{Water leaving through the base of the soil each hour (mm),
-#'     negative where water enters there. A vector.}
-#'   \item{witers}{Iterations taken to balance the soil's water each hour. A
-#'     warning is given if the balance was not reached in some hours.}
-#'   \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
-#'     per time step.}
-#'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
-#'     per time step.}
-#'   \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector, one value per
-#'     time step.}
-#'   \item{iters}{Passes each hour took to settle. A vector.}
-#'   \item{error}{How far the last pass of each hour still moved air
-#'     temperature (K). One warning is given for the run if this exceeds the
-#'     tolerance in some hours.}
+#'   \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+#'   \item{runoff}{Runoff from the soil surface in each time step (mm). A vector.}
+#'   \item{drainage}{Drainage from the base of the soil in each time step (mm). A vector.}
+#'   \item{witers}{Number of iterations of the soil water model in each time step. A vector.}
+#'   \item{tcanopy}{Air temperature at canopy top (°C). A vector.}
+#'   \item{rhcanopy}{Relative humidity at canopy top (\%). A vector.}
+#'   \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector.}
+#'   \item{iters}{Number of iterations in each time step. A vector.}
+#'   \item{error}{Final convergence error in each time step (K). A vector.}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp
@@ -978,21 +832,19 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2,
                        SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA,
                        zm = 0.004, maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
-  st <- accuracy_settings(accuracy, tolerance, maxiter)
+  st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
-  soilc$zm <- zm   # the soil's roughness length travels with the soil parameters
+  soilc$zm <- zm   # soil roughness length
   # Derive boundary temperature if not supplied
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
     if (n < 8750) stop("Incomplete year. Need to provide boundaryT as ~ mean annual temperature\n")
     boundaryT <- mean(climdata$temp)
   }
-  # The soil the run is made with, where the accuracy level allows fewer layers
-  # than were given; initial profiles supplied for the user's nodes are carried
-  # to its nodes, and the soil profiles returned are carried back.
+  # Soil layers used for the run, if the accuracy level allows fewer than were given.
   soiluser <- soilc
-  cs <- coarsen_soil(soilc, st$soillayers)
+  cs <- .coarsen_soil(soilc, st$soillayers)
   if (!is.null(cs)) {
     if (class(SoilTempIni) != "logical") SoilTempIni <- stats::approx(cs$zu, SoilTempIni, xout = cs$zc, rule = 2)$y
     if (class(ThetaIni) != "logical") ThetaIni <- stats::approx(cs$zu, ThetaIni, xout = cs$zc, rule = 2)$y
@@ -1010,58 +862,45 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
                         month = tme$mon + 1,
                         day = tme$mday,
                         hour = tme$hour)
-  vegp <- asbareifshort(vegp, zm)
+  vegp <- .asbareifshort(vegp, zm)
   if (class(vegp) == "logical") {  # Bare ground assumed
     z <- (c(1:20)/ 20) * zref
     mout <- RunBelowFullBare(obstime, climdata, soilc, z, zref, zm, lat, long,
                              SoilTempIni, ThetaIni, st$maxiter, st$tolerance)
   } else {
     if (is.na(CO2ppm)) CO2ppm <- Cafromyear(tme$year[1] + 1900)
-    fr <- forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
+    fr <- .forcing_at_reference(climdata, vegp, zref, lat, long, CO2ppm, boundaryT, zm, st)
     climdata <- fr$climdata; zref <- fr$zref
-    # The canopy the run is made with, where the level allows fewer layers than
-    # were given; the profiles are returned on the layers given.
+    # Canopy layers used for the run, if the accuracy level allows fewer than were given.
     nuser <- length(paii)
-    cc <- coarsen_canopy(paii, Lfrac, st$canopylayers)
+    cc <- .coarsen_canopy(paii, Lfrac, st$canopylayers)
     if (!is.null(cc)) { paii <- cc$paii; Lfrac <- cc$Lfrac }
-    two <- at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
-    set_solver(st)
+    two <- .at_least_two_layers(paii, Lfrac); paii <- two$paii; Lfrac <- two$Lfrac
+    .set_solver(st)
     mout <- RunBelowFull(obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm,
                          lat, long, SoilTempIni, ThetaIni, st$maxiter, st$tolerance,
                          -1, 1.25, C3)
-    mout <- canopy_to_user(mout, nuser, vegp$h, zm)
+    mout <- .canopy_to_user(mout, nuser, vegp$h, zm)
   }
   if (!is.null(cs)) {
-    mout$tsoil <- soil_to_user(mout$tsoil, cs)
-    mout$theta <- soil_to_user(mout$theta, cs)
+    mout$tsoil <- .soil_to_user(mout$tsoil, cs)
+    mout$theta <- .soil_to_user(mout$theta, cs)
   }
-  # Each hour is solved by iteration, and so is the soil's water balance within
-  # it; say so, once for the run, if either did not settle in some hours
-  warn_unsettled(mout$error, st)
+  # One warning for the run if some hours, or their soil water balance, did not converge
+  .warn_unsettled(mout$error, st)
   stuck <- sum(mout$witers >= max(st$maxiter, 50))
   if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
-  mout$theta <- reportedtheta(mout$theta, soiluser)
+  mout$theta <- .reportedtheta(mout$theta, soiluser)
   return(mout)
 }
-#' Soil water content as reported to the user
-#'
-#' @param theta volumetric water content from the model (vector or matrix).
-#' @param soilc soil parameter list as returned by [createsoilc()].
-#' @return `theta`, no lower than the soil's residual water content.
-#' @details
-#' The retention curve the model uses falls to nothing as soil dries, where a
-#' real soil keeps a film of water that no suction removes; in sand the model's
-#' dry surface would read near zero. What is returned is therefore not allowed
-#' below the residual water content. Only the reported value is affected: the
-#' model's own state, its water potentials and its water budget are untouched.
-#' @noRd
-reportedtheta <- function(theta, soilc) {
+# Soil water content as returned to the user: no lower than the residual water content.
+.reportedtheta <- function(theta, soilc) {
   if (is.null(theta)) return(theta)
   pmax(theta, min(soilc$Smin))
 }
 #' R wrapper for c++ expand_outputCpp function
 #'
-#' Spline interpolates a Numeric Matrix for better visual representation
+#' Linearly interpolates a Numeric Matrix for better visual representation
 #'
 #' @param mat matrix to expand.
 #' @param nout number of rows of expanded matrix

@@ -15,5 +15,5 @@ expand_output(mat, nout)
 an expanded matrix
 }
 \description{
-Spline interpolates a Numeric Matrix for better visual representation
+Linearly interpolates a Numeric Matrix for better visual representation
 }

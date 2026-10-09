@@ -92,7 +92,7 @@ create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "r
 #' @param hr Integer. Hour to evaluate, indexed from 1 to `nrow(climdata)`.
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param ectop List of ectotherm parameters required by [Ectotherm()].
+#' @param ectop List of ectotherm parameters as returned by [create_ectop()].
 #' @param lat Numeric. Latitude in decimal degrees.
 #' @param long Numeric. Longitude in decimal degrees.
 #' @param zref Numeric. Height (m) above ground of the meteorological forcing data.
@@ -185,12 +185,8 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
     n <- length(moutprofile$Rswup)
     d <- zeroplanedisCpp2(vegp$h, vegp$pai)
     zm <- roughlengthCpp2(vegp$h, vegp$pai, d, if (is.null(soilc$zm)) 0.004 else soilc$zm)
-    # Friction velocity from the reference wind with the stability correction
-    # between the roughness height and the reference height, then the wind at
-    # each height above the canopy from the same profile.
-    # The profile may have been run with its forcing translated to a greater
-    # height than supplied; the wind and the height it refers to are then the
-    # ones the profile carries.
+    # Friction velocity from the reference wind, then wind at each height above
+    # the canopy. The reference height is the one the profile was run with.
     uref <- climdata$windspeed[hr]
     if (!is.null(moutprofile$zref)) {
       zref <- moutprofile$zref
@@ -229,16 +225,16 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
 #' Return time-series of ectotherm body-temperature for a specified height
 #'
 #' Runs the ectotherm model through time using microclimate data returned by
-#' [RunMicro()] and returns predicted body temperature for very hour.
+#' [RunMicro()] and returns predicted body temperature for every hour.
 #'
 #' @param mout List of microclimate variables as returned by [RunMicro()]
 #' @param climdata data.frame of meteorological forcing data using the same
 #'   naming conventions as the inbuilt dataset `climdata`.
 #' @param reqhgt height above or below ground for which body temperature is wanted
-#' (negative is below ground). Must match value supplied to [RunMIcro()].
+#' (negative is below ground). Must match value supplied to [RunMicro()].
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param ectop List of ectotherm parameters required by [Ectotherm()].
+#' @param ectop List of ectotherm parameters as returned by [create_ectop()].
 #' @param lat Numeric. Latitude in decimal degrees.
 #' @param long Numeric. Longitude in decimal degrees.
 #' @param maxiter Integer. Maximum number of iterations used to achieve
@@ -253,7 +249,7 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
 #'
 #' @return A data.frame with two columns:
 #' \describe{
-#'   \item{obs_time}{POSIXlt object of dates and times associated with eahc body
+#'   \item{obs_time}{POSIXlt object of dates and times associated with each body
 #'   temperature estimate}
 #'   \item{Tbody}{Predicted ectotherm body temperature (degrees C).}
 #' }
@@ -318,7 +314,7 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
 #'   naming conventions as the inbuilt dataset `climdata`.
 #' @param vegp Vegetation parameter list as returned by [createvegp()].
 #' @param soilc Soil parameter list as returned by [createsoilc()].
-#' @param ectop List of ectotherm parameters required by [Ectotherm()].
+#' @param ectop List of ectotherm parameters as returned by [create_ectop()].
 #' @param lat Numeric. Latitude in decimal degrees.
 #' @param long Numeric. Longitude in decimal degrees.
 #' @param maxiter Integer. Maximum number of iterations used to achieve
@@ -331,7 +327,7 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
 #' @return A list of two Numeric Matrices:
 #' \describe{
 #'   \item{Tbodya}{Estimated body temperature above ground (degrees C).}
-#'   \item{Tbody}{Estimated body temperature below ground (degrees C).}
+#'   \item{Tbodyb}{Estimated body temperature below ground (degrees C).}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp

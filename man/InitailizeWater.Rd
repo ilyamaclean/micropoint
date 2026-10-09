@@ -24,10 +24,9 @@ InitailizeWater(
 \item{climdata}{data.frame of weather conditions that uses the same naming conventions
 as in the inbuilt dataset `climdata`.}
 
-\item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than
-2 times the soil roughness length, which are too short for the vegetation
-to present the wind a surface distinct from the soil.}
+\item{vegp}{Vegetation parameter list as returned by [createvegp()]. If `NA`,
+bare ground is assumed. Canopies shorter than twice the soil roughness
+length are also run as bare ground.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
@@ -38,7 +37,7 @@ to present the wind a surface distinct from the soil.}
 \item{zref}{Numeric. Height (m) of the meteorological forcing data.
 Default is 2 (see Details).}
 
-\item{zmr}{Numeric. Roughness length for bare-ground calculations.}
+\item{zmr}{Numeric. Roughness length (m) of the soil surface.}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO2 concentration (ppm).
 If `NA`, it is estimated from the year of the first observation using [Cafromyear()].}
@@ -52,15 +51,13 @@ within each time step.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
-\item{Lfrac}{Fraction of plant area that is living vegetation, given either as
-a single value or as a vector giving the fraction in each canopy layer.
-Required unless `vegp` is `NA`.}
+\item{Lfrac}{Fraction of plant area that is living vegetation: a single value
+or one for each canopy layer. Required unless `vegp` is `NA`.}
 
-\item{accuracy}{Character. `"high"` (the default), `"very high"`,
-`"moderate"` or `"fast"`: the accuracy at which weather measured too close to the
-canopy is translated up to the height the model needs (see Details of
-[RunMicro()]). The spin-up itself is a quick, simplified run and is the
-same at every level.}
+\item{accuracy}{Character. Controls the trade-off between model run time and
+numerical accuracy. One of "high" (the default), "very high",
+"moderate" or "fast". Used only where weather is adjusted to a greater
+height.}
 }
 \value{
 Numeric vector of initial volumetric soil water contents in each layer

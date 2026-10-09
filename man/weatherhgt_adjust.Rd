@@ -36,7 +36,7 @@ were measured.}
 If `NA`, a default profile is generated.}
 
 \item{ThetaIni}{Optional numeric vector of initial volumetric soil water
-contents. If `NA`, all layers are initialised to 0.419.}
+contents. If `NA`, a default profile is generated.}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO₂ concentration (ppm).
 If `NA`, it is estimated from the year of the first observation using [Cafromyear()].}
@@ -45,14 +45,14 @@ If `NA`, it is estimated from the year of the first observation using [Cafromyea
 (°C) used to initialise the soil temperature profile. If `NA`, it is
 estimated from `climdata$temp`.}
 
-\item{accuracy}{Character. How closely the model is solved: `"high"` (the
-default), `"very high"`, `"moderate"` or `"fast"`. See Details of [RunMicro()].}
+\item{accuracy}{Character. Controls the trade-off between model run time and
+numerical accuracy. One of "high" (the default), "very high", "moderate" or "fast".}
 
-\item{maxiter}{Optional integer. The most passes an hour may take. By default
-set by `accuracy`.}
+\item{maxiter}{Optional integer. Maximum number of iterations within each
+hour. Set by `accuracy` if not supplied.}
 
-\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
-moves air temperature by less than this (K). By default set by `accuracy`.}
+\item{tolerance}{Optional numeric. Convergence tolerance (K) for air
+temperature. Set by `accuracy` if not supplied.}
 }
 \value{
 A data.frame identical to `climdata` but with `temp`, `relhum`,

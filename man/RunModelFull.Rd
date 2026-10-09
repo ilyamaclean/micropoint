@@ -30,10 +30,9 @@ conventions as the inbuilt dataset `climdata`.}
 
 \item{soilc}{Soil parameter list as returned by [createsoilc()].}
 
-\item{vegp}{Vegetation parameter list as returned by [createvegp()].
-If `NA`, bare-ground conditions are assumed, as are canopies shorter than 2 times the soil roughness length `zm`,
-which are too short for the vegetation to present the wind a surface distinct
-from the soil.}
+\item{vegp}{Vegetation parameter list as returned by [createvegp()]. If `NA`,
+bare ground is assumed. Canopies shorter than twice the soil roughness
+length are also run as bare ground.}
 
 \item{paii}{Numeric vector of plant area index values for each canopy layer,
 ordered from bottom to top.}
@@ -54,7 +53,7 @@ boundary node. If `NA`, a default profile is generated.}
 
 \item{ThetaIni}{Optional numeric vector of initial soil water contents,
 ordered from the soil surface downward and including the lower boundary
-node. If `NA`, all layers are initialised to 0.419.}
+node. If `NA`, a default profile is generated.}
 
 \item{CO2ppm}{Optional numeric. Atmospheric CO2 concentration (ppm). If `NA`,
 it is estimated from the year of the first observation using [Cafromyear()].}
@@ -63,19 +62,18 @@ it is estimated from the year of the first observation using [Cafromyear()].}
 to initialise the soil temperature profile. If `NA`, it is estimated from
 `climdata$temp`, which requires approximately a full year of data.}
 
-\item{zm}{Numeric. Roughness length used for bare-ground calculations.}
+\item{zm}{Numeric. Roughness length (m) of the soil surface.}
 
-\item{maxiter}{Optional integer. The most passes an hour may take. By default
-set by `accuracy`.}
+\item{maxiter}{Optional integer. Maximum number of iterations within each
+hour. Set by `accuracy` if not supplied.}
 
-\item{tolerance}{Optional numeric. The iteration of an hour stops when a pass
-moves air temperature by less than this (K). By default set by `accuracy`.}
+\item{tolerance}{Optional numeric. Convergence tolerance (K) for air
+temperature. Set by `accuracy` if not supplied.}
 
 \item{C3}{Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.}
 
-\item{accuracy}{Character. How closely the model is solved, and so how long
-it takes: `"high"` (the default), `"very high"`, `"moderate"` or `"fast"`. See Details
-of [RunMicro()]. Profiles are returned on the layers given whatever the level.}
+\item{accuracy}{Character. One of `"high"` (the default), `"very high"`,
+`"moderate"` or `"fast"`. See details of [RunMicro()].}
 }
 \value{
 A list of numeric matrices giving simulated microclimate variables
@@ -83,12 +81,10 @@ for all time steps and all canopy heights (above ground) or soil nodes
 (below ground). Rows correspond to time steps and columns correspond to
 canopy heights or soil nodes.
 
-For vegetated runs the canopy is divided into as many layers of equal depth
-as `paii` has elements, and each column gives the mean conditions of one
-layer, counted from the ground and referred to the middle of the layer: with
-`n` layers under a canopy of height `h`, column `i` is at `(i - 0.5) h / n`.
-Canopy top is the upper edge of the highest layer, not one of the columns;
-the air there is returned separately.
+For vegetated runs each column is one canopy layer, counted from the ground:
+with `n` layers under a canopy of height `h`, column `i` is at height
+`(i - 0.5) h / n`. For bare-ground runs the columns are twenty equally
+spaced heights up to `zref`.
 
 For **bare-ground runs** (`vegp = NA`) the returned elements are:
 \describe{
@@ -96,18 +92,12 @@ For **bare-ground runs** (`vegp = NA`) the returned elements are:
   \item{relhum}{Relative humidity profile (\%).}
   \item{windspeed}{Wind speed profile (m s^-1).}
   \item{tsoil}{Soil temperature profile (°C).}
-  \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
-    than the soil's residual water content.}
-  \item{runoff}{Rain reaching the ground that the saturated soil surface
-    could not take, each hour (mm). A vector, one value per time step.}
-  \item{drainage}{Water leaving through the base of the soil each hour (mm),
-    negative where water enters there. A vector.}
-  \item{witers}{Iterations taken to balance the soil's water each hour. A
-    warning is given if the balance was not reached in some hours.}
-  \item{iters}{Passes each hour took to settle. A vector.}
-  \item{error}{How far the last pass of each hour still moved air
-    temperature (K). One warning is given for the run if this exceeds the
-    tolerance in some hours.}
+  \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+  \item{runoff}{Runoff from the soil surface in each time step (mm). A vector.}
+  \item{drainage}{Drainage from the base of the soil in each time step (mm). A vector.}
+  \item{witers}{Number of iterations of the soil water model in each time step. A vector.}
+  \item{iters}{Number of iterations in each time step. A vector.}
+  \item{error}{Final convergence error in each time step (K). A vector.}
 }
 
 For **vegetated runs** the returned elements are:
@@ -122,24 +112,15 @@ For **vegetated runs** the returned elements are:
   \item{relhum}{Relative humidity profile (\%).}
   \item{windspeed}{Wind speed profile (m s^-1).}
   \item{tsoil}{Soil temperature profile (°C).}
-  \item{theta}{Volumetric soil water content profile (m^3 m^-3), no lower
-    than the soil's residual water content.}
-  \item{runoff}{Rain reaching the ground that the saturated soil surface
-    could not take, each hour (mm). A vector, one value per time step.}
-  \item{drainage}{Water leaving through the base of the soil each hour (mm),
-    negative where water enters there. A vector.}
-  \item{witers}{Iterations taken to balance the soil's water each hour. A
-    warning is given if the balance was not reached in some hours.}
-  \item{tcanopy}{Air temperature at canopy top (°C). A vector, one value
-    per time step.}
-  \item{rhcanopy}{Relative humidity at canopy top (\%). A vector, one value
-    per time step.}
-  \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector, one value per
-    time step.}
-  \item{iters}{Passes each hour took to settle. A vector.}
-  \item{error}{How far the last pass of each hour still moved air
-    temperature (K). One warning is given for the run if this exceeds the
-    tolerance in some hours.}
+  \item{theta}{Volumetric soil water content profile (m^3 m^-3).}
+  \item{runoff}{Runoff from the soil surface in each time step (mm). A vector.}
+  \item{drainage}{Drainage from the base of the soil in each time step (mm). A vector.}
+  \item{witers}{Number of iterations of the soil water model in each time step. A vector.}
+  \item{tcanopy}{Air temperature at canopy top (°C). A vector.}
+  \item{rhcanopy}{Relative humidity at canopy top (\%). A vector.}
+  \item{ucanopy}{Wind speed at canopy top (m s^-1). A vector.}
+  \item{iters}{Number of iterations in each time step. A vector.}
+  \item{error}{Final convergence error in each time step (K). A vector.}
 }
 }
 \description{
@@ -148,10 +129,10 @@ simulated microclimate profiles for all heights above ground and all soil
 nodes below ground.
 }
 \details{
-The meteorological forcing data must describe air at or above the height
-given by [reference_height()]. Forcing supplied below that height is
-translated up to it with [weatherhgt_adjust()] before the simulation, and
-the heights returned then extend to that height.
+The model requires weather data from above the canopy, typically at least
+1.3 to 1.9 times canopy height for a dense canopy and somewhat lower for a
+sparse one. If `zref` is too low, the weather data are adjusted automatically
+to the required height using [weatherhgt_adjust()] before the model is run.
 
 If `vegp` is `NA`, the model runs in bare-ground mode. Otherwise the full
 canopy model is used with vegetation structure defined by `vegp`, `paii`,

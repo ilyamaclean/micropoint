@@ -19,8 +19,7 @@ createsoilc(
 
 \item{nlayers}{Integer. Number of soil layers.}
 
-\item{totalDepth}{Numeric. Total soil depth (m): the depth of the deepest
-node, which is held at the boundary temperature.}
+\item{totalDepth}{Numeric. Total soil depth (m).}
 
 \item{slope}{Numeric. Surface slope (degrees).}
 
@@ -44,15 +43,10 @@ A list of soil parameters:
   \item{Vq}{Quartz fraction by volume (m^3 m^-3), repeated for each soil layer}
   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
-  \item{Mc}{Coarse fragment or gravel fraction (m^3 m^-3), repeated for each soil layer}
+  \item{Mc}{Mass fraction of clay (kg kg^-1), repeated for each soil layer}
   \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
-  \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer.
-    The Campbell hydraulic conductivity exponent used internally by the soil water solver
-    is derived from this as \code{2 * b + 3}; it is not a separate element of this list.}
-  \item{psi_e}{Air-entry water potential (J/kg, specific potential energy per
-    unit mass -- numerically equal to kPa for water; consistent with the
-    Kelvin-equation vapour pressure calculations elsewhere in the soil
-    water model, which require this unit), repeated for each soil layer}
+  \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
+  \item{psi_e}{Air-entry water potential (J/kg, numerically equal to kPa), repeated for each soil layer}
   \item{gref}{Ground shortwave reflectance (unitless)}
   \item{groundem}{Ground longwave emissivity (unitless)}
   \item{grefPAR}{Ground reflectance for photosynthetically active radiation (unitless)}

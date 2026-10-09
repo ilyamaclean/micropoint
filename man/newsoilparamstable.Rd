@@ -16,21 +16,11 @@ A data frame with the following columns:
   \item{Vo}{Volumetric organic content of soil.}
   \item{Mc}{Mass fraction of clay.}
   \item{rho}{Soil bulk density (Mg / m^3).}
-  \item{b}{Campbell soil water retention parameter (dimensionless, > 1). The
-    Campbell hydraulic conductivity exponent used by the soil water solver
-    is derived from this as \code{2 * b + 3}, not stored as a separate
-    column.}
+  \item{b}{Campbell soil water retention parameter (dimensionless)}
   \item{psi_e}{Matric potential (J / m^3).}
-  \item{alpha}{van Genuchten shape parameter (cm^-1). Not used by
-    \code{\link{createsoilc}}; retained for calls into micropoint from the
-    microclimate tutorial package.}
-  \item{VGn}{van Genuchten pore size distribution parameter. Not used by
-    \code{\link{createsoilc}}; retained for calls into micropoint from the
-    microclimate tutorial package.}
-  \item{VGpsie}{van Genuchten matric potential parameter (J / m^3),
-    currently a placeholder pending verification (see Details). Not used
-    by \code{\link{createsoilc}}; retained for calls into micropoint from
-    the microclimate tutorial package.}
+  \item{alpha}{van Genuchten shape parameter (cm^-1). Not used by \code{\link{createsoilc}}.}
+  \item{VGn}{van Genuchten pore size distribution parameter. Not used by \code{\link{createsoilc}}.}
+  \item{VGpsie}{van Genuchten matric potential parameter; a placeholder. Not used by \code{\link{createsoilc}}.}
 }
 }
 \usage{
@@ -38,19 +28,6 @@ newsoilparamstable
 }
 \description{
 A table of soil parameters for different soil types, used by
-\code{\link{createsoilc}} (the new point-model soil water solver, which is
-Campbell-only: its conductivity exponent is derived internally as
-\code{2 * b + 3} wherever needed, not read from this table). The van
-Genuchten columns (\code{alpha}, \code{VGn}, \code{VGpsie}) are carried
-here only because they are consumed elsewhere, by calls into micropoint
-from the microclimate tutorial package. This table used to also carry a
-column named \code{n}, which was assumed to be the Campbell exponent but
-was actually a duplicate/leftover van Genuchten pore-size parameter from
-an older workflow (the genuine value is \code{VGn}); it was never read as
-the Campbell exponent (always computed as \code{2 * b + 3}) and has been
-removed as part of that fix, along with the mislabeling. Note also that
-\code{VGpsie} is currently populated as a placeholder (set equal to the
-Campbell \code{psi_e} value) rather than genuine van Genuchten air-entry
-data, pending verification against a trustworthy source.
+\code{\link{createsoilc}}.
 }
 \keyword{datasets}
