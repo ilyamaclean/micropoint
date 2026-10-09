@@ -320,10 +320,11 @@ timeseries_ecto <- function(mout, climdata, reqhgt, vegp, soilc, ectop, lat, lon
 #' @details
 #' Below ground, body temperature is assumed to equal soil temperature.
 #'
-#' @return A list of two Numeric Matrices:
+#' @return A list of Numeric Matrices:
 #' \describe{
 #'   \item{Tbodya}{Estimated body temperature above ground (degrees C).}
 #'   \item{Tbodyb}{Estimated body temperature below ground (degrees C).}
+#'   \item{Tbody_above}{Estimated body temperature above the canopy (degrees C). Vegetated runs only.}
 #' }
 #'
 #' @importFrom Rcpp sourceCpp
@@ -356,5 +357,16 @@ full_ecto <- function(mout, climdata, vegp, soilc, ectop, lat, long, maxiter = 1
   }
   Tbodya <- EctothermM(obstime, climin, ectop, lat, long, ltra, maxiter, tolerance)
   Tbodyb <- mout$tsoil
-  return(list(Tbodya = Tbodya, Tbodyb = Tbodyb))
+  out <- list(Tbodya = Tbodya, Tbodyb = Tbodyb)
+  # Above the canopy: radiation as at the top layer, and no contact with a surface
+  if (!is.null(mout$za)) {
+    top <- function(M) matrix(M[, ncol(M)], nrow(M), length(mout$za))
+    climin <- list(Rdirdown = top(mout$Rdirdown), Rdifdown = top(mout$Rdifdown), Rswup = top(mout$Rswup),
+                   Rlwdown = top(mout$Rlwdown), Rlwup = top(mout$Rlwup), uz = mout$windspeed_above,
+                   Ta = mout$tair_above, Ts = mout$tair_above, rh = mout$relhum_above,
+                   pk = climdata$pres, wdir = climdata$winddir)
+    ectop$confrac <- 0
+    out$Tbody_above <- EctothermM(obstime, climin, ectop, lat, long, ltra, maxiter, tolerance)
+  }
+  return(out)
 }

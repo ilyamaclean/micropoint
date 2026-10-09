@@ -38,10 +38,11 @@ convergence in the ectotherm model.}
 \item{tolerance}{Numeric. Convergence tolerance for the ectotherm model.}
 }
 \value{
-A list of two Numeric Matrices:
+A list of Numeric Matrices:
 \describe{
   \item{Tbodya}{Estimated body temperature above ground (degrees C).}
   \item{Tbodyb}{Estimated body temperature below ground (degrees C).}
+  \item{Tbody_above}{Estimated body temperature above the canopy (degrees C). Vegetated runs only.}
 }
 }
 \description{
