@@ -5,12 +5,11 @@ Version: 0.1.0
 Authors@R: c(
     person("Ilya", "Maclean", email = "i.m.d.maclean@exeter.ac.uk", role = "cre"))
 Maintainer: Ilya M. D. Maclean <i.m.d.maclean@exeter.ac.uk>
-Description: Mechanistic modelling of microclimate at a point location.
-    From standard hourly weather data and vegetation and soil properties,
-    predicts temperature, humidity, wind speed, radiation and soil moisture
-    above, within and below a vegetation canopy and below ground. Also
-    predicts the body temperature of ectotherms from the modelled
-    microclimate.
+Description: Mechanistic modelling of microclimate at a point location. Uses standard
+    hourly weather data and vegetation and soil properties to simulate temperature, humidity,
+    wind speed, radiation and soil moisture above, within and below vegetation canopies,
+    as well as soil temperature and moisture below ground. Also models ectotherm body
+    temperatures under the simulated microclimatic conditions.
 License: GPL-2
 Encoding: UTF-8
 LazyData: true
