@@ -20,9 +20,8 @@ Suggests:
     knitr,
     rmarkdown
 VignetteBuilder: knitr
-Vignette: vignettes/runningmicropoint.Rmd
 URL: https://github.com/ilyamaclean/micropoint
-BugReports: http://github.com/micropoint/issues
+BugReports: https://github.com/ilyamaclean/micropoint/issues
 Depends: 
     R (>= 3.5)
 Config/testthat/edition: 3
