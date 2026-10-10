@@ -1047,9 +1047,9 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     if (C3) {
         // Rubisco's affinity for CO2, allowing for competition from oxygen (Pa).
         double Q10Kc = 2.1;
-        double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tair - 25.0));
+        double Kc = 30.0 * std::pow(Q10Kc, 0.1 * (envdata.tleaf - 25.0));
         double Q10Ko = 1.2;
-        double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tair - 25.0));
+        double Ko = 30000.0 * std::pow(Q10Ko, 0.1 * (envdata.tleaf - 25.0));
         st.Km = Kc * (1.0 + Oa / Ko);
     }
     if (vegp.apsi < 0.0) {
