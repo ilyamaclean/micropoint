@@ -432,8 +432,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // clearskyradCpp2
-std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon);
-RcppExport SEXP _micropoint_clearskyradCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP latSEXP, SEXP lonSEXP) {
+std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon, bool haze, bool hourmean);
+RcppExport SEXP _micropoint_clearskyradCpp2(SEXP obstimeSEXP, SEXP climdataSEXP, SEXP latSEXP, SEXP lonSEXP, SEXP hazeSEXP, SEXP hourmeanSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -441,7 +441,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< DataFrame >::type climdata(climdataSEXP);
     Rcpp::traits::input_parameter< double >::type lat(latSEXP);
     Rcpp::traits::input_parameter< double >::type lon(lonSEXP);
-    rcpp_result_gen = Rcpp::wrap(clearskyradCpp2(obstime, climdata, lat, lon));
+    Rcpp::traits::input_parameter< bool >::type haze(hazeSEXP);
+    Rcpp::traits::input_parameter< bool >::type hourmean(hourmeanSEXP);
+    rcpp_result_gen = Rcpp::wrap(clearskyradCpp2(obstime, climdata, lat, lon, haze, hourmean));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -617,7 +619,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_micropoint_RunBelowFullBare", (DL_FUNC) &_micropoint_RunBelowFullBare, 12},
     {"_micropoint_RunBelowFull", (DL_FUNC) &_micropoint_RunBelowFull, 17},
     {"_micropoint_AboveCanopyCpp", (DL_FUNC) &_micropoint_AboveCanopyCpp, 13},
-    {"_micropoint_clearskyradCpp2", (DL_FUNC) &_micropoint_clearskyradCpp2, 4},
+    {"_micropoint_clearskyradCpp2", (DL_FUNC) &_micropoint_clearskyradCpp2, 6},
     {"_micropoint_difpropCpp", (DL_FUNC) &_micropoint_difpropCpp, 4},
     {"_micropoint_solaltCpp", (DL_FUNC) &_micropoint_solaltCpp, 3},
     {"_micropoint_expand_outputCpp", (DL_FUNC) &_micropoint_expand_outputCpp, 2},

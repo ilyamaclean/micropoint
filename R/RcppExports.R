@@ -89,8 +89,8 @@ AboveCanopyCpp <- function(za, zref, tcanopy, rhcanopy, ucanopy, tref, rhref, ur
     .Call(`_micropoint_AboveCanopyCpp`, za, zref, tcanopy, rhcanopy, ucanopy, tref, rhref, uref, hgt, pai, LL, z0, fade)
 }
 
-clearskyradCpp2 <- function(obstime, climdata, lat, lon) {
-    .Call(`_micropoint_clearskyradCpp2`, obstime, climdata, lat, lon)
+clearskyradCpp2 <- function(obstime, climdata, lat, lon, haze = FALSE, hourmean = TRUE) {
+    .Call(`_micropoint_clearskyradCpp2`, obstime, climdata, lat, lon, haze, hourmean)
 }
 
 difpropCpp <- function(obstime, swrad, lat, lon) {

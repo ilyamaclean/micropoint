@@ -257,7 +257,7 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
     double amx = gref; if (amx < lref) amx = lref;
     double amxp = grefPAR; if (amxp < lrefp) amxp = lrefp;
 
-    const double kd = kp.kd, h = tspveg.h, hp = tspvegPAR.h;
+    const double kd = kp.kd;
     const double sil = kp.k * cosz;
     const double a = tspveg.a, ap = tspvegPAR.a;
 
@@ -1653,19 +1653,6 @@ static double thermalConductivityFrom(const soilConductivityFixed& f,
     double out = (kw * kWaterPhase * Vw + ka * kGas * gasPorosity + ks * kSolid * Vsolid)
         / (kw * Vw + ka * gasPorosity + ks * Vsolid);
     return out;
-}
-// Soil thermal conductivity in one call.
-static double thermalConductivityCpp(
-    double Vq, // volumetric quartz (m3/m3)
-    double Vm, // volumetric other minerals (m3/m3)
-    double Vo, // volumetric organic matter (m3/m3)
-    double Vw, // volumetric water plus ice (m3/m3)
-    double Vw_ice, // volumetric ice, part of Vw (m3/m3)
-    double Mc, // mass fraction of clay (kg/kg)
-    double Tc, // temperature (deg C)
-    double pk) // pressure (kPa)
-{
-    return thermalConductivityFrom(soilConductivityFixedOf(Vq, Vm, Vo, Vw, Mc), Vw, Vw_ice, Tc, pk);
 }
 // Solves a tridiagonal system between rows first and last (Thomas algorithm).
 static Thomas ThomasBoundaryCondition(std::vector<double> aa, std::vector<double> bb,
@@ -5081,10 +5068,13 @@ List AboveCanopyCpp(std::vector<double> za, double zref, std::vector<double> tca
 // ********************************************** Other useful functions *********************************************** //
 // Solar utilities, and the big-leaf runs that give the soil its starting state.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Clear-sky shortwave radiation, allowing for scattering and absorption by
-// gases, water vapour and aerosols.
+// Clear-sky shortwave radiation on a horizontal surface, allowing for scattering
+// and absorption by gases and water vapour and, if haze is true, by a typical
+// amount of haze and dust. If hourmean is true it is the mean over the hour
+// centred on each time, from the sun's position every five minutes.
 // [[Rcpp::export]]
-std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon)
+std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, double lat, double lon,
+    bool haze = false, bool hourmean = true)
 {
     std::vector<int> year = obstime["year"];
     std::vector<int> month = obstime["month"];
@@ -5096,21 +5086,28 @@ std::vector<double> clearskyradCpp2(DataFrame obstime, DataFrame climdata, doubl
     double latr = lat * torad;
     double lonr = lon * torad;
     size_t n = hour.size();
+    int nstep = hourmean ? 12 : 1;
     std::vector<double> csr(n, 0.0);
     for (size_t hr = 0; hr < n; ++hr) {
-        solmodel solp = solpositionCpp2(latr, lonr, year[hr], month[hr], day[hr], hour[hr]);
-        if (solp.zenr <= pi / 2.0) {
-            double cosz = std::cos(solp.zenr);
-            double m = 35.0 / std::sqrt(1224.0 * cosz * cosz + 1.0);
-            double TrTpg = 1.021 - 0.084 * std::sqrt(m * 0.00949 * pres[hr] + 0.051);
-            double xx = std::log(relhum[hr] / 100.0) + ((17.27 * temp[hr]) / (237.3 + temp[hr]));
-            double Td = (237.3 * xx) / (17.27 - xx);
-            double u = std::exp(0.1133 - std::log(3.78) + 0.0393 * Td);
-            double Tw = 1.0 - 0.077 * std::pow(u * m, 0.3);
-            double Ta = pow(0.935, m);
-            double od = TrTpg * Tw * Ta;
-            csr[hr] = 1352.778 * std::cos(solp.zenr) * od;
+        // Water in the column of air above the surface, from dew point (degrees Fahrenheit)
+        double xx = std::log(relhum[hr] / 100.0) + ((17.27 * temp[hr]) / (237.3 + temp[hr]));
+        double Td = (237.3 * xx) / (17.27 - xx);
+        double u = std::exp(0.1133 - std::log(3.78) + 0.0393 * (Td * 1.8 + 32.0));
+        for (int k = 0; k < nstep; ++k) {
+            double lt = hourmean ? hour[hr] + (5.0 * k - 27.5) / 60.0 : hour[hr];
+            solmodel solp = solpositionCpp2(latr, lonr, year[hr], month[hr], day[hr], lt);
+            if (solp.zenr <= pi / 2.0) {
+                double cosz = std::cos(solp.zenr);
+                // Depth of atmosphere crossed by the beam, relative to the sun overhead
+                double m = 35.0 / std::sqrt(1224.0 * cosz * cosz + 1.0);
+                // Fractions passed by the gases of the air, by water vapour and by haze
+                double TrTpg = 1.021 - 0.084 * std::sqrt(m * 0.00949 * pres[hr] + 0.051);
+                double Tw = 1.0 - 0.077 * std::pow(u * m, 0.3);
+                double Ta = haze ? std::pow(0.935, m) : 1.0;
+                csr[hr] += 1352.778 * cosz * TrTpg * Tw * Ta;
+            }
         }
+        csr[hr] /= nstep;
     }
     return csr;
 }
