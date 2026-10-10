@@ -149,6 +149,8 @@
 #'   \item{DSh}{Parameter values for Deciduous Shrubs}
 #'   \item{multiplier}{Factor applied to each value by \code{createvegp} to convert it from the units listed to those the model uses}
 #' }
+#' @source Photosynthesis parameters are from Harper et al. (2016), Table 2; plant hydraulic parameters are
+#'   from Eller et al. (2020), Table 2.
 "PFTparams"
 #' An updated table of soil parameters used in new model
 #'
