@@ -1101,15 +1101,19 @@ static double leafgsLight(const stomatalState& st, double PARabs, double pk, con
         Aca = Wca - Rd;
     }
     else { // C4 pathway
-        double k = 2.0e-4;
+        // Rubisco-limited, light-limited and CO2-limited rates (Collatz et al. 1992),
+        // the last with stomata fully open: internal CO2 equal to ambient.
+        double k = 2.0e4;
         double Wc = Vcmax;
         double Wl = vegp.alpha * IPAR;
-        double We = k * Vcmax * (ci / (pk * 1000.0));
+        double We = k * Vcmax * (ca / (pk * 1000.0));
         double W = Wc;
         if (Wl < W) W = Wl;
         if (We < W) W = We;
         Aca = W - Rd; // net assimilation (can be negative)
-        double Wcol = ((Wc + Wl) - std::sqrt(std::pow(Wc + Wl, 2.0) - 4.0 * 0.83 * (We * Wl)))
+        // Co-limited rate of the two that do not depend on CO2, and the internal CO2
+        // at which the CO2-limited rate equals it (Eller et al. 2020, Eqs S2.7, S2.8).
+        double Wcol = ((Wc + Wl) - std::sqrt(std::pow(Wc + Wl, 2.0) - 4.0 * 0.83 * (Wc * Wl)))
             / (2.0 * 0.83);
         Acol = Wcol - Rd;
         cicol = (Wcol * pk * 1000.0) / (k * Vcmax);
