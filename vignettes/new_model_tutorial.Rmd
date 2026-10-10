@@ -568,7 +568,7 @@ plot(Tbody ~ tme, data = ecto_out, type = "l", col = "red",
 ```                      
 ![](images/new/plot11.png)
 
-The code gives a warning as it is a bit harder for the model to fully converge in sandy soil and it didn't do so in one hour. The effects are trivial.
+The code gives a warning as it is a bit harder for the model to fully converge in sandy soil and it didn't do so in a few hours of the year. The effects are trivial.
 
 One can see from this plot, that if the ectotherm was forced to sun-bask continuously on bare ground, its body temperature would get excessively hot at times!
 
