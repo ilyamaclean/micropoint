@@ -23,11 +23,9 @@ a list of vegetation parameters:
   \item{Vcmx25}{Maximum Rubisco carboxylation rate at 25 °C (µmol m^-2 s^-1)}
   \item{Tup}{Upper temperature limit for photosynthesis (°C)}
   \item{Tlow}{Lower temperature limit for photosynthesis (°C)}
-  \item{Dcrit}{Vapour pressure deficit at onset of strong stomatal limitation (kPa)}
   \item{alpha}{Photosynthetic quantum efficiency (mol CO2 mol^-1 PAR)}
   \item{Kxmx}{Maximum xylem hydraulic conductance (µmol m^-2 s^-1)}
   \item{hv}{Huber value (cm^2 m^-2)}
-  \item{f0}{Ratio of ci/(ci − Γ*) under low vapour pressure deficit from Jacobs (1994) (unitless)}
   \item{fd}{Fraction of Vcmax converted to leaf dark respiration (unitless)}
   \item{psi50}{Water potential causing 50\% loss of maximum hydraulic conductance (MPa)}
   \item{apsi}{Xylem hydraulic conductance parameter (calculated if \code{< 0}) (unitless)}

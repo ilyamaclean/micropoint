@@ -15,11 +15,9 @@ namespace newmodel {
         double Vcmax25; // micromol / m ^ 2 / s ^ 1
         double Tup; // high temperature photosynthesis range (deg C)
         double Tlw; // low temperature photosynthesis range (deg C)
-        double Dcrit; // Onset of strong stomatal limitation (kPa)
         double alpha; // photosynthesis quantum efficiency (mol CO2 / mol PAR)
         double Kxmx; // xylem maximum hydraulic conductance (mol / m^2 / s)
         double hv; // Huber value (m^2/m^2)
-        double f0; // ratio of ci/(ci-Gma) under low D from Jacobs (1994) equation (unitless) 
         double fd; // reaction of Vcmax converted to leaf dark respiration (unitless)
         double psi50; // Water potential when plant loses 50% of krc_max (MPa) 
         double apsi; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)

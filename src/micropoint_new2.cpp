@@ -3996,11 +3996,9 @@ static vegpstruct tovegpstruct(List vegp, std::vector<double> paii, std::vector<
     out.Vcmax25 = vegp["Vcmx25"]; // micromol to mol / m ^ 2 / s ^ 1
     out.Tup = vegp["Tup"]; // high temperature photosynthesis range (deg C)
     out.Tlw = vegp["Tlow"]; // low temperature photosynthesis range (deg C)
-    out.Dcrit = vegp["Dcrit"]; // Onset of strong stomatal limitation (kPa)
     out.alpha = vegp["alpha"]; // photosynthesis quantum efficiency (mol CO2 / mol PAR)
     out.Kxmx = vegp["Kxmx"]; // xylem maximum hydraulic conductance (mol to micromol / m^2 / s)
     out.hv = vegp["hv"]; // Huber value (cm^2 to m^2/m^2)
-    out.f0 = vegp["f0"]; // ratio of ci/(ci-Gma) under low D from Jacobs (1994) equation (unitless) 
     out.fd = vegp["fd"]; // reaction of Vcmax converted to leaf dark respiration (unitless)
     out.psi50 = vegp["psi50"]; // Water potential when plant loses 50% of krc_max (MPa) 
     out.apsi = vegp["apsi"]; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)
