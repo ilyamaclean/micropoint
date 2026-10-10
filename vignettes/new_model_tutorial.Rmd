@@ -172,6 +172,8 @@ Available soil texture classes include sand, loamy sand, sandy loam, loam, silt 
 
 ### Additional inputs
 
+On sloping ground, plant area index can be defined in two ways: per unit horizontal area (as is usual for values derived from remote sensing), or per unit area of the sloping ground surface (which provides a more consistent proxy of vegetation density across complex terrain). By default the model assumes the latter. If `pai` and `paii` are instead given per unit horizontal area, set `paiFlat = TRUE` when running the model and they are converted by multiplying by the cosine of the slope angle. The setting makes no difference on flat ground.
+
 `lat` and `long` specify the latitude and longitude of the location in decimal degrees. Other optional inputs include `zref`, the height above ground of the meteorological forcing data (2 m by default); `SoilTempIni` and `ThetaIni`, vectors giving the initial soil temperature (°C) and volumetric water content of each soil layer from the surface downward; `accuracy`, which controls the trade-off between run time and numerical accuracy (see below); and `c3`, which specifies whether C3 photosynthesis is assumed.
 
 The final inputs are `zm` - a measure of surface roughness evoked only when the ground surface is bare, and `CO2ppm`, the atmospheric CO₂ concentration (ppm) during the model run. This affects stomatal behaviour and hence evapotranspirative cooling. If not provided (`NA`), the model estimates CO₂ concentration from the simulation year using the function `Cafromyear`, which applies polynomial fits to historical observations and projections for the period 1750–2100 as in the example below.

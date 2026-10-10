@@ -21,7 +21,8 @@ RunModelFull(
   maxiter = NULL,
   tolerance = NULL,
   C3 = TRUE,
-  accuracy = "high"
+  accuracy = "high",
+  paiFlat = FALSE
 )
 }
 \arguments{
@@ -74,6 +75,10 @@ temperature. Set by `accuracy` if not supplied.}
 
 \item{accuracy}{Character. One of `"high"` (the default), `"very high"`,
 `"moderate"` or `"fast"`. See details of [RunMicro()].}
+
+\item{paiFlat}{Logical. If `TRUE`, plant area index is given per unit
+horizontal area. If `FALSE` (the default), it is given per unit area of the
+sloping ground surface. Makes no difference on flat ground.}
 }
 \value{
 A list of numeric matrices giving simulated microclimate variables

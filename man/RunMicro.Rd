@@ -22,7 +22,8 @@ RunMicro(
   maxiter = NULL,
   tolerance = NULL,
   C3 = TRUE,
-  accuracy = "high"
+  accuracy = "high",
+  paiFlat = FALSE
 )
 }
 \arguments{
@@ -80,6 +81,10 @@ numerical accuracy. One of `"high"` (the default), `"very high"`,
 `"moderate"` and `"fast"` progressively favour speed over accuracy. `"fast"`
 is intended primarily for applications where the model is run repeatedly
 over many grid cells.}
+
+\item{paiFlat}{Logical. If `TRUE`, plant area index is given per unit
+horizontal area. If `FALSE` (the default), it is given per unit area of the
+sloping ground surface. Makes no difference on flat ground.}
 }
 \value{
 A data.frame containing model outputs for each time step.

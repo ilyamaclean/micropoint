@@ -610,6 +610,15 @@ clay, silty clay, and clay.</p>
 </div>
 <div id="additional-inputs" class="section level3">
 <h3>Additional inputs</h3>
+<p>On sloping ground, plant area index can be defined in two ways: per
+unit horizontal area (as is usual for values derived from remote
+sensing), or per unit area of the sloping ground surface (which provides
+a more consistent proxy of vegetation density across complex terrain).
+By default the model assumes the latter. If <code>pai</code> and
+<code>paii</code> are instead given per unit horizontal area, set
+<code>paiFlat = TRUE</code> when running the model and they are
+converted by multiplying by the cosine of the slope angle. The setting
+makes no difference on flat ground.</p>
 <p><code>lat</code> and <code>long</code> specify the latitude and
 longitude of the location in decimal degrees. Other optional inputs
 include <code>zref</code>, the height above ground of the meteorological

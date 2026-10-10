@@ -191,7 +191,9 @@ profile_ecto <- function(moutprofile, climdata, hr, vegp, soilc, ectop, lat, lon
       zref <- moutprofile$zref
       uref <- moutprofile$uref
     }
-    uza <- sapply(za, function(zz) Uabove(zz, zref, moutprofile$ucanopy, uref, vegp$h, vegp$pai, moutprofile$LL))
+    # Plant area index likewise
+    pai <- if (is.null(moutprofile$pai)) vegp$pai else moutprofile$pai
+    uza <- sapply(za, function(zz) Uabove(zz, zref, moutprofile$ucanopy, uref, vegp$h, pai, moutprofile$LL))
     obstime <- data.frame(year = rep(tme$year +1900, n2),
                           month = rep(tme$mon + 1, n2),
                           day = rep(tme$mday, n2),

@@ -290,6 +290,15 @@ SHORT_CANOPY_MULTIPLE <- 2
   }
   vegp
 }
+# Plant area given per unit horizontal area, re-expressed per unit area of the sloping ground.
+.pai_on_slope <- function(vegp, paii, soilc, paiFlat) {
+  if (paiFlat && class(vegp) != "logical") {
+    mu <- cos(soilc$slope * pi / 180)
+    vegp$pai <- vegp$pai * mu
+    paii <- paii * mu
+  }
+  list(vegp = vegp, paii = paii)
+}
 #' Runs model quickly for a period of time to get an initial soil water profile
 #'
 #' @param climdata data.frame of weather conditions that uses the same naming conventions
@@ -317,6 +326,9 @@ SHORT_CANOPY_MULTIPLE <- 2
 #'   numerical accuracy. One of "high" (the default), "very high",
 #'   "moderate" or "fast". Used only where weather is adjusted to a greater
 #'   height.
+#' @param paiFlat Logical. If `TRUE`, plant area index is given per unit
+#'   horizontal area. If `FALSE` (the default), it is given per unit area of the
+#'   sloping ground surface. Makes no difference on flat ground.
 #' @details
 #' The soil water model is run over the supplied climate data, and the final
 #' soil water profile is used as the initial condition. Where antecedent climate
@@ -330,10 +342,11 @@ SHORT_CANOPY_MULTIPLE <- 2
 #' @export
 InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.004,
                             CO2ppm = NA, boundaryT = NA, maxiter = 100, C3 = TRUE,
-                            Lfrac = NA, accuracy = "high") {
+                            Lfrac = NA, accuracy = "high", paiFlat = FALSE) {
   st <- .accuracy_settings(accuracy)
   chk <- runchecks(climdata, vegp, soilc, lat, long, Lfrac = Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  vegp <- .pai_on_slope(vegp, NA, soilc, paiFlat)$vegp
   soilc$zm <- zmr   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
@@ -405,6 +418,9 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 #'   `"moderate"` or `"fast"`. See details of [RunMicro()].
 #' @param varn Character. Variable to plot. One of `"temp"`, `"relhum"`,
 #'   or `"radiation"`.
+#' @param paiFlat Logical. If `TRUE`, plant area index is given per unit
+#'   horizontal area. If `FALSE` (the default), it is given per unit area of the
+#'   sloping ground surface. Makes no difference on flat ground.
 #'
 #' @details
 #' The length of `paii` and `Lfrac` must be the same, and `sum(paii)` must equal
@@ -446,10 +462,11 @@ InitailizeWater <- function(climdata, vegp, soilc, lat, long, zref = 2, zmr = 0.
 return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                            SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
                            maxiter = NULL, tolerance = NULL, C3 = TRUE, plotout = TRUE, varn = "temp",
-                           accuracy = "high") {
+                           accuracy = "high", paiFlat = FALSE) {
   st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  ps <- .pai_on_slope(vegp, paii, soilc, paiFlat); vegp <- ps$vegp; paii <- ps$paii
   soilc$zm <- zm   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
@@ -521,6 +538,8 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
     # the height the forcing was referred to, and the wind there, for the hour returned
     mout$zref <- zref2
     mout$uref <- climdata2$windspeed[hr]
+    # plant area index as the model used it
+    mout$pai <- vegp$pai
   }
   if (plotout) {
     tp <- paste0("Hour: ", hr)
@@ -626,6 +645,9 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' `"moderate"` and `"fast"` progressively favour speed over accuracy. `"fast"`
 #' is intended primarily for applications where the model is run repeatedly
 #' over many grid cells.
+#' @param paiFlat Logical. If `TRUE`, plant area index is given per unit
+#'   horizontal area. If `FALSE` (the default), it is given per unit area of the
+#'   sloping ground surface. Makes no difference on flat ground.
 #'
 #' @details
 #' If `vegp` is `NA`, bare-ground conditions are assumed and the bare-ground
@@ -675,10 +697,11 @@ return_profile <- function(climdata, hr, vegp, soilc, paii, Lfrac, lat, long, zr
 #' @export
 RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref = 2,
                      SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA, zm = 0.004,
-                     maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
+                     maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high", paiFlat = FALSE) {
   st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  ps <- .pai_on_slope(vegp, paii, soilc, paiFlat); vegp <- ps$vegp; paii <- ps$paii
   soilc$zm <- zm   # soil roughness length
   if (class(boundaryT) == "logical") {
     n <- length(climdata$temp)
@@ -771,6 +794,9 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @param C3 Logical. If `TRUE`, use C3 photosynthesis; otherwise C4.
 #' @param accuracy Character. One of `"high"` (the default), `"very high"`,
 #'   `"moderate"` or `"fast"`. See details of [RunMicro()].
+#' @param paiFlat Logical. If `TRUE`, plant area index is given per unit
+#'   horizontal area. If `FALSE` (the default), it is given per unit area of the
+#'   sloping ground surface. Makes no difference on flat ground.
 #'
 #' @details
 #' The model requires weather data from above the canopy, typically at least
@@ -841,10 +867,12 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
 #' @export
 RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2,
                        SoilTempIni = NA, ThetaIni = NA, CO2ppm = NA, boundaryT = NA,
-                       zm = 0.004, maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high") {
+                       zm = 0.004, maxiter = NULL, tolerance = NULL, C3 = TRUE, accuracy = "high",
+                       paiFlat = FALSE) {
   st <- .accuracy_settings(accuracy, tolerance, maxiter)
   chk <- runchecks(climdata, vegp, soilc, lat, long, paii, Lfrac)
   climdata <- chk$climdata; soilc <- chk$soilc
+  ps <- .pai_on_slope(vegp, paii, soilc, paiFlat); vegp <- ps$vegp; paii <- ps$paii
   soilc$zm <- zm   # soil roughness length
   # Derive boundary temperature if not supplied
   if (class(boundaryT) == "logical") {

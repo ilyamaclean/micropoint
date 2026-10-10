@@ -24,7 +24,8 @@ return_profile(
   C3 = TRUE,
   plotout = TRUE,
   varn = "temp",
-  accuracy = "high"
+  accuracy = "high",
+  paiFlat = FALSE
 )
 }
 \arguments{
@@ -82,6 +83,10 @@ or `"radiation"`.}
 
 \item{accuracy}{Character. One of `"high"` (the default), `"very high"`,
 `"moderate"` or `"fast"`. See details of [RunMicro()].}
+
+\item{paiFlat}{Logical. If `TRUE`, plant area index is given per unit
+horizontal area. If `FALSE` (the default), it is given per unit area of the
+sloping ground surface. Makes no difference on flat ground.}
 }
 \value{
 A list of model outputs for the hour, including:

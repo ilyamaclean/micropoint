@@ -17,7 +17,8 @@ InitailizeWater(
   maxiter = 100,
   C3 = TRUE,
   Lfrac = NA,
-  accuracy = "high"
+  accuracy = "high",
+  paiFlat = FALSE
 )
 }
 \arguments{
@@ -58,6 +59,10 @@ or one for each canopy layer. Required unless `vegp` is `NA`.}
 numerical accuracy. One of "high" (the default), "very high",
 "moderate" or "fast". Used only where weather is adjusted to a greater
 height.}
+
+\item{paiFlat}{Logical. If `TRUE`, plant area index is given per unit
+horizontal area. If `FALSE` (the default), it is given per unit area of the
+sloping ground surface. Makes no difference on flat ground.}
 }
 \value{
 Numeric vector of initial volumetric soil water contents in each layer
