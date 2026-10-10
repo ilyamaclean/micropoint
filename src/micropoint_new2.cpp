@@ -4377,7 +4377,7 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
     vegpstruct vegpc = tovegpstruct(vegp, paii20, Lfrac20);
     soilpstruct soilpc = tosoilpstruct(soilc);
     tsvegstruct  tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
-    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.gref);
+    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.grefPAR);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
@@ -4606,7 +4606,7 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     vegpstruct vegpc = tovegpstruct(vegp, paii, Lfrac);
     soilpstruct soilpc = tosoilpstruct(soilc);
     tsvegstruct tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
-    tsvegstruct tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.gref);
+    tsvegstruct tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.grefPAR);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
@@ -4778,7 +4778,7 @@ List WeatherhgtCpp2(DataFrame obstime, DataFrame climdata, List soilc, List vegp
     soilmod soilheatvars = toSoilheatmod(soilc, SoilTempIni, SoilThetaIni);
     soilwatermod soilwatervars = toSoilwatermod(soilpc, soilheatvars, vegpc.root50, vegpc.root95);
     tsvegstruct  tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
-    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.gref);
+    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.grefPAR);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
@@ -4944,7 +4944,7 @@ List RunBelowFull(DataFrame obstime, DataFrame climdata, List soilc, List vegp, 
     vegpstruct vegpc = tovegpstruct(vegp, paii, Lfrac);
     soilpstruct soilpc = tosoilpstruct(soilc);
     tsvegstruct  tspveg = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lref, vegpc.ltra, soilpc.gref);
-    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.gref);
+    tsvegstruct  tspvegPAR = twostreamvegCpp(vegpc.pai, vegpc.x, vegpc.lrefp, vegpc.ltrap, soilpc.grefPAR);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     LWweights wgts = lwradweights(vegpc.paii);
@@ -5437,7 +5437,7 @@ SEXP DiagSetupCpp(Rcpp::DataFrame obstime, Rcpp::DataFrame climdata, Rcpp::List 
     ctx->vegp = tovegpstruct(vegp, paii, Lfrac);
     ctx->soilp = tosoilpstruct(soilc);
     tsvegstruct tspveg = twostreamvegCpp(ctx->vegp.pai, ctx->vegp.x, ctx->vegp.lref, ctx->vegp.ltra, ctx->soilp.gref);
-    tsvegstruct tspvegPAR = twostreamvegCpp(ctx->vegp.pai, ctx->vegp.x, ctx->vegp.lrefp, ctx->vegp.ltrap, ctx->soilp.gref);
+    tsvegstruct tspvegPAR = twostreamvegCpp(ctx->vegp.pai, ctx->vegp.x, ctx->vegp.lrefp, ctx->vegp.ltrap, ctx->soilp.grefPAR);
     tsdifstruct tspdif = twostreamdifCpp(tspveg);
     tsdifstruct tspdifPAR = twostreamdifCpp(tspvegPAR);
     ctx->wgts = lwradweights(ctx->vegp.paii);
