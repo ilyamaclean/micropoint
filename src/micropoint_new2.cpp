@@ -297,6 +297,11 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
         double difd_g, up_g;
         streams(pai, tspveg, tspdif, tspdir, amx, difd_g, up_g);
         out.RswGabs = (1.0 - gref) * (difd_g + Rb * std::exp(-kd * pai));
+        // The streams at the ground itself: the beam as it arrives beneath the canopy,
+        // the diffuse radiation with it, and what the ground reflects of the two.
+        out.Rdirdownground = Rbeam * std::exp(-kd * pai);
+        out.Rdifdownground = difd_g;
+        out.Rswupground = gref * (difd_g + Rb * std::exp(-kd * pai));
     }
     // Whole-canopy absorption: what enters at the top and does not reach the ground.
     out.RswCabs = netdown(0.0, false) - netdown(pai, false);
@@ -348,74 +353,21 @@ static radmodel shortwavemodelCpp(const std::vector<double>& pia, const std::vec
 // ***************************** Longwave radiation model ***************************** //
 // Longwave exchange between sky, ground and canopy layers.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
-// Weights giving how much of each other layer, the ground and the sky each layer
-// sees. They depend on plant area only, so are calculated once.
+// Fractions of longwave transmitted by each layer. They depend on plant area only,
+// so are calculated once.
 static LWweights lwradweights(const std::vector<double>& paii) {
     int n = static_cast<int>(paii.size());
-    double pait = 0.0;
-    for (int i = 0; i < n; ++i) pait += paii[i];
-    // Plant area above and below the middle of each layer.
-    std::vector<double> paia(n);
-    std::vector<double> paib(n);
-    double below = 0.0;
-    for (int i = 0; i < n; ++i) {
-        paib[i] = below + 0.5 * paii[i];
-        paia[i] = pait - paib[i];
-        below += paii[i];
-    }
-    // Weight between two layers: plant area of the other layer times transmission
-    // through the foliage between them.
-    NumericMatrix wgts(n, n);
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) {
-            if (i != j) {
-                double pij = std::abs(paia[i] - paia[j]);
-                double tr = std::exp(-pij);
-                wgts(i, j) = tr * paii[j];
-            }
-            else wgts(i, j) = 0.0;
-        }
-    }
-    // Transmission from each layer to the sky (trh) and to the ground (trg).
-    std::vector<double> trg(n);
-    std::vector<double> trh(n);
-    for (int i = 0; i < n; ++i) {
-        trh[i] = std::exp(-paia[i]);
-        trg[i] = std::exp(-paib[i]);
-    }
-    std::vector<double> wgt(n);
-    for (int i = 0; i < n; ++i) {
-        wgt[i] = 0.0;
-        for (int j = 0; j < n; ++j) wgt[i] += wgts(i, j);
-    }
-    // Rescale so each layer's weights sum to 2: a leaf has two sides.
-    std::vector<double> wsum(n);
-    for (int i = 0; i < n; ++i) wsum[i] = wgt[i] + trh[i] + trg[i];
-    std::vector<double> mu(n);
-    for (int i = 0; i < n; ++i) {
-        double mu1 = wsum[i] / 2.0;
-        mu[i] = 1.0 + (2.0 - 2.0 * mu1) / wgt[i];
-    }
-    for (int i = 0; i < n; ++i) {
-        for (int j = 0; j < n; ++j) wgts(i, j) = wgts(i, j) * mu[i];
-    }
-    // The ground's weights, rescaled to sum to 1.
-    std::vector<double> wgtg(n);
-    for (int i = 0; i < n; ++i) {
-        wgtg[i] = trg[i] * paii[i];
-    }
-    double gwsum = 0.0;
-    for (int i = 0; i < n; ++i) gwsum += wgtg[i];
-    double trsky = std::exp(-pait);
-    double mug1 = (gwsum + trsky) / 1.0;
-    double mug = 1.0 + (1.0 - mug1) / gwsum;
-    for (int i = 0; i < n; ++i) wgtg[i] = wgtg[i] * mug;
     LWweights out;
-    out.wgts = wgts; // weight matrix for each canopy element
-    out.trh = trh; // transmission from sky
-    out.trg = trg; // transmission from ground
-    out.wgtg = wgtg; // weights for each canopy element for ground
-    out.trsky = trsky;
+    out.tr.resize(n); out.trhalf.resize(n); out.trmean.resize(n);
+    double pait = 0.0;
+    for (int i = 0; i < n; ++i) {
+        pait += paii[i];
+        out.tr[i] = std::exp(-paii[i]);
+        out.trhalf[i] = std::exp(-0.5 * paii[i]);
+        // Mean over the depth of the layer of the transmission from one of its faces.
+        out.trmean[i] = (paii[i] > 0.0) ? -std::expm1(-paii[i]) / paii[i] : 1.0;
+    }
+    out.trsky = std::exp(-pait);
     return out;
 }
 // Absolute temperature to the fourth power.
@@ -427,37 +379,36 @@ static double radem(double tc)
 static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double tground, double groundem, double vegem,
     const std::vector<double>& tleaf)
 {
-    int n = static_cast<int>(wgts.trh.size());
+    int n = static_cast<int>(wgts.tr.size());
     std::vector<double> RlwLabs(n);
     std::vector<double> Rlwdown(n);
     std::vector<double> Rlwup(n);
     std::vector<double> leafLW(n);
+    std::vector<double> Rdmean(n);
     // Longwave leaving each layer and the ground: black-body emission, which
     // includes the longwave a surface reflects as well as what it emits.
     for (int i = 0; i < n; ++i) leafLW[i] = sb * radem(tleaf[i]);
     double groundLW = sb * radem(tground);
+    // Downward longwave, followed from the sky down through each layer in turn. Each
+    // layer lets part of what arrives through and replaces the rest with its own.
+    double flux = lwdown;
+    for (int i = n - 1; i >= 0; --i) {
+        Rlwdown[i] = flux * wgts.trhalf[i] + leafLW[i] * (1.0 - wgts.trhalf[i]); // at the middle of the layer
+        Rdmean[i] = flux * wgts.trmean[i] + leafLW[i] * (1.0 - wgts.trmean[i]);  // at the average leaf of the layer
+        flux = flux * wgts.tr[i] + leafLW[i] * (1.0 - wgts.tr[i]);               // leaving the base of the layer
+    }
+    // What leaves the base of the lowest layer reaches the ground.
+    const double Rlwdownground = flux;
+    double RlwGabs = groundem * flux;
+    // Upward longwave, followed from the ground up through each layer in the same way.
+    flux = groundLW;
     for (int i = 0; i < n; ++i) {
-        double lwsky = lwdown * wgts.trh[i];
-        double lwgro = groundLW * wgts.trg[i];
-        double lwcand = 0.0;
-        for (int j = i; j < n; ++j) {
-            lwcand += wgts.wgts(i, j) * leafLW[j];
-        }
-        double lwcanu = 0.0;
-        for (int j = 0; j <= i; ++j) {
-            lwcanu += wgts.wgts(i, j) * leafLW[j];
-        }
-        Rlwdown[i] = lwsky + lwcand;
-        Rlwup[i] = lwgro + lwcanu;
+        Rlwup[i] = flux * wgts.trhalf[i] + leafLW[i] * (1.0 - wgts.trhalf[i]);
+        const double Rumean = flux * wgts.trmean[i] + leafLW[i] * (1.0 - wgts.trmean[i]);
+        flux = flux * wgts.tr[i] + leafLW[i] * (1.0 - wgts.tr[i]);
         // Absorbed by both sides of the leaves, per unit one-sided plant area.
-        RlwLabs[i] = vegem * (Rlwdown[i] + Rlwup[i]);
+        RlwLabs[i] = vegem * (Rdmean[i] + Rumean);
     }
-    double lwgrfromcan = 0.0;
-    for (int i = 0; i < n; ++i) {
-        lwgrfromcan += wgts.wgtg[i] * leafLW[i];
-    }
-    double lwgrfromsky = wgts.trsky * lwdown;
-    double RlwGabs = groundem * (lwgrfromsky + lwgrfromcan);
     double em = wgts.trsky * groundem + (1.0 - wgts.trsky) * vegem;
     double RlwCabs = em * lwdown;
     radmodel2 out;
@@ -465,6 +416,7 @@ static radmodel2 longwavemodelCpp(const LWweights& wgts, double lwdown, double t
     out.Rlwup = Rlwup;
     out.RlwLabs = RlwLabs;
     out.RlwGabs = RlwGabs;
+    out.Rlwdownground = Rlwdownground;
     out.RlwCabs = RlwCabs;
     return out;
 }
@@ -2742,6 +2694,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     radmodel2 lwrad = longwavemodelCpp(wgts, climdata.Rlw, c.tground, soilpc.groundem, vegpc.vegem, onestepin.tleaf);
     onestepin.Rlwdown = lwrad.Rlwdown;
     onestepin.Rlwup = lwrad.Rlwup;
+    onestepin.Rlwdownground = lwrad.Rlwdownground;
     MP_LAP(2);
     // Wind and stability.
     windmodel wind = windmodelCpp(wc, climdata.uref, vegpc.hgt, vegpc.pai, zref, c.H_iter, climdata.tref, climdata.pk, innerIter, a1,
@@ -3023,6 +2976,9 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
     onestepin.Rdirdown = swrad.Rdirdown;
     onestepin.Rdifdown = swrad.Rdifdown;
     onestepin.Rswup = swrad.Rswup;
+    onestepin.Rdirdownground = swrad.Rdirdownground;
+    onestepin.Rdifdownground = swrad.Rdifdownground;
+    onestepin.Rswupground = swrad.Rswupground;
     size_t na = onestepin.tair.size();
     outercarry c;
     MP_LAP(1);
@@ -4680,6 +4636,12 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                 Rdifdown[hr] = onestepin.Rdifdown[sel];
                 Rlwdown[hr] = onestepin.Rlwdown[sel];
                 if (reqhgt == 0.0) {
+                    // At the ground: the radiation arriving beneath the lowest layer and leaving the surface.
+                    Rdirdown[hr] = onestepin.Rdirdownground;
+                    Rdifdown[hr] = onestepin.Rdifdownground;
+                    Rswup[hr] = onestepin.Rswupground;
+                    Rlwdown[hr] = onestepin.Rlwdownground;
+                    Rlwup[hr] = sb * radem(onestepin.soilheatvars.Te[0]);
                     tair[hr] = onestepin.soilheatvars.Te[0];
                     tleaf[hr] = -999.99;
                     rz[hr] = onestepin.soilwatervars.theta[0];

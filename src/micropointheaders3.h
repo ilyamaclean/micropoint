@@ -128,20 +128,23 @@ namespace newmodel {
         std::vector<double> Rdifdown; // Downward diffuse stream
         std::vector<double> Rswup; // Upward shortwave stream (entirely diffuse)
         double RswGabs; // Shortwave radiation absorbed by ground surface
+        double Rdirdownground = 0.0; // Direct beam reaching the ground
+        double Rdifdownground = 0.0; // Downward diffuse radiation reaching the ground
+        double Rswupground = 0.0; // Shortwave reflected by the ground
         double RswCabs; // Shortwave radiation absorbed by vegetated surface
     };
     struct LWweights {
-        Rcpp::NumericMatrix wgts;
-        std::vector<double> trh;
-        std::vector<double> trg;
-        std::vector<double> wgtg;
-        double trsky;
+        std::vector<double> tr;     // fraction of longwave that passes through each layer
+        std::vector<double> trhalf; // fraction that passes through half of each layer
+        std::vector<double> trmean; // fraction reaching the average leaf of a layer from one of its faces
+        double trsky;               // fraction of sky longwave that reaches the ground
     };
     struct radmodel2 {
         std::vector<double> RlwLabs; // Longwave radiation absorbed by leaf
         std::vector<double> Rlwdown; // Downward longwave stream
         std::vector<double> Rlwup; // Upward longwave stream
         double RlwGabs; // Longwave radiation absorbed by ground surface
+        double Rlwdownground; // Downward longwave reaching the ground
         double RlwCabs; // Longwave radiation absorbed by vegetated surface
     };
     struct windmodel {
@@ -227,6 +230,10 @@ namespace newmodel {
         std::vector<double> Rswup;
         std::vector<double> Rlwdown;
         std::vector<double> Rlwup;
+        double Rdirdownground = 0.0; // direct beam reaching the ground
+        double Rdifdownground = 0.0; // downward diffuse radiation reaching the ground
+        double Rswupground = 0.0; // shortwave reflected by the ground
+        double Rlwdownground = 0.0; // downward longwave reaching the ground
         std::vector<double> tair; // air temperature
         std::vector<double> tleaf; // mean temperature of foliage, leaves and wood (deg C)
         std::vector<double> rh; // relative humidity
