@@ -3303,21 +3303,12 @@ double bulkstomatalresist(double tair, double tcan, double relhum, double pk, do
 }
 // Dew-point temperature from air temperature and relative humidity.
 double dewpointCpp2(double tc, double rh) {
-    // actual vapour pressure (kPa)
-    double ea = satvapCpp2(tc) * rh / 100.0;
-    // Magnus constants
-    const double a_w = 17.27;
-    const double b_w = 237.7;   // water
-    const double a_i = 21.875;
-    const double b_i = 265.5;   // ice
-    // first guess assuming water
-    double gamma = std::log(ea / 0.6108);
-    double td = (b_w * gamma) / (a_w - gamma);
-    // correct for ice if dewpoint < 0
-    if (td < 0.0) {
-        double gamma_i = std::log(ea / 0.6108);
-        td = (b_i * gamma_i) / (a_i - gamma_i);
-    }
+    double ea = satvapCpp2(tc) * rh / 100.0; // vapour pressure of the air (kPa)
+    // Temperature at which this vapour pressure saturates the air, over water
+    double gamma = std::log(ea / 0.61078);
+    double td = (237.3 * gamma) / (17.27 - gamma);
+    // Below freezing the air saturates over ice
+    if (td < 0.0) td = (265.5 * gamma) / (21.875 - gamma);
     return td;
 }
 // Damped update of an iterated value (Aitken): the weight given to the new value
