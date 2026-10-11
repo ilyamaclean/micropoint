@@ -897,19 +897,19 @@ static double satVapDensityCpp2(double Tk)
     double es_Pa = 1000.0 * satvapCpp2(tc); // kPa -> Pa
     return Mw * es_Pa / (RgasC * Tk);
 }
-// Characteristic dimension of a leaf (m), from its length, width and leaf-angle parameter.
+// Characteristic dimension of a leaf (m): its size scaled by the fraction of leaf
+// area that faces a horizontal wind, which is greatest for upright leaves.
 static double leafDimension(double len, double wid, double x)
 {
-    double y = 1.0 / x;
-    double Gy = std::sqrt(y * y + (1.0 - y * y)) / (y + 1.774 * std::pow((y + 1.182), -0.733));
-    return std::sqrt(len * wid) * Gy;
+    double Gx = 1.0 / (x + 1.774 * std::pow((x + 1.182), -0.733));
+    return std::sqrt(len * wid) * Gx;
 }
 // Leaf boundary-layer resistance to heat (s/m): forced and free convection combined.
 static double leafrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
 {
     double Tk = tair + 273.15;
     double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6); // thermal diffusivity
-    double v = 1.326 * std::pow(10.0, -5.0) * std::pow(Tk / 273.15, 1.5) * (393.55 / (Tk + 120.0)); // kinematic viscosity
+    double v = 1.326e-5 * std::pow(Tk / 273.15, 2.5) * (393.15 / (Tk + 120.0)); // kinematic viscosity
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
     double Nuf; // Nusselt number, forced convection
@@ -3615,7 +3615,7 @@ static double animalrHa(double tair, double dT, double uz, double d, double rHma
 {
     double Tk = tair + 273.15;
     double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6); // thermal diffusivity
-    double v = 1.326 * std::pow(10.0, -5.0) * std::pow(Tk / 273.15, 1.5) * (393.55 / (Tk + 120.0)); // kinematic viscosity
+    double v = 1.326e-5 * std::pow(Tk / 273.15, 2.5) * (393.15 / (Tk + 120.0)); // kinematic viscosity
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
     double Nuf; // Nusselt number, forced convection
