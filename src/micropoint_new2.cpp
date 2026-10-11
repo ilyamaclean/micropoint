@@ -912,16 +912,9 @@ static double leafrHa(double tair, double dT, double uz, double d, double rHmax 
     double v = 1.326e-5 * std::pow(Tk / 273.15, 2.5) * (393.15 / (Tk + 120.0)); // kinematic viscosity
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
-    double Nuf; // Nusselt number, forced convection
-    if (Re > 2e5) {
-        Nuf = 0.37 * std::pow(Re, 0.6) * std::pow(Pr, 1.0 / 3.0) + 9.08;
-    }
-    else if (Re > 1000) {
-        Nuf = 2.0 + (0.48 * std::pow(Re, 0.6) - 11.31) * std::pow(Pr, 1.0 / 3.0);
-    }
-    else {
-        Nuf = 2.0 + 0.6 * sqrt(Re) * pow(Pr, 1.0 / 3.0);
-    }
+    // Forced convection: a flat plate lying along the wind in smooth flow, raised by
+    // 1.4 for the turbulence of outdoor wind.
+    double Nuf = 1.4 * 0.664 * std::sqrt(Re) * std::pow(Pr, 1.0 / 3.0);
     double Gr = (g * std::pow(d, 3.0) * dT) / (Tk * v * v); // Grashof number
     double Nun = std::pow(0.825 + (0.387 * std::pow(Gr * Pr, 1.0 / 6.0)) /
         std::pow(1.0 + std::pow(0.492 / Pr, 9.0 / 16.0), 8.0 / 27.0), 2.0); // Nusselt number, free convection
@@ -3613,21 +3606,17 @@ static double chardim(double wdir, double zenr, double azir, double height, doub
 // convection combined.
 static double animalrHa(double tair, double dT, double uz, double d, double rHmax = 300.0)
 {
+    // Length of the body along the wind: for a spheroid, 1.5 times its volume over the
+    // area it presents to the wind. For a sphere it is the diameter.
+    d *= 1.5;
     double Tk = tair + 273.15;
     double Kh = (1.6667e-10 * Tk * Tk + 2.9935e-8 * Tk - 1.7128e-6); // thermal diffusivity
     double v = 1.326e-5 * std::pow(Tk / 273.15, 2.5) * (393.15 / (Tk + 120.0)); // kinematic viscosity
     double Re = (uz * d) / v; // Reynolds number
     double Pr = v / Kh; // Prandtl number
-    double Nuf; // Nusselt number, forced convection
-    if (Re > 2e5) {
-        Nuf = 0.37 * std::pow(Re, 0.6) * std::pow(Pr, 1.0 / 3.0) + 9.08;
-    }
-    else if (Re > 1000) {
-        Nuf = 2.0 + (0.48 * std::pow(Re, 0.6) - 11.31) * std::pow(Pr, 1.0 / 3.0);
-    }
-    else {
-        Nuf = 2.0 + 0.6 * sqrt(Re) * pow(Pr, 1.0 / 3.0);
-    }
+    // Forced convection from a sphere (Whitaker 1972): conduction into still air, smooth
+    // flow over the front of the body and the wake behind it.
+    double Nuf = 2.0 + (0.4 * std::sqrt(Re) + 0.06 * std::pow(Re, 2.0 / 3.0)) * std::pow(Pr, 0.4);
     double Gr = (g * std::pow(d, 3.0) * dT) / (Tk * v * v); // Grashof number
     double Nun = std::pow(0.825 + (0.387 * std::pow(Gr * Pr, 1.0 / 6.0)) /
         std::pow(1.0 + std::pow(0.492 / Pr, 9.0 / 16.0), 8.0 / 27.0), 2.0); // Nusselt number, free convection
