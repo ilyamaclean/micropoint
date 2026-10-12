@@ -265,6 +265,7 @@ namespace newmodel {
         double ucanopy; // effective wind speed at canopy top (m/s), which includes the convective addition
         double windscale; // actual wind over effective wind
         double LL; // Monin-Obukhov length (m)
+        double ufmix = 0.0; // friction velocity the diffusivity profile was built with (m/s)
         int iters; // passes the hour took
         int witers; // iterations of the soil water solve
         double runoff = 0.0; // water a saturated surface could not take (mm)

@@ -2700,6 +2700,7 @@ static void outerPass(onestep& onestepin, outercarry& c, const climstruct& climd
     onestepin.phih = wind.phi_h;
     onestepin.fade = wind.fade;
     onestepin.LL = wind.LL;
+    onestepin.ufmix = mixingFrictionVelocity(wind);
     c.uf = wind.uf;
     MP_LAP(3);
     // Rain interception.
@@ -4350,6 +4351,36 @@ List profileR(size_t hourtoplot, DataFrame obstime, DataFrame climdata, List soi
         tspdifPAR, wgts, wc, Ca, latr, lonr, zref, maxNrIterations, tolerance, a0, a1, C3);
     return OneStepCpptoList(onestepin, z2);
 }
+// Where a height or depth lies among nodes in ascending order: the node below it
+// and the weight of the node above. Beyond either end it takes the end node.
+struct nodeposition { size_t lower; double upper; };
+static nodeposition betweenNodes(const std::vector<double>& x, size_t n, double v)
+{
+    if (n < 2 || v <= x[0]) return { 0, 0.0 };
+    if (v >= x[n - 1]) return { n - 1, 0.0 };
+    size_t i = 0;
+    while (v > x[i + 1]) ++i;
+    return { i, (v - x[i]) / (x[i + 1] - x[i]) };
+}
+// Value at that position, varying linearly between the two nodes.
+static double atPosition(const std::vector<double>& y, const nodeposition& p)
+{
+    if (p.upper == 0.0) return y[p.lower];
+    return y[p.lower] + p.upper * (y[p.lower + 1] - y[p.lower]);
+}
+// Fraction of the resistance of the air between two heights that lies below height z.
+static double resistanceShare(const aerocolumn& col, double zlower, double zupper, double z)
+{
+    const double rl = soilToZ(col, zlower);
+    const double span = soilToZ(col, zupper) - rl;
+    if (span <= 0.0) return (z - zlower) / (zupper - zlower);
+    return std::min(1.0, std::max(0.0, (soilToZ(col, z) - rl) / span));
+}
+// Relative humidity (%) of air of vapour pressure e (kPa) at temperature tc.
+static double humidityOf(double e, double tc)
+{
+    return std::min(100.0, 100.0 * e / satvapCpp2(tc));
+}
 // Bare ground: the whole time series at one height (below ground if reqhgt is negative).
 // [[Rcpp::export]]
 DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List soilc, double zref,
@@ -4390,20 +4421,9 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
     onestepin.Rswup = 0.0; onestepin.Rb0 = 0.0; onestepin.Rlwup = 0.0;
     onestepin.LL = 999.99; onestepin.iters = 1; onestepin.error = 1e99;
     onestepin.theta = onestepin.soilwatervars.theta[0];
-    // Soil node nearest the depth requested, if below ground
-    size_t sel = 0;
-    if (reqhgt < 0.0) {
-        // The last depth is below the boundary and has no node.
-        std::vector<double> zz = onestepin.soilheatvars.z;
-        double mn = std::abs(reqhgt + zz[0]);
-        for (size_t i = 1, n = zz.size() - 1; i < n; ++i) {
-            double dif = std::abs(reqhgt + zz[i]);
-            if (dif < mn) {
-                mn = dif;
-                sel = i;
-            }
-        }
-    }
+    // Below ground, output lies between the soil nodes above and below the depth
+    // requested. The last depth is below the boundary and has no node.
+    const nodeposition soilpos = betweenNodes(onestepin.soilheatvars.z, onestepin.soilheatvars.z.size() - 1, -reqhgt);
     // Create output variables for storing
     std::vector<double> Rdirdown(n);
     std::vector<double> Rdifdown(n);
@@ -4469,8 +4489,8 @@ DataFrame RunBareR(double reqhgt, DataFrame obstime, DataFrame climdata, List so
             Rswup[hr] = 0.0;
             Rlwdown[hr] = 0.0;
             Rlwup[hr] = 0.0;
-            tair[hr] = onestepin.soilheatvars.Te[sel];
-            rz[hr] = onestepin.soilwatervars.theta[sel];
+            tair[hr] = atPosition(onestepin.soilheatvars.Te, soilpos);
+            rz[hr] = atPosition(onestepin.soilwatervars.theta, soilpos);
             uz[hr] = 0.0;
         }
         onestepin.soilheatvars.oldTe = onestepin.soilheatvars.Te;
@@ -4545,23 +4565,12 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
     onestep onestepin = CreateOneStep(soilheatvars, soilwatervars, temp[0], relhum[0], Rlw[0], na);
     double latr = lat * torad;
     double lonr = lon * torad;
-    std::vector<double> zz = z;
-    if (reqhgt < 0.0) {
-        // The last depth is below the boundary and has no node.
-        zz = soilheatvars.z;
-        zz.pop_back();
-        for (size_t i = 0; i < zz.size(); ++i)
-            zz[i] = -zz[i];
-    }
-    size_t sel = 0;
-    double mn = std::abs(reqhgt - zz[0]);
-    for (size_t i = 1; i < zz.size(); ++i) {
-        double dif = std::abs(reqhgt - zz[i]);
-        if (dif < mn) {
-            mn = dif;
-            sel = i;
-        }
-    }
+    // Output lies between the nodes above and below the height or depth requested.
+    // The last soil depth is below the boundary and has no node.
+    const nodeposition soilpos = betweenNodes(soilheatvars.z, soilheatvars.z.size() - 1, -reqhgt);
+    const nodeposition pos = betweenNodes(z, na, reqhgt);
+    const double a0v = (a0 > 0.0) ? a0 : floorGustRatio(vegpc, a1);
+    const double dcan = zeroplanedisCpp2(vegpc.hgt, vegpc.pai);
     std::vector<double> Rdirdown(n), Rdifdown(n), Rswup(n), Rlwdown(n), Rlwup(n);
     std::vector<double> tair(n), tground(n), tleaf(n), leafwet(n, -999.99), rz(n), uz(n);
     std::vector<double> H(n), L(n), G(n), Ev(n), Et(n), error(n), runoff(n), drainage(n);
@@ -4602,15 +4611,15 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
         witers[hr] = onestepin.witers;
         if (reqhgt < 0.0) {
             Rdirdown[hr] = Rdifdown[hr] = Rswup[hr] = Rlwdown[hr] = Rlwup[hr] = 0.0;
-            tair[hr] = onestepin.soilheatvars.Te[sel];
+            tair[hr] = atPosition(onestepin.soilheatvars.Te, soilpos);
             tleaf[hr] = -999.99;
-            rz[hr] = onestepin.soilwatervars.theta[sel];
+            rz[hr] = atPosition(onestepin.soilwatervars.theta, soilpos);
             uz[hr] = 0.0;
         }
         else {
-            Rdirdown[hr] = onestepin.Rdirdown[sel];
-            Rswup[hr] = onestepin.Rswup[sel];
-            Rlwup[hr] = onestepin.Rlwup[sel];
+            Rdirdown[hr] = atPosition(onestepin.Rdirdown, pos);
+            Rswup[hr] = atPosition(onestepin.Rswup, pos);
+            Rlwup[hr] = atPosition(onestepin.Rlwup, pos);
             if (reqhgt >= vegpc.hgt) {
                 Rdifdown[hr] = Rdif[hr];
                 Rlwdown[hr] = Rlw[hr];
@@ -4622,8 +4631,15 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                 uz[hr] = Uabove(reqhgt, zref, onestepin.ucanopy * onestepin.windscale, wspeed[hr], vegpc.hgt, vegpc.pai, onestepin.LL);
             }
             else {
-                Rdifdown[hr] = onestepin.Rdifdown[sel];
-                Rlwdown[hr] = onestepin.Rlwdown[sel];
+                Rdifdown[hr] = atPosition(onestepin.Rdifdown, pos);
+                Rlwdown[hr] = atPosition(onestepin.Rlwdown, pos);
+                tleaf[hr] = atPosition(onestepin.tleaf, pos);
+                leafwet[hr] = atPosition(onestepin.leafwet, pos);
+                const double ws = onestepin.windscale;
+                // Air temperature and vapour pressure between two levels are weighted by the
+                // resistance of the air between the lower level and the height requested.
+                const aerocolumn col = makeColumn(vegpc.hgt, dcan, onestepin.ufmix, onestepin.LL, a0v, a1,
+                    canopyEnhancement(vegpc.hgt, vegpc.pai, soilpc.z0, onestepin.fade), soilpc.z0);
                 if (reqhgt == 0.0) {
                     // At the ground: the radiation arriving beneath the lowest layer and leaving the surface.
                     Rdirdown[hr] = onestepin.Rdirdownground;
@@ -4633,15 +4649,50 @@ Rcpp::List RunModelR(double reqhgt, Rcpp::DataFrame obstime, Rcpp::DataFrame cli
                     Rlwup[hr] = sb * radem(onestepin.soilheatvars.Te[0]);
                     tair[hr] = onestepin.soilheatvars.Te[0];
                     tleaf[hr] = -999.99;
+                    leafwet[hr] = -999.99;
                     rz[hr] = onestepin.soilwatervars.theta[0];
                     uz[hr] = 0.0;
                 }
+                else if (reqhgt < z[0]) {
+                    // Between the ground and the lowest node, air lies between the soil surface and the node.
+                    const double share = resistanceShare(col, 0.0, z[0], reqhgt);
+                    const double tg = onestepin.soilheatvars.Te[0];
+                    const double eg = satvapCpp2(tg) * soilrelhumCpp(soilpc, tg, onestepin.soilwatervars.theta[0]);
+                    const double en = satvapCpp2(onestepin.tair[0]) * onestepin.rh[0] / 100.0;
+                    tair[hr] = tg + share * (onestepin.tair[0] - tg);
+                    rz[hr] = humidityOf(eg + share * (en - eg), tair[hr]);
+                    // Wind falls to nil at the soil's roughness height along a logarithmic profile.
+                    const double lognode = std::log(z[0] / soilpc.z0);
+                    const double windshare = (lognode > 0.0) ? std::min(1.0, std::max(0.0, std::log(reqhgt / soilpc.z0) / lognode)) : 1.0;
+                    uz[hr] = onestepin.uz[0] * ws * windshare;
+                    // Radiation varies linearly between the ground and the node.
+                    const double f = reqhgt / z[0];
+                    Rdirdown[hr] = onestepin.Rdirdownground + f * (onestepin.Rdirdown[0] - onestepin.Rdirdownground);
+                    Rdifdown[hr] = onestepin.Rdifdownground + f * (onestepin.Rdifdown[0] - onestepin.Rdifdownground);
+                    Rswup[hr] = onestepin.Rswupground + f * (onestepin.Rswup[0] - onestepin.Rswupground);
+                    Rlwdown[hr] = onestepin.Rlwdownground + f * (onestepin.Rlwdown[0] - onestepin.Rlwdownground);
+                    const double lwground = sb * radem(tg);
+                    Rlwup[hr] = lwground + f * (onestepin.Rlwup[0] - lwground);
+                }
+                else if (reqhgt > z[na - 1]) {
+                    // Between the highest node and canopy top: air and wind lie between the two.
+                    const double f = (reqhgt - z[na - 1]) / (vegpc.hgt - z[na - 1]);
+                    const double share = resistanceShare(col, z[na - 1], vegpc.hgt, reqhgt);
+                    const double en = satvapCpp2(onestepin.tair[na - 1]) * onestepin.rh[na - 1] / 100.0;
+                    const double et = satvapCpp2(onestepin.tcanopy) * onestepin.rhcanopy / 100.0;
+                    tair[hr] = onestepin.tair[na - 1] + share * (onestepin.tcanopy - onestepin.tair[na - 1]);
+                    rz[hr] = humidityOf(en + share * (et - en), tair[hr]);
+                    uz[hr] = (onestepin.uz[na - 1] + f * (onestepin.ucanopy - onestepin.uz[na - 1])) * ws;
+                }
                 else {
-                    tair[hr] = onestepin.tair[sel];
-                    tleaf[hr] = onestepin.tleaf[sel];
-                    leafwet[hr] = onestepin.leafwet[sel];
-                    rz[hr] = onestepin.rh[sel];
-                    uz[hr] = onestepin.uz[sel] * onestepin.windscale;
+                    // Between two nodes.
+                    const size_t i = pos.lower, j = (pos.upper > 0.0) ? i + 1 : i;
+                    const double share = (j > i) ? resistanceShare(col, z[i], z[j], reqhgt) : 0.0;
+                    const double ei = satvapCpp2(onestepin.tair[i]) * onestepin.rh[i] / 100.0;
+                    const double ej = satvapCpp2(onestepin.tair[j]) * onestepin.rh[j] / 100.0;
+                    tair[hr] = onestepin.tair[i] + share * (onestepin.tair[j] - onestepin.tair[i]);
+                    rz[hr] = humidityOf(ei + share * (ej - ei), tair[hr]);
+                    uz[hr] = atPosition(onestepin.uz, pos) * ws;
                 }
             }
         }
