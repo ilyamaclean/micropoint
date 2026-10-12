@@ -83,7 +83,7 @@ head(climdata)
 # n <- 20 # Number of layers
 # # Create vegetation parameters for C3 grassland
 # vegp <-  createvegp(vegtype = "C3") # C3 grassland
-# vegp$h <- 1 # adjust vegetation height to 10 cm
+# vegp$h <- 1 # adjust vegetation height to 1 m
 # vegp$pai <- 0.5 # reduce pai to 0.5
 # paii <- PAIgrass(vegp$h, n, vegp$pai) # generate foliage profile
 # Lfrac <- seq(0.9, 1, length.out = length(paii))
@@ -141,10 +141,10 @@ head(climdata)
 # # plot temperature time series
 # tme <- as.POSIXct(climdata$obs_time, tz = "UTC")
 # plot(climdata$temp ~ tme, type = "l", col = rgb(0, 0, 0, 0.5),
-#      xlab = "Month", ylab = "Temperature", ylim = c(-3, 35))
+#      xlab = "Month", ylab = "Temperature", ylim = c(-3, 36))
 # par(new = TRUE)
 # plot(mout$tair ~ tme, type = "l", col = rgb(1, 0, 0, 0.5),
-#      xlab = "", ylab = "", ylim = c(-3, 35))
+#      xlab = "", ylab = "", ylim = c(-3, 36))
 
 # # Run model for a year to initialize water profile
 # ThetaIni <- InitailizeWater(climdata, vegp = NA, soilc,

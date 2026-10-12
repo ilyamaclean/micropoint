@@ -293,7 +293,7 @@ plot(mout$tair ~ tme, type = "l", col = rgb(1, 0, 0, 0.5),
 n <- 20 # Number of layers
 # Create vegetation parameters for C3 grassland
 vegp <-  createvegp(vegtype = "C3") # C3 grassland
-vegp$h <- 1 # adjust vegetation height to 10 cm
+vegp$h <- 1 # adjust vegetation height to 1 m
 vegp$pai <- 0.5 # reduce pai to 0.5
 paii <- PAIgrass(vegp$h, n, vegp$pai) # generate foliage profile
 Lfrac <- seq(0.9, 1, length.out = length(paii))
@@ -374,10 +374,10 @@ mout <- RunMicro(climdata, reqhgt = 0.02, vegp = NA, soilc, paii = NA, Lfrac = N
 # plot temperature time series
 tme <- as.POSIXct(climdata$obs_time, tz = "UTC")
 plot(climdata$temp ~ tme, type = "l", col = rgb(0, 0, 0, 0.5),
-     xlab = "Month", ylab = "Temperature", ylim = c(-3, 35))
+     xlab = "Month", ylab = "Temperature", ylim = c(-3, 36))
 par(new = TRUE)
 plot(mout$tair ~ tme, type = "l", col = rgb(1, 0, 0, 0.5),
-     xlab = "", ylab = "", ylim = c(-3, 35))
+     xlab = "", ylab = "", ylim = c(-3, 36))
 ```
 ![](images/new/plot7.png)
 Alternatively we may wish to derive the volumetric soil water fraction near the surface. Here we use the ``InitailizeWater`, which sets up a sensible initial soil water profile.
@@ -482,7 +482,7 @@ abline(h = vegp$h, lty = 2)
 ```
 ![](images/new/plot8.png)
 
-The small step at the top of the canopy is the result of the ectotherm no longer being in direct contact with a physical surface. Obviously for some ectotherms, being suspended in the air is rather hypothetical!
+The step at the ground is where the ectotherm passes from the soil to the air. The slight kink at the top of the canopy is the result of the ectotherm no longer being in direct contact with a physical surface. Obviously for some ectotherms, being suspended in the air is rather hypothetical!
 
 
 ### Ectotherm time series
@@ -520,7 +520,7 @@ ecto_out <- full_ecto(mout, climdata_adj, vegp, soilc, ectop,
                       lat = 49.96807, long = -5.215668)
 ```
 
-The function returns a list of two matrices: (1) `Tbodya` - the body temperature for every hour and height above ground, (2) `Tbodyb` - the body temperature for every hour and height below ground, assumed to be the same as the ground temperature. We can then produce a plot, which as we did for microclimate variables (see above)
+The function returns a list of three matrices: (1) `Tbodya` - the body temperature for every hour and height within the canopy, (2) `Tbodyb` - the body temperature for every hour and height below ground, assumed to be the same as the ground temperature, (3) `Tbody_above` - the body temperature for every hour and height above the canopy. We can then produce a plot, which as we did for microclimate variables (see above)
 
 ```{r eval=FALSE} 
 require(terra)
