@@ -190,10 +190,10 @@ The `accuracy` argument controls the trade-off between run time and numerical ac
 
 | `accuracy` | typical temperature error | worst hour of a year | one year of hourly data |
 |---|---|---|---|
-| `"very high"` | under 0.05 °C | 0.5 to 1.5 °C | 9 to 25 s |
-| `"high"` (default) | about 0.1 °C, at most 0.4 | 1 to 2.5 °C | 6 to 12 s |
-| `"moderate"` | about 0.2 °C, at most 0.9 | 2 to 4 °C | 2 to 5 s |
-| `"fast"` | about 0.3 °C, at most 1.1 | 2.5 to 5.5 °C | 1.6 to 4 s |
+| `"very high"` | under 0.05 °C | up to 2.5 °C, 3.5 in freezing soil | 9 to 27 s |
+| `"high"` (default) | about 0.1 °C, at most 0.4 | 0.5 to 2 °C | 6 to 12 s |
+| `"moderate"` | about 0.2 °C, at most 0.8 | 1.5 to 4 °C | 2.4 to 5 s |
+| `"fast"` | about 0.3 °C, at most 1.0 | 1.5 to 5.5 °C | 1.8 to 4 s |
 
 `"high"` is suitable for almost all applications. `"moderate"` is around three times faster and is useful for long runs, many sites or exploratory work: averages over days or months are little affected, although individual hours can differ by several degrees. `"fast"` is intended primarily for running the model over many grid cells and is around 30% faster again than `"moderate"`. `"very high"` is most useful where individual hours or small differences between runs matter.
 
