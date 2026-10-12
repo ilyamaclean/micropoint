@@ -17,10 +17,7 @@ A data frame with the following columns:
   \item{Mc}{Mass fraction of clay.}
   \item{rho}{Soil bulk density (Mg / m^3).}
   \item{b}{Campbell soil water retention parameter (dimensionless)}
-  \item{psi_e}{Matric potential (J / m^3).}
-  \item{alpha}{van Genuchten shape parameter (cm^-1). Not used by \code{\link{createsoilc}}.}
-  \item{VGn}{van Genuchten pore size distribution parameter. Not used by \code{\link{createsoilc}}.}
-  \item{VGpsie}{van Genuchten matric potential parameter; a placeholder. Not used by \code{\link{createsoilc}}.}
+  \item{psi_e}{Matric potential (J / kg).}
 }
 }
 \usage{
