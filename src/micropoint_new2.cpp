@@ -3030,13 +3030,20 @@ static onestep OneStepBelow(onestep onestepin, const obsstruct& obsdata, const c
 // Fraction of the resistance between canopy top and the reference height that
 // lies below height za. Temperature and vapour pressure at za lie this fraction
 // of the way from their canopy-top values to their reference values.
-static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL, double z0, double fade)
+static aerocolumn aboveCanopyColumn(double hgt, double pai, double LL, double z0, double fade)
 {
     const double a1 = 1.25;
     const double d = zeroplanedisCpp2(hgt, pai);
     const double a0 = a1 * std::exp(-GUST_DECAY * LEAF_DRAG * pai / (1.0 + SHELTER * pai));
-    const aerocolumn col = makeColumn(hgt, d, 1.0, LL, a0, a1, canopyEnhancement(hgt, pai, z0, fade), z0);
+    return makeColumn(hgt, d, 1.0, LL, a0, a1, canopyEnhancement(hgt, pai, z0, fade), z0);
+}
+static double aboveCanopyFraction(const aerocolumn& col, double za, double zref)
+{
     return (soilToZ(col, za) - col.Rh) / (soilToZ(col, zref) - col.Rh);
+}
+static double aboveCanopyFraction(double za, double zref, double hgt, double pai, double LL, double z0, double fade)
+{
+    return aboveCanopyFraction(aboveCanopyColumn(hgt, pai, LL, z0, fade), za, zref);
 }
 // Air temperature at height za above the canopy, between canopy-top air (th)
 // and the reference temperature (tref). LL defaults to neutral.
@@ -5058,8 +5065,9 @@ List AboveCanopyCpp(std::vector<double> za, double zref, std::vector<double> tca
     for (size_t hr = 0; hr < n; ++hr) {
         const double eh = satvapCpp2(tcanopy[hr]) * rhcanopy[hr] / 100.0;
         const double eref = satvapCpp2(tref[hr]) * rhref[hr] / 100.0;
+        const aerocolumn col = aboveCanopyColumn(hgt, pai, LL[hr], z0, fade[hr]);
         for (size_t i = 0; i < na; ++i) {
-            const double f = aboveCanopyFraction(za[i], zref, hgt, pai, LL[hr], z0, fade[hr]);
+            const double f = aboveCanopyFraction(col, za[i], zref);
             tair(hr, i) = tcanopy[hr] + (tref[hr] - tcanopy[hr]) * f;
             rh(hr, i) = std::min(100.0, 100.0 * (eh + (eref - eh) * f) / satvapCpp2(tair(hr, i)));
             uz(hr, i) = Uabove(za[i], zref, ucanopy[hr], uref[hr], hgt, pai, LL[hr]);
