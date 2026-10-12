@@ -1283,14 +1283,25 @@ static double columnK(const aerocolumn& c, double z)
     if (z < c.zw) inv += std::max(0.0, soilLayerSlope(z, c.ug, c.LL) - 1.0 / c.Kc0);
     return 1.0 / inv;
 }
+// Velocity scale of the soil surface layer: the gusts that reach the ground, plus
+// free convection, which restores part of what the canopy's shelter removes.
+constexpr double FLOOR_FREE_CONVECTION = 0.04;   // m/s
+static double floorGustVelocity(double share, double uf)
+{
+    const double sheltered = std::max(0.0, 1.0 - share * share);
+    const double g2 = FLOOR_FREE_CONVECTION * FLOOR_FREE_CONVECTION;
+    const double restored = uf * uf * g2 / (uf * uf + g2);
+    return std::sqrt(share * share * uf * uf + sheltered * restored);
+}
 // Builds the diffusivity profile for the current friction velocity and stability.
 static aerocolumn makeColumn(double h, double d, double uf, double LL, double a0, double a1,
     double enhancement, double z0)
 {
     aerocolumn c{};
     c.h = h; c.d = d; c.uf = uf; c.LL = LL; c.a0 = a0; c.a1 = a1;
-    // The soil surface layer is driven by the gusts that reach the ground.
-    c.ug = (a0 / a1) * uf;
+    // The soil surface layer is driven by the gusts that reach the ground. Where a
+    // canopy shelters the ground, free convection keeps them from dying away.
+    c.ug = floorGustVelocity(a0 / a1, uf);
     c.zh = heatRoughness(z0, c.ug);
     const double dt = h - d;
     c.b = dt * std::sqrt(std::max(enhancement * enhancement - 1.0, 0.0));
