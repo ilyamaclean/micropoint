@@ -95,7 +95,6 @@ createvegp <- function(vegtype = "BET.Te") {
 #'   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
 #'   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
 #'   \item{Mc}{Mass fraction of clay (kg kg^-1), repeated for each soil layer}
-#'   \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
 #'   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
 #'   \item{psi_e}{Air-entry water potential (J/kg, numerically equal to kPa), repeated for each soil layer}
 #'   \item{gref}{Ground shortwave reflectance (unitless)}
@@ -114,7 +113,7 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 3, sl
                         surface_organicmu = 3, FreeDrain = TRUE) {
   s <- which(newsoilparamstable$Soil.type == soiltype)
   # Campbell parameters, selected by name
-  campbellcols <- c("Smax", "Smin", "Ksat", "Vq", "Vm", "Vo", "Mc", "rho", "b", "psi_e")
+  campbellcols <- c("Smax", "Smin", "Ksat", "Vq", "Vm", "Vo", "Mc", "b", "psi_e")
   v <- as.numeric(newsoilparamstable[s, campbellcols])
   names(v) <- campbellcols
   soilc <- as.list(v)
@@ -130,8 +129,6 @@ createsoilc <- function(soiltype = "Clay loam", nlayers = 15, totalDepth = 3, sl
   soilc$Vm <- soilc$Vm * mu
   soilc$Vq <- soilc$Vq * mu
   soilc$Mc <- soilc$Mc * mu
-  mu <- seq(0.9, 1.1, length.out = nlayers + 1)  # multiplication factor for bulk density
-  soilc$rho <- soilc$rho * mu
   soilc$gref <- 0.15
   soilc$groundem <- 0.97
   soilc$grefPAR <- 0.75 * soilc$gref
@@ -741,10 +738,11 @@ RunMicro <- function(climdata, reqhgt, vegp, soilc, paii, Lfrac, lat, long, zref
     mout <- RunModelR(reqhgt, obstime, climdata, soilc, vegp, paii, Lfrac, zref, CO2ppm, lat, long, SoilTempIni,
                       ThetaIni, st$maxiter, st$tolerance, -1, 1.25, C3)
   }
-  # One warning for the run if some hours, or their soil water balance, did not converge
+  # One warning for the run if hours ended far from settled, or if the soil's water did not
+  # balance in more than 1% of hours.
   .warn_unsettled(mout$error, st)
   stuck <- sum(mout$witers >= max(st$maxiter, 50))
-  if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
+  if (stuck > 0.01 * length(mout$witers)) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   mout$surfwater <- .reportedtheta(mout$surfwater, soilc)
   # Rename variables if below ground
   if (reqhgt <= 0) {
@@ -931,10 +929,11 @@ RunModelFull <- function(climdata, soilc, vegp, paii, Lfrac, lat, long, zref = 2
     mout$tsoil <- .soil_to_user(mout$tsoil, cs)
     mout$theta <- .soil_to_user(mout$theta, cs)
   }
-  # One warning for the run if some hours, or their soil water balance, did not converge
+  # One warning for the run if hours ended far from settled, or if the soil's water did not
+  # balance in more than 1% of hours.
   .warn_unsettled(mout$error, st)
   stuck <- sum(mout$witers >= max(st$maxiter, 50))
-  if (stuck > 0) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
+  if (stuck > 0.01 * length(mout$witers)) warning(sprintf("The soil's water did not balance in %d of %d hours; soil water there is approximate", stuck, length(mout$witers)))
   mout$theta <- .reportedtheta(mout$theta, soiluser)
   return(mout)
 }

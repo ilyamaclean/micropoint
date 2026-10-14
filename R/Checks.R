@@ -124,7 +124,7 @@ runchecks <- function(climdata, vegp, soilc, lat, long, paii = NA, Lfrac = NA) {
   if (soilc$slope < 0 || soilc$slope > 90) stop("soilc$slope must be between 0 and 90 degrees")
   soilc$aspect <- soilc$aspect %% 360
   nn <- soilc$nLayers + 1
-  for (nm in c("Smax", "Smin", "Ksat", "b", "psi_e", "rho")) {
+  for (nm in c("Smax", "Smin", "Ksat", "b", "psi_e")) {
     if (length(soilc[[nm]]) != nn) stop("soilc$", nm, " must have nLayers + 1 values")
   }
   if (any(soilc$Smin < 0 | soilc$Smax > 1)) stop("soilc$Smin and soilc$Smax must be between 0 and 1")

@@ -44,9 +44,9 @@ ACCURACY_LEVELS <- list(
                     as.integer(o("groundrow", 0L)), o("nearlocal", FALSE), o("leafclosed", FALSE))
   invisible(NULL)
 }
-# One warning for the run if some hours did not converge.
+# One warning for the run if some hours ended more than ten times the tolerance from settled.
 .warn_unsettled <- function(error, st) {
-  k <- sum(error > st$tolerance, na.rm = TRUE)
+  k <- sum(error > 10 * st$tolerance, na.rm = TRUE)
   if (k > 0) warning(sprintf("The hour did not converge within %d passes in %d of %d hours; results there are those of the steadiest pass",
                              as.integer(st$maxiter), k, length(error)), call. = FALSE)
   invisible(k)

@@ -44,7 +44,6 @@ A list of soil parameters:
   \item{Vm}{Mineral fraction by volume (m^3 m^-3), repeated for each soil layer}
   \item{Vo}{Organic fraction by volume (m^3 m^-3), repeated for each soil layer and adjusted with depth}
   \item{Mc}{Mass fraction of clay (kg kg^-1), repeated for each soil layer}
-  \item{rho}{Bulk density (kg m^-3), repeated for each soil layer and adjusted with depth}
   \item{b}{Campbell soil water retention parameter (unitless), repeated for each soil layer}
   \item{psi_e}{Air-entry water potential (J/kg, numerically equal to kPa), repeated for each soil layer}
   \item{gref}{Ground shortwave reflectance (unitless)}
