@@ -50,7 +50,7 @@ create_ectop <- function(height, width, len, refl = 0.1, adir = 0, position = "r
                          type = c("arthropod", "reptile", "amphibian", "other")) {
   type <- match.arg(type)
   # Estimate typical cutaneous resistance (s / m)
-  rc <- switch(type, arthropod = 4500, reptile = 6700, amphibian = 31, other = 5000)
+  rc <- switch(type, arthropod = 4500, reptile = 20000, amphibian = 5, other = 5000)
   # Volume and surface area
   AA <- len / 200
   BB <- width / 200
