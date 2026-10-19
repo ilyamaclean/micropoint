@@ -977,7 +977,7 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     double K_50f = 1.0 / (1.0 + std::pow(psi_50f / vegp.psi50, vegp.apsi));
     double dKdpKi;
     if (std::abs(psi_pd - psi_50f) > 1e-9) dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
-    else dKdpKi = -vegp.apsi * std::pow(psi_pd / vegp.psi50, vegp.apsi - 1.0) * K_psi_pd / vegp.psi50; // the two points meet
+    else dKdpKi = -vegp.apsi * std::pow(psi_pd / vegp.psi50, vegp.apsi - 1.0) * K_psi_pd / vegp.psi50; // pre-dawn potential at psi50: the curve's own slope there
     double rp = vegp.rpmin / K_psi_pd;
     double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
     st.zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
@@ -3608,7 +3608,7 @@ static double animalrHa(double tair, double dT, double uz, double d, double rHma
     // Forced convection from a sphere (Whitaker 1972): conduction into still air, smooth
     // flow over the front of the body and the wake behind it.
     double Nuf = 2.0 + (0.4 * std::sqrt(Re) + 0.06 * std::pow(Re, 2.0 / 3.0)) * std::pow(Pr, 0.4);
-    // Free convection from a sphere (Churchill 1983), which keeps conduction into still air.
+    // Free convection from a sphere (Churchill 1983), including conduction into still air.
     double Gr = (g * std::pow(d, 3.0) * std::abs(dT)) / (Tk * v * v); // Grashof number
     double Nun = 2.0 + 0.589 * std::pow(Gr * Pr, 0.25) /
         std::pow(1.0 + std::pow(0.469 / Pr, 9.0 / 16.0), 4.0 / 9.0);
