@@ -1005,9 +1005,13 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
         (508929.2 * (envdata.tleaf + 68.12963)));
     double psi_pd = envdata.psi_r - z * g * rhow * 1e-6; // pre-dawn water potential at this leaf's height
     double K_psi_pd = 1.0 / (1.0 + std::pow(psi_pd / vegp.psi50, vegp.apsi)); // fraction of max hydraulic conductance remaining (vulnerability curve)
-    double K_50f = 0.5 / (1.0 + std::pow((psi_pd + vegp.psi50) / vegp.psi50, vegp.apsi));
+    // How fast the plant loses hydraulic conductance as it dries, relative to what it has: the slope between
+    // pre-dawn potential and halfway to the potential that halves conductance (Eller et al. 2020, Eq. S2.9).
     double psi_50f = (psi_pd + vegp.psi50) / 2.0;
-    double dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
+    double K_50f = 1.0 / (1.0 + std::pow(psi_50f / vegp.psi50, vegp.apsi));
+    double dKdpKi;
+    if (std::abs(psi_pd - psi_50f) > 1e-9) dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
+    else dKdpKi = -vegp.apsi * std::pow(psi_pd / vegp.psi50, vegp.apsi - 1.0) * K_psi_pd / vegp.psi50; // the two points meet
     // Minimum plant resistance is fixed for a run, so is calculated once.
     if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
     double rp = vegp.rpmin / K_psi_pd;

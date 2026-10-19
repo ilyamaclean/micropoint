@@ -145,7 +145,7 @@ The plant functional types and their default parameter values follow those used 
 
 Additionally, two vectors must be provided: `paii`, giving the plant area index in each canopy layer (ordered from bottom to top), and `Lfrac`, giving the fraction of plant area in each layer that is living leaf tissue.
 
-At least 10 layers are required for the model to run. Increasing the number of layers improves the representation of vertical gradients in radiation, temperature, and transpiration, but also increases computation time; around 20 layers typically provides a good balance between accuracy and speed.
+Any number of layers can be used. Increasing the number of layers improves the representation of vertical gradients in radiation, temperature, and transpiration, but also increases computation time; around 20 layers typically provides a good balance between accuracy and speed.
 
 The values in `paii` must sum to the total plant area index (`pai`) specified in the vegetation parameter list, and the `Lfrac` vector must have the same length as `paii`.
 
