@@ -923,40 +923,6 @@ static double leafrHa(double tair, double dT, double uz, double d, double rHmax 
     if (rHa > rHmax) rHa = rHmax;
     return rHa;
 }
-// Minimum hydraulic resistance of the plant, from its height, Huber value (hv)
-// and maximum xylem conductivity (Eller et al. 2020).
-static double rpmin_calc(double h, double hv, double Kxmx)
-{
-    // Constants
-    const double n_ext = 2.0;      // number of daughter branches per parent
-    const double Lpet = 0.04;     // petiole length (m)
-    const double r_intpet = 10.0;  // petiole conduit radius (micrometres)
-    const double r_intref = 22.0;  // terminal branch conduit radius (micrometres)
-    // Number of branching levels (at least 1)
-    const double n_ext_13 = std::pow(n_ext, 1.0 / 3.0);
-    const double arg = 1.0 - (h / Lpet) * (1.0 - n_ext_13);
-    double Nh;
-    if (arg <= 0.0 || !std::isfinite(arg)) {
-        Nh = 1.0;
-    }
-    else {
-        Nh = (3.0 * std::log(arg)) / std::log(n_ext);
-        if (!std::isfinite(Nh) || Nh < 1.0) Nh = 1.0;
-    }
-    // Conduit taper factor
-    const double Chi_1 = 2.888503;
-    const double Chi_h = (6.6e-13 / 7.2e-13) * std::pow(Nh, 0.53);
-    const double Chi_tap = Chi_h / Chi_1;
-    // Maximum petiole hydraulic conductivity
-    const double ratio = r_intpet / r_intref;
-    const double Kpmx = Kxmx * (ratio * ratio);
-    // Minimum resistance (infinite if any input is not positive)
-    if (hv <= 0.0 || Kpmx <= 0.0 || Chi_tap <= 0.0 || !std::isfinite(Chi_tap)) {
-        return std::numeric_limits<double>::infinity();
-    }
-    const double rpmin = h / (Kpmx * hv * Chi_tap);
-    return rpmin;
-}
 // Everything stomatal conductance depends on except light (Eller et al. 2020):
 // photosynthetic capacity at leaf temperature, vapour pressure deficit and water
 // supply from the soil. Shared by the sunlit and shaded leaves of a layer.
@@ -1012,8 +978,6 @@ static stomatalState leafgsState(const envstruct& envdata, vegpstruct& vegp, dou
     double dKdpKi;
     if (std::abs(psi_pd - psi_50f) > 1e-9) dKdpKi = ((K_psi_pd - K_50f) / (psi_pd - psi_50f)) * (1.0 / K_psi_pd);
     else dKdpKi = -vegp.apsi * std::pow(psi_pd / vegp.psi50, vegp.apsi - 1.0) * K_psi_pd / vegp.psi50; // the two points meet
-    // Minimum plant resistance is fixed for a run, so is calculated once.
-    if (vegp.rpmin < 0.0) vegp.rpmin = rpmin_calc(vegp.hgt, vegp.hv, vegp.Kxmx);
     double rp = vegp.rpmin / K_psi_pd;
     double DDm = DD / envdata.pk; // vapour pressure deficit, mol/mol
     st.zeta = 2.0 / (dKdpKi * rp * 1.6 * DDm); // marginal carbon cost of water, Eller optimisation
@@ -1061,9 +1025,9 @@ static double leafgsLight(const stomatalState& st, double PARabs, double pk, con
         Aca = assimilation(ca);
         Acol = assimilation(cicol);
     }
-    // Gain in assimilation per unit CO2 from opening the stomata: from the point where
-    // CO2 stops limiting to stomata fully open, internal CO2 equal to ambient (Eq. S2.1).
-    const double dadc = (Aca - Acol) / (ca - cicol);
+    // Gain in assimilation per unit mole fraction of CO2 from opening the stomata: from the point
+    // where CO2 stops limiting to stomata fully open, internal CO2 equal to ambient (Eq. S2.1).
+    const double dadc = P * (Aca - Acol) / (ca - cicol);
     double gs;
     if (dadc > 0.0) {
         // Conductance at which the gain in carbon balances the loss of water supply (Eq. 4).
@@ -1077,7 +1041,8 @@ static double leafgsLight(const stomatalState& st, double PARabs, double pk, con
     }
     double gsmax = vegp.Vcmax25 * 1e4;
     gs = std::fmin(gs, gsmax);
-    return gs;
+    // The optimum is a conductance to CO2; water vapour diffuses 1.6 times faster (Eq. S1.8).
+    return 1.6 * gs;
 }
 // Stomatal conductance in one call.
 static double leafgs(const envstruct& envdata, vegpstruct& vegp, double z, bool C3 = true)
@@ -3960,8 +3925,7 @@ static vegpstruct tovegpstruct(List vegp, std::vector<double> paii, std::vector<
     out.Tup = vegp["Tup"]; // high temperature photosynthesis range (deg C)
     out.Tlw = vegp["Tlow"]; // low temperature photosynthesis range (deg C)
     out.alpha = vegp["alpha"]; // photosynthesis quantum efficiency (mol CO2 / mol PAR)
-    out.Kxmx = vegp["Kxmx"]; // xylem maximum hydraulic conductance (mol to micromol / m^2 / s)
-    out.hv = vegp["hv"]; // Huber value (cm^2 to m^2/m^2)
+    out.rpmin = vegp["rpmin"]; // minimum hydraulic resistance of the plant (m^2 s MPa / mol)
     out.fd = vegp["fd"]; // reaction of Vcmax converted to leaf dark respiration (unitless)
     out.psi50 = vegp["psi50"]; // Water potential when plant loses 50% of krc_max (MPa) 
     out.apsi = vegp["apsi"]; // xylem hydraulic conductance parameter. Calculated if set to less than zero (unitless)
