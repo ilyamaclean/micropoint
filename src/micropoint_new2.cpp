@@ -915,7 +915,7 @@ static double leafrHa(double tair, double dT, double uz, double d, double rHmax 
     // Forced convection: a flat plate lying along the wind in smooth flow, raised by
     // 1.4 for the turbulence of outdoor wind.
     double Nuf = 1.4 * 0.664 * std::sqrt(Re) * std::pow(Pr, 1.0 / 3.0);
-    double Gr = (g * std::pow(d, 3.0) * dT) / (Tk * v * v); // Grashof number
+    double Gr = (g * std::pow(d, 3.0) * std::abs(dT)) / (Tk * v * v); // Grashof number
     double Nun = std::pow(0.825 + (0.387 * std::pow(Gr * Pr, 1.0 / 6.0)) /
         std::pow(1.0 + std::pow(0.492 / Pr, 9.0 / 16.0), 8.0 / 27.0), 2.0); // Nusselt number, free convection
     double Nu = std::pow(std::pow(Nuf, 3.0) + std::pow(Nun, 3.0), 1.0 / 3.0);
@@ -3523,6 +3523,18 @@ bigleafone solveonestepbare(const obsstruct& obsdata, const climstruct& climdata
 // Body temperature of an ectotherm from its energy balance, given the
 // microclimate around it. The animal is treated as an ellipsoid.
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ //
+// Area an ellipsoid of semi-axes A (length), B (width), C (height) casts on a plane
+// normal to the sun, with its length axis heading adirr and raised by atiltr at the front.
+static double ellipsoidShadow(double zenr, double azir, double adirr, double atiltr,
+    double A, double B, double C)
+{
+    // Direction cosines of the sun along the body's length, width and height axes
+    double theta = adirr - azir;
+    double L = std::sin(zenr) * std::cos(atiltr) * std::cos(theta) + std::cos(zenr) * std::sin(atiltr);
+    double M = std::sin(zenr) * std::sin(theta);
+    double N = std::cos(zenr) * std::cos(atiltr) - std::sin(zenr) * std::sin(atiltr) * std::cos(theta);
+    return pi * std::sqrt(L * L * B * B * C * C + M * M * C * C * A * A + N * N * A * A * B * B);
+}
 // Surface area and volume of the animal, and the area it presents to the direct
 // beam (silA), for its shape and orientation.
 static silstruct silhouette(double zenr, double azir, double height, double width, double length,
@@ -3549,30 +3561,21 @@ static silstruct silhouette(double zenr, double azir, double height, double widt
         out.silA = pi * std::min({ B * C, A * C, A * B });
     }
     else if (position == "randomdir") { // direction (horizontal rotation) assumed random
-        double phi = std::acos(std::cos(zenr) * std::cos(-atiltr) +
-            std::sin(zenr) * std::sin(-atiltr) * std::cos(azir));
-        double M = std::sin(phi);
-        double N = std::cos(phi);
-        out.silA = pi * std::sqrt(
-            0.5 * M * M * (B * B * C * C + C * C * A * A) +
-            N * N * A * A * B * B);
+        // Mean, over headings at five-degree steps, of the area cast with the body held
+        // at its tilt.
+        const int nh = 72;
+        double sum = 0.0;
+        for (int k = 0; k < nh; ++k) sum += ellipsoidShadow(zenr, azir, 2.0 * pi * k / nh, atiltr, A, B, C);
+        out.silA = sum / nh;
     }
     else if (position == "random") { // direction and tilt assumed random
-        out.silA = pi * std::sqrt((A * A * B * B + A * A * C * C + B * B * C * C) / 3.0);
+        // Averaged over all orientations, a convex body casts a quarter of its surface area.
+        out.silA = out.A / 4.0;
     }
     else if (position == "fixed") {
-        // Calculate silhouette area
-        double theta = (adirr - azir);
-        double phi = std::acos(std::cos(zenr) * std::cos(-atiltr) +
-            std::sin(zenr) * std::sin(-atiltr) * cos(theta));
-        double L = cos(theta) * sin(phi);
-        double M = sin(theta) * sin(phi);
-        double N = cos(phi);
-        out.silA = pi * std::sqrt(L * L * B * B * C * C +
-            M * M * C * C * A * A +
-            N * N * A * A * B * B);
+        out.silA = ellipsoidShadow(zenr, azir, adirr, atiltr, A, B, C);
     }
-    else Rcpp::stop("Position not recongised");
+    else Rcpp::stop("Position not recognised");
     return out;
 }
 // Characteristic dimension of the animal across the wind, for convective heat exchange.
@@ -3616,7 +3619,7 @@ static double chardim(double wdir, double zenr, double azir, double height, doub
         }
         position = "fixed";
     }
-    silstruct sa = silhouette(pi / 2.0, wdir, height, width, length, adir, atilt, position);
+    silstruct sa = silhouette(pi / 2.0, wdir * torad, height, width, length, adir, atilt, position);
     // Volume over the area presented to the wind
     double d = sa.V / sa.silA;
     return d;
@@ -3636,9 +3639,10 @@ static double animalrHa(double tair, double dT, double uz, double d, double rHma
     // Forced convection from a sphere (Whitaker 1972): conduction into still air, smooth
     // flow over the front of the body and the wake behind it.
     double Nuf = 2.0 + (0.4 * std::sqrt(Re) + 0.06 * std::pow(Re, 2.0 / 3.0)) * std::pow(Pr, 0.4);
-    double Gr = (g * std::pow(d, 3.0) * dT) / (Tk * v * v); // Grashof number
-    double Nun = std::pow(0.825 + (0.387 * std::pow(Gr * Pr, 1.0 / 6.0)) /
-        std::pow(1.0 + std::pow(0.492 / Pr, 9.0 / 16.0), 8.0 / 27.0), 2.0); // Nusselt number, free convection
+    // Free convection from a sphere (Churchill 1983), which keeps conduction into still air.
+    double Gr = (g * std::pow(d, 3.0) * std::abs(dT)) / (Tk * v * v); // Grashof number
+    double Nun = 2.0 + 0.589 * std::pow(Gr * Pr, 0.25) /
+        std::pow(1.0 + std::pow(0.469 / Pr, 9.0 / 16.0), 4.0 / 9.0);
     double Nu = std::pow(std::pow(Nuf, 3.0) + std::pow(Nun, 3.0), 1.0 / 3.0);
     double rHa = d / (Kh * Nu);
     if (rHa > rHmax) rHa = rHmax;
